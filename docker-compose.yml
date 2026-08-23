@@ -1,0 +1,21 @@
+services:
+  asl-transcriber:
+    build: .
+    container_name: asl-transcriber
+    env_file:
+      - .env
+    ports:
+      - "8088:8080"
+    environment:
+      ASLT_AUTO_PROCESS: "true"
+    volumes:
+      - ./data:/data
+      - ./tmp:/tmp
+      - ${ASLT_HOST_ARCHIVE_PATH:-./asl-monitor}:/audio:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v1/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
