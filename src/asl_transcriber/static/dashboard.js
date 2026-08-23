@@ -65,20 +65,27 @@ async function loadActivity() {
 async function loadNodeStatus() {
   const response = await fetch('/api/v1/node/status', { cache: 'no-store' });
   const state = document.querySelector('#node-state');
+  const dot = document.querySelector('#node-status-dot');
   if (!response.ok) {
     state.textContent = response.status === 503 ? 'AMI disabled' : 'Node unavailable';
     state.className = 'status processing';
+    dot.className = 'status-dot offline';
     return;
   }
   const data = await response.json();
   state.textContent = data.ami_connected ? 'AMI connected' : 'Node unavailable';
   state.className = data.ami_connected ? 'status' : 'status processing';
+  dot.className = `status-dot ${data.talkers.length ? 'talking' : data.ami_connected ? 'idle' : 'offline'}`;
   document.querySelector('#connected-nodes').textContent = data.connected_nodes.length ? data.connected_nodes.join(', ') : 'None';
   document.querySelector('#talkers').textContent = data.talkers.length ? data.talkers.join(', ') : 'None detected';
   document.querySelector('#active-channels').textContent = data.active_channels.length;
+  document.querySelector('#stations-count').textContent = data.connected_stations.length;
   document.querySelector('#stations').innerHTML = data.connected_stations.length
-    ? data.connected_stations.map(station => `<div class="station"><div><strong>${esc(station.id)}</strong><span>${esc(station.name)}</span></div><small>${esc(station.state)} · ${esc(station.channel)}</small><button class="station-action" data-target="${esc(station.id)}" type="button">Disconnect</button></div>`).join('')
-    : '<div class="empty">No connected stations.</div>';
+    ? data.connected_stations.map(station => {
+        const talking = data.talkers.includes(station.id);
+        return `<tr class="station-row${talking ? ' talking' : ''}"><td><span class="status-dot ${talking ? 'talking' : 'idle'}"></span></td><td><strong>${esc(station.id)}</strong></td><td>${esc(station.name)}</td><td>${esc(station.state)} · ${esc(station.channel)}</td><td><button class="station-action" data-target="${esc(station.id)}" type="button">Disconnect</button></td></tr>`;
+      }).join('')
+    : '<tr><td colspan="5" class="empty">No connected stations.</td></tr>';
   document.querySelectorAll('.station-action').forEach(button => button.addEventListener('click', () => runCommand('Disconnect node', button.dataset.target)));
 }
 
@@ -98,14 +105,18 @@ async function loadCommands() {
   const response = await fetch(`/api/v1/node/${encodeURIComponent(nodeId)}/commands`);
   if (!response.ok) return;
   const data = await response.json();
-  document.querySelector('#command-buttons').innerHTML = data.commands.map(command => `<button class="command-button" type="button" data-command="${esc(command.name)}" data-requires-target="${command.requires_target}">${esc(command.name)}</button>`).join('');
-  document.querySelectorAll('.command-button').forEach(button => button.addEventListener('click', () => {
-    const target = button.dataset.requiresTarget === 'true' ? window.prompt('Target node number') : null;
-    if (button.dataset.requiresTarget === 'true' && !target) return;
-    runCommand(button.dataset.command, target);
-  }));
+  document.querySelector('#command-buttons').innerHTML = data.commands.map(command => `<option value="${esc(command.name)}" data-requires-target="${command.requires_target}">${esc(command.name)}</option>`).join('');
 }
 document.querySelector('#control-node-id').addEventListener('change', loadCommands);
+document.querySelector('#run-command').addEventListener('click', () => {
+  const select = document.querySelector('#command-buttons');
+  const option = select.selectedOptions[0];
+  if (!option) return;
+  const requiresTarget = option.dataset.requiresTarget === 'true';
+  const target = requiresTarget ? window.prompt('Target node number') : null;
+  if (requiresTarget && !target) return;
+  runCommand(option.value, target);
+});
 async function runCommand(name, target = null) {
   const nodeId = document.querySelector('#control-node-id').value.trim();
   if (!window.confirm(`${name}${target ? ` ${target}` : ''}?`)) return;
@@ -123,11 +134,6 @@ async function runCommand(name, target = null) {
 }
 loadCommands();
 
-document.querySelectorAll('.nav-button').forEach(button => button.addEventListener('click', () => {
-  document.querySelectorAll('.nav-button, .view').forEach(item => item.classList.remove('active', 'active-view'));
-  button.classList.add('active');
-  document.querySelector(`#${button.dataset.view}`).classList.add('active-view');
-}));
 searchInput.addEventListener('input', loadJobs);
 loadJobs();
 loadActivity();
@@ -138,3 +144,120 @@ const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
 stream.addEventListener('job', () => { loadJobs(); });
 stream.addEventListener('error', () => { document.querySelector('#connection-label').textContent = 'Reconnecting to archive'; });
+
+/* Windows dropdown menu */
+const windowsMenuTrigger = document.querySelector('#windows-menu .menu-trigger');
+const windowsMenuPanel = document.querySelector('#windows-menu-panel');
+windowsMenuTrigger.addEventListener('click', () => {
+  const isHidden = windowsMenuPanel.hasAttribute('hidden');
+  windowsMenuPanel.toggleAttribute('hidden', !isHidden);
+  windowsMenuTrigger.setAttribute('aria-expanded', String(isHidden));
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('#windows-menu') && !windowsMenuPanel.hasAttribute('hidden')) {
+    windowsMenuPanel.setAttribute('hidden', '');
+    windowsMenuTrigger.setAttribute('aria-expanded', 'false');
+  }
+});
+
+/* Settings modal */
+const settingsModal = document.querySelector('#settings-modal');
+document.querySelector('#open-settings').addEventListener('click', () => settingsModal.removeAttribute('hidden'));
+document.querySelector('#close-settings').addEventListener('click', () => settingsModal.setAttribute('hidden', ''));
+settingsModal.addEventListener('click', event => { if (event.target === settingsModal) settingsModal.setAttribute('hidden', ''); });
+
+/* Draggable, resizable, collapsible windows with persisted layout */
+const desktop = document.querySelector('#desktop');
+const LAYOUT_KEY = 'dashboard-layout';
+let topZ = 10;
+
+function loadLayout() {
+  try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); } catch { return {}; }
+}
+function saveLayout(layout) {
+  localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+}
+function persistWin(win) {
+  const layout = loadLayout();
+  layout[win.dataset.win] = {
+    top: win.style.top || undefined,
+    left: win.style.left || undefined,
+    width: win.style.width || undefined,
+    height: win.style.height || undefined,
+    collapsed: win.classList.contains('collapsed'),
+    hidden: win.classList.contains('win-hidden'),
+  };
+  saveLayout(layout);
+}
+function bringToFront(win) { win.style.zIndex = String(++topZ); }
+
+document.querySelectorAll('.win').forEach(win => {
+  const id = win.dataset.win;
+  const saved = loadLayout()[id];
+  if (saved) {
+    if (saved.top) win.style.top = saved.top;
+    if (saved.left) win.style.left = saved.left;
+    if (saved.width) win.style.width = saved.width;
+    if (saved.height) win.style.height = saved.height;
+    if (saved.collapsed) win.classList.add('collapsed');
+    if (saved.hidden) win.classList.add('win-hidden');
+  }
+
+  const titlebar = win.querySelector('.win-titlebar');
+  const collapseButton = win.querySelector('.win-collapse');
+  if (win.classList.contains('collapsed')) collapseButton.textContent = '+';
+
+  let dragState = null;
+  titlebar.addEventListener('pointerdown', event => {
+    if (event.target.closest('button, input, select, label')) return;
+    bringToFront(win);
+    const desktopRect = desktop.getBoundingClientRect();
+    const winRect = win.getBoundingClientRect();
+    dragState = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startTop: winRect.top - desktopRect.top + desktop.scrollTop,
+      startLeft: winRect.left - desktopRect.left + desktop.scrollLeft,
+    };
+    titlebar.setPointerCapture(event.pointerId);
+  });
+  titlebar.addEventListener('pointermove', event => {
+    if (!dragState) return;
+    const dx = event.clientX - dragState.startX;
+    const dy = event.clientY - dragState.startY;
+    win.style.left = `${Math.max(0, dragState.startLeft + dx)}px`;
+    win.style.top = `${Math.max(0, dragState.startTop + dy)}px`;
+  });
+  const stopDrag = () => {
+    if (!dragState) return;
+    dragState = null;
+    persistWin(win);
+  };
+  titlebar.addEventListener('pointerup', stopDrag);
+  titlebar.addEventListener('pointercancel', stopDrag);
+
+  win.addEventListener('pointerdown', () => bringToFront(win));
+
+  new ResizeObserver(() => persistWin(win)).observe(win);
+
+  collapseButton.addEventListener('click', () => {
+    win.classList.toggle('collapsed');
+    collapseButton.textContent = win.classList.contains('collapsed') ? '+' : '–';
+    persistWin(win);
+  });
+});
+
+document.querySelectorAll('#windows-menu-panel input[type="checkbox"]').forEach(checkbox => {
+  const win = document.querySelector(`.win[data-win="${checkbox.dataset.toggleWin}"]`);
+  if (!win) return;
+  checkbox.checked = !win.classList.contains('win-hidden');
+  checkbox.addEventListener('change', () => {
+    win.classList.toggle('win-hidden', !checkbox.checked);
+    persistWin(win);
+  });
+});
+
+document.querySelector('#reset-layout').addEventListener('click', () => {
+  localStorage.removeItem(LAYOUT_KEY);
+  window.location.reload();
+});
