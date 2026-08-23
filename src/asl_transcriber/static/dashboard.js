@@ -176,15 +176,23 @@ mainMenuTrigger.addEventListener('click', () => {
 function closeAllSubmenus() {
   document.querySelectorAll('.submenu').forEach(submenu => submenu.setAttribute('hidden', ''));
 }
+function closeSubmenuTree(submenu) {
+  submenu.setAttribute('hidden', '');
+  submenu.querySelectorAll('.submenu').forEach(child => child.setAttribute('hidden', ''));
+}
 document.querySelectorAll('.menu-item.has-submenu').forEach(item => {
   const submenu = document.querySelector(`#${item.dataset.submenu}`);
-  const open = () => {
+  const open = event => {
+    event.stopPropagation();
     const isHidden = submenu.hasAttribute('hidden');
-    closeAllSubmenus();
-    submenu.toggleAttribute('hidden', !isHidden);
+    Array.from(item.parentElement.children)
+      .filter(child => child.classList.contains('submenu') && child !== submenu)
+      .forEach(closeSubmenuTree);
+    if (isHidden) submenu.removeAttribute('hidden');
+    else closeSubmenuTree(submenu);
   };
   item.addEventListener('click', open);
-  item.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+  item.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(event); } });
 });
 document.addEventListener('click', event => {
   if (!event.target.closest('#main-menu') && !mainMenuPanel.hasAttribute('hidden')) {

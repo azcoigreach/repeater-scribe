@@ -12,27 +12,32 @@
     <div class="top-actions">
       <div class="connection"><span class="pulse"></span><span id="connection-label">Live archive</span></div>
       <div class="menu" id="main-menu">
-        <button class="menu-trigger view-menu-trigger" id="main-menu-trigger" type="button" aria-haspopup="true" aria-expanded="false"><span>VIEW</span><span class="view-menu-caret" aria-hidden="true">&#9662;</span></button>
+        <button class="menu-trigger icon-button" id="main-menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Open menu"><span class="hamburger-icon" aria-hidden="true"></span></button>
         <div class="menu-panel menu-panel-right" id="main-menu-panel" hidden>
-          <div class="menu-item has-submenu" data-submenu="windows-submenu" role="button" tabindex="0">
-            <span>WINDOWS</span><span class="submenu-caret">&#9666;</span>
+          <div class="menu-item has-submenu" data-submenu="view-submenu" role="button" tabindex="0">
+            <span>VIEW</span><span class="submenu-caret">&#9666;</span>
           </div>
-          <div class="submenu" id="windows-submenu" hidden>
-            <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
-            <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
-            <label><input type="checkbox" data-toggle-win="stations" checked> Connected stations</label>
-            <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
-            <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
-            <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
-            <label><input type="checkbox" id="toggle-properties" data-toggle-win="properties"> Properties</label>
-          </div>
-          <div class="menu-item has-submenu" data-submenu="layout-submenu" role="button" tabindex="0">
-            <span>LAYOUTS</span><span class="submenu-caret">&#9666;</span>
-          </div>
-          <div class="submenu" id="layout-submenu" hidden>
-            <button id="layout-save" class="menu-action" type="button">Save current as preset&hellip;</button>
-            <div id="layout-preset-list" class="preset-list"><p class="empty-note">No saved presets</p></div>
-            <button id="reset-layout" class="menu-action" type="button">Reset to default</button>
+          <div class="submenu" id="view-submenu" hidden>
+            <div class="menu-item has-submenu" data-submenu="windows-submenu" role="button" tabindex="0">
+              <span>WINDOWS</span><span class="submenu-caret">&#9666;</span>
+            </div>
+            <div class="submenu" id="windows-submenu" hidden>
+              <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
+              <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
+              <label><input type="checkbox" data-toggle-win="stations" checked> Connected stations</label>
+              <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
+              <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
+              <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
+              <label><input type="checkbox" id="toggle-properties" data-toggle-win="properties"> Properties</label>
+            </div>
+            <div class="menu-item has-submenu" data-submenu="layout-submenu" role="button" tabindex="0">
+              <span>LAYOUTS</span><span class="submenu-caret">&#9666;</span>
+            </div>
+            <div class="submenu" id="layout-submenu" hidden>
+              <button id="layout-save" class="menu-action" type="button">Save current as preset&hellip;</button>
+              <div id="layout-preset-list" class="preset-list"><p class="empty-note">No saved presets</p></div>
+              <button id="reset-layout" class="menu-action" type="button">Reset to default</button>
+            </div>
           </div>
           <div class="menu-item" id="open-settings" role="button" tabindex="0"><span>Settings</span></div>
         </div>

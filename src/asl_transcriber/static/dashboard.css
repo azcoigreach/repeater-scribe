@@ -37,8 +37,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(116,199,255,.16); }
 .icon-button { border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; font-size: 15px; }
 .icon-button:hover { border-color: var(--green); color: var(--green); }
-.view-menu-trigger { display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 74px; height: 34px; }
-.view-menu-caret { color: var(--muted); font-size: 10px; }
+#main-menu-trigger { padding: 0; }
+.hamburger-icon { width: 14px; height: 10px; background: linear-gradient(to bottom, currentColor 0 2px, transparent 2px 4px, currentColor 4px 6px, transparent 6px 8px, currentColor 8px 10px); }
 
 /* Desktop: a dock tree (splits + tab groups, never overlaps) plus a floating overlay layer */
 .desktop { position: relative; width: 100%; height: calc(100vh - 60px); overflow: hidden; background: var(--paper); background-image: radial-gradient(circle, rgba(116,199,255,.06) 1px, transparent 1px); background-size: 26px 26px; }
