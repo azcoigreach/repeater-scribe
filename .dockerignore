@@ -1,0 +1,17 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.git/
+.gitignore
+.env
+*.pyc
+*.pyo
+*.pyd
+coverage/
+htmlcov/
+.DS_Store
+/data/
+/tmp/
+/asl-monitor/

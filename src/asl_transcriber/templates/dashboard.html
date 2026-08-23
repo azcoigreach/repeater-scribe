@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }} dashboard</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">RS</span><span>{{ app_name }}</span></div>
+    <div class="connection"><span class="pulse"></span><span id="connection-label">Listening to archive</span></div>
+  </header>
+  <main class="shell">
+    <section class="intro">
+      <div>
+        <p class="kicker">ASL3 archive monitor</p>
+        <h1>Radio traffic, made searchable.</h1>
+        <p class="lede">A quiet window into your repeater archive. New recordings appear here as they settle and move through local transcription.</p>
+      </div>
+      <div class="archive-badge"><span class="badge-label">SOURCE</span><strong>{{ archive_path }}</strong><span class="read-only">READ ONLY</span></div>
+    </section>
+    <section class="stats" aria-label="Queue summary">
+      <article><span class="stat-label">Total recordings</span><strong id="total-count">0</strong></article>
+      <article><span class="stat-label">Transcribed</span><strong id="completed-count">0</strong></article>
+      <article><span class="stat-label">In progress</span><strong id="processing-count">0</strong></article>
+      <article><span class="stat-label">Waiting</span><strong id="pending-count">0</strong></article>
+    </section>
+    <section class="workspace">
+      <div class="transcripts-panel">
+        <div class="section-head">
+          <div><p class="kicker">Archive index</p><h2>Recent recordings</h2></div>
+          <label class="search"><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="Search transcripts" autocomplete="off"></label>
+        </div>
+        <div id="recordings" class="recordings" aria-live="polite"><div class="empty">Loading recordings...</div></div>
+      </div>
+      <aside class="activity-panel">
+        <div class="section-head"><div><p class="kicker">Node signals</p><h2>Activity</h2></div><span id="activity-count" class="count">0</span></div>
+        <div id="activity" class="activity"><div class="empty">No activity log found.</div></div>
+      </aside>
+    </section>
+  </main>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

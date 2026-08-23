@@ -1,2 +1,61 @@
-# repeater-scribe
-AllStar repeater transcription
+# Repeater Scribe
+
+Read-only companion application for AllStarLink 3 archive recordings. It scans
+WAV files, reads node-local `activity.log` files, and queues recordings for
+local transcription without connecting to or controlling Asterisk.
+
+## Live ASL3 archive
+
+For a Dockerized ASL3 node, mount the host archive read-only and point the app
+at the container path:
+
+```yaml
+volumes:
+	- /home/azcoigreach/ASL3-Docker/asl_monitor:/audio:ro
+	- ./data:/data
+environment:
+	ASLT_ARCHIVE_PATHS: /audio
+	ASLT_DATABASE_URL: sqlite:////data/asl_transcriber.db
+```
+
+The application never renames, moves, deletes, or writes to files below the
+configured archive paths. It scans on startup and polls the archive every five
+seconds by default; adjust `ASLT_ARCHIVE_POLL_SECONDS` when needed.
+With `ASLT_AUTO_PROCESS=true`, stable recordings are also transcribed
+automatically in the background.
+Recordings are shown as `waiting` while their size or modification time is
+changing. They are queued only after an unchanged poll, so an active ASL3
+recording is never processed mid-write.
+
+## Development
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e '.[dev]'
+pytest -q
+ruff check src tests
+mypy src
+```
+
+Run a one-time scan with the configured archive paths:
+
+```bash
+ASLT_ARCHIVE_PATHS=/home/azcoigreach/ASL3-Docker/asl_monitor \
+	asl-transcriber scan
+```
+
+Start the API with `uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080`.
+
+## API
+
+- `GET /api/v1/health` reports service readiness.
+- `POST /api/v1/ingestion/scan` performs a read-only archive scan.
+- `POST /api/v1/ingestion/process` processes pending recordings with local Whisper.
+- `GET /api/v1/ingestion/jobs` lists discovered recording jobs.
+- `GET /api/v1/activity` lists parsed ASL3 activity events.
+- `GET /api/v1/recordings?q=...&status=...` searches queued recordings and transcripts.
+- `GET /api/v1/events` provides an SSE stream of discovery and processing events.
+
+Processing loads the configured `faster-whisper` model on demand. The first
+processing request may download the model and take longer than later requests.

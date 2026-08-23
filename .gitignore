@@ -11,6 +11,20 @@
 *.sln.docstates
 *.env
 
+.venv/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Runtime data and read-only ASL3 archive mount
+/data/
+/tmp/
+/asl-monitor/*
+!/asl-monitor/.gitkeep
+*.wav
+*.wav49
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
