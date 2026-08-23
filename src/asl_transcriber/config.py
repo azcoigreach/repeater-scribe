@@ -13,7 +13,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = Field(default="asl-transcriber")
+    app_name: str = Field(default="repeater-scribe")
     app_env: str = Field(default="development")
     log_level: str = Field(default="INFO")
     database_url: str = Field(default="sqlite:///./data/asl_transcriber.db")
