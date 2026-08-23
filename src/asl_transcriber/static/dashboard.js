@@ -345,7 +345,7 @@ function clampFloatRect(rect) {
 /* Panel visibility actions */
 function undockPanel(panelId) {
   state.tree = removePanelFromTree(state.tree, panelId);
-  state.floating[panelId] = clampFloatRect({ left: 60 + floatingCount() * 28, top: 60 + floatingCount() * 28, width: 420, height: 320 });
+  state.floating[panelId] = { ...clampFloatRect({ left: 60 + floatingCount() * 28, top: 60 + floatingCount() * 28, width: 420, height: 320 }), collapsed: false };
   renderAll();
   persist();
 }
@@ -415,7 +415,10 @@ function renderAll() {
     const win = document.querySelector(`.win[data-win="${panelId}"]`);
     if (state.floating[panelId]) {
       const rect = state.floating[panelId];
+      const collapseButton = win.querySelector('.win-collapse');
       win.classList.add('floating');
+      win.classList.toggle('collapsed', !!rect.collapsed);
+      if (collapseButton) collapseButton.textContent = rect.collapsed ? '+' : '–';
       win.style.left = `${rect.left}px`;
       win.style.top = `${rect.top}px`;
       win.style.width = `${rect.width}px`;
@@ -423,7 +426,7 @@ function renderAll() {
       win.style.display = '';
       floatLayer.appendChild(win);
     } else if (state.hidden.includes(panelId) && !findGroupWithPanel(state.tree, panelId)) {
-      win.classList.remove('floating');
+      win.classList.remove('floating', 'collapsed');
       win.style.display = 'none';
       floatLayer.appendChild(win);
     }
@@ -486,7 +489,7 @@ function renderGroup(node) {
   body.className = 'dock-body';
   node.panels.forEach(panelId => {
     const win = document.querySelector(`.win[data-win="${panelId}"]`);
-    win.classList.remove('floating');
+    win.classList.remove('floating', 'collapsed');
     win.style.cssText = '';
     win.style.display = panelId === node.active ? '' : 'none';
     body.appendChild(win);
@@ -609,7 +612,7 @@ ALL_PANELS.forEach(panelId => {
     const rect = clampFloatRect({ left: dragState.startLeft + dx, top: dragState.startTop + dy, width: win.offsetWidth, height: win.offsetHeight });
     win.style.left = `${rect.left}px`;
     win.style.top = `${rect.top}px`;
-    state.floating[panelId] = rect;
+    state.floating[panelId] = { ...state.floating[panelId], ...rect };
   });
   const stopDrag = () => { if (dragState) { dragState = null; persist(); } };
   titlebar.addEventListener('pointerup', stopDrag);
@@ -618,17 +621,21 @@ ALL_PANELS.forEach(panelId => {
   win.addEventListener('pointerdown', () => { if (win.classList.contains('floating')) bringToFront(win); });
 
   new ResizeObserver(() => {
-    if (!win.classList.contains('floating')) return;
+    if (!win.classList.contains('floating') || win.classList.contains('collapsed')) return;
     const clamped = clampFloatRect({ left: parseFloat(win.style.left) || 0, top: parseFloat(win.style.top) || 0, width: win.offsetWidth, height: win.offsetHeight });
     win.style.width = `${clamped.width}px`;
     win.style.height = `${clamped.height}px`;
-    state.floating[panelId] = clamped;
+    state.floating[panelId] = { ...state.floating[panelId], ...clamped };
     persist();
   }).observe(win);
 
   collapseButton.addEventListener('click', () => {
     win.classList.toggle('collapsed');
     collapseButton.textContent = win.classList.contains('collapsed') ? '+' : '–';
+    if (state.floating[panelId]) {
+      state.floating[panelId].collapsed = win.classList.contains('collapsed');
+      persist();
+    }
   });
   dockButton.addEventListener('click', () => dockFloatingPanel(panelId));
   closeButton.addEventListener('click', () => closePanel(panelId));
