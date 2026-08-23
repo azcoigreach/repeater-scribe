@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     retry_backoff_seconds: int = Field(default=5)
     max_retries: int = Field(default=5)
     read_only_mode: bool = Field(default=False)
+    ami_enabled: bool = Field(default=False)
+    ami_host: str = Field(default="allstarlink3")
+    ami_port: int = Field(default=5038)
+    ami_username: str = Field(default="admin")
+    ami_secret: str = Field(default="")
+    ami_timeout_seconds: float = Field(default=5.0)
+    ami_connection_grace_seconds: float = Field(default=15.0)
+    ami_control_enabled: bool = Field(default=False)
+    api_key: str = Field(default="")
 
     @property
     def archive_path_list(self) -> list[str]:

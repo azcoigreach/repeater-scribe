@@ -31,6 +31,8 @@ This phase establishes the application skeleton and operating model needed to su
 - Build the versioned REST API, search filters, and SSE streams.
 - Add the built-in dashboard, detail pages, and audio access controls.
 - Support API-key authentication and read-only operations.
+- Add opt-in authenticated AMI status and AllStar function controls.
+- Associate AMI station events with archive recordings and transcripts.
 
 ## Phase 5: Production hardening
 
