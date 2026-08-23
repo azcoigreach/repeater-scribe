@@ -10,6 +10,7 @@ ASL Transcriber is organized around a pipeline that begins with the ASL3 archive
 - Correlation: combine recordings with nearby ASL3 activity events.
 - Persistence: store metadata, transcripts, and service state in SQLite by default.
 - Delivery: expose events via SSE and resources via a FastAPI API and dashboard.
+- Node integration: optionally read status and issue constrained AllStar function commands through authenticated AMI.
 
 ## Internal boundaries
 
@@ -20,8 +21,13 @@ The first implementation is deliberately narrow:
 - `ASL3ArchiveSource` for archive-based discovery
 - `FasterWhisperEngine` for local transcription
 - SQLite-backed persistence with Alembic migrations
+- `AmiClient` for authenticated AMI status and constrained `rpt fun` control
 
 This keeps the first release focused on reliability while leaving room for future adapters such as RTP media, broadcast stream sources, or a cloud transcription engine.
+
+AMI control is disabled by default. Enabling it requires both AMI credentials
+and an application API key; arbitrary AMI actions are never exposed through the
+HTTP API.
 
 ## Runtime lifecycle
 

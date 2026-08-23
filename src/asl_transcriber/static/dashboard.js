@@ -62,10 +62,78 @@ async function loadActivity() {
   }
 }
 
+async function loadNodeStatus() {
+  const response = await fetch('/api/v1/node/status', { cache: 'no-store' });
+  const state = document.querySelector('#node-state');
+  if (!response.ok) {
+    state.textContent = response.status === 503 ? 'AMI disabled' : 'Node unavailable';
+    state.className = 'status processing';
+    return;
+  }
+  const data = await response.json();
+  state.textContent = data.ami_connected ? 'AMI connected' : 'Node unavailable';
+  state.className = data.ami_connected ? 'status' : 'status processing';
+  document.querySelector('#connected-nodes').textContent = data.connected_nodes.length ? data.connected_nodes.join(', ') : 'None';
+  document.querySelector('#talkers').textContent = data.talkers.length ? data.talkers.join(', ') : 'None detected';
+  document.querySelector('#active-channels').textContent = data.active_channels.length;
+  document.querySelector('#stations').innerHTML = data.connected_stations.length
+    ? data.connected_stations.map(station => `<div class="station"><div><strong>${esc(station.id)}</strong><span>${esc(station.name)}</span></div><small>${esc(station.state)} · ${esc(station.channel)}</small><button class="station-action" data-target="${esc(station.id)}" type="button">Disconnect</button></div>`).join('')
+    : '<div class="empty">No connected stations.</div>';
+  document.querySelectorAll('.station-action').forEach(button => button.addEventListener('click', () => runCommand('Disconnect node', button.dataset.target)));
+}
+
+function setControlResult(message, error = false) {
+  const result = document.querySelector('#control-result');
+  result.textContent = message;
+  result.className = `control-result${error ? ' error' : ''}`;
+}
+
+document.querySelector('#refresh-node').addEventListener('click', loadNodeStatus);
+document.querySelector('#ping-node').addEventListener('click', async () => {
+  const response = await fetch('/api/v1/node/ping', { method: 'POST' });
+  setControlResult(response.ok ? 'Node responded to AMI ping.' : `Ping failed (${response.status}).`, !response.ok);
+});
+async function loadCommands() {
+  const nodeId = document.querySelector('#control-node-id').value.trim();
+  const response = await fetch(`/api/v1/node/${encodeURIComponent(nodeId)}/commands`);
+  if (!response.ok) return;
+  const data = await response.json();
+  document.querySelector('#command-buttons').innerHTML = data.commands.map(command => `<button class="command-button" type="button" data-command="${esc(command.name)}" data-requires-target="${command.requires_target}">${esc(command.name)}</button>`).join('');
+  document.querySelectorAll('.command-button').forEach(button => button.addEventListener('click', () => {
+    const target = button.dataset.requiresTarget === 'true' ? window.prompt('Target node number') : null;
+    if (button.dataset.requiresTarget === 'true' && !target) return;
+    runCommand(button.dataset.command, target);
+  }));
+}
+document.querySelector('#control-node-id').addEventListener('change', loadCommands);
+async function runCommand(name, target = null) {
+  const nodeId = document.querySelector('#control-node-id').value.trim();
+  if (!window.confirm(`${name}${target ? ` ${target}` : ''}?`)) return;
+  const response = await fetch(`/ui/node/${encodeURIComponent(nodeId)}/command`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, target, confirmed: document.querySelector('#command-confirm').checked }),
+  });
+  if (response.ok) {
+    setControlResult(`Command ${name} sent to node ${nodeId}.`);
+    document.querySelector('#command-confirm').checked = false;
+  } else {
+    const detail = await response.json().catch(() => ({}));
+    setControlResult(detail.detail || `Command failed (${response.status}).`, true);
+  }
+}
+loadCommands();
+
+document.querySelectorAll('.nav-button').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('.nav-button, .view').forEach(item => item.classList.remove('active', 'active-view'));
+  button.classList.add('active');
+  document.querySelector(`#${button.dataset.view}`).classList.add('active-view');
+}));
 searchInput.addEventListener('input', loadJobs);
 loadJobs();
 loadActivity();
 setInterval(loadActivity, 5000);
+loadNodeStatus();
+setInterval(loadNodeStatus, 5000);
 const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
 stream.addEventListener('job', () => { loadJobs(); });

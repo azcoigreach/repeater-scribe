@@ -6,6 +6,9 @@ services:
       - .env
     ports:
       - "8088:8080"
+    networks:
+      - default
+      - asl3
     environment:
       ASLT_AUTO_PROCESS: "true"
     volumes:
@@ -19,3 +22,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+networks:
+  asl3:
+    external: true
+    name: ${ASL3_NETWORK_NAME:-asl3-docker_default}

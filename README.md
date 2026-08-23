@@ -47,6 +47,10 @@ ASLT_ARCHIVE_PATHS=/home/azcoigreach/ASL3-Docker/asl_monitor \
 
 Start the API with `uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080`.
 
+When running beside the AllScan Reimagined virtual-node stack, create or reuse
+the external Docker network named by `ASL3_NETWORK_NAME` (default:
+`asl3-docker_default`). This lets the AMI adapter resolve `allstarlink3`.
+
 ## API
 
 - `GET /api/v1/health` reports service readiness.
@@ -56,6 +60,23 @@ Start the API with `uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080`
 - `GET /api/v1/activity` lists parsed ASL3 activity events.
 - `GET /api/v1/recordings?q=...&status=...` searches queued recordings and transcripts.
 - `GET /api/v1/events` provides an SSE stream of discovery and processing events.
+- `GET /api/v1/node/status` reads node status through authenticated AMI.
+- `POST /api/v1/node/ping` checks AMI connectivity.
+- `POST /api/v1/node/{node_id}/function` sends an AllStar function code when AMI control and API-key protection are enabled.
+- `GET /api/v1/node/{node_id}/commands` lists the named Functions menu.
+- `POST /api/v1/node/{node_id}/command` executes a named command for API clients.
+
+## AMI control
+
+AMI is disabled by default. Set the AMI connection values in `.env`, then set
+`ASLT_AMI_ENABLED=true`, `ASLT_AMI_CONTROL_ENABLED=true`, and a private
+`ASLT_API_KEY` to enable node control. Send the key in the `X-API-Key` header.
+Control requests are limited to AllStar DTMF function codes; arbitrary AMI
+actions are not exposed by the HTTP API.
+The dashboard uses the server-configured AMI credentials and does not ask the
+operator to enter the API key. Its command drawer is available only when web
+authentication is explicitly off; enable authentication before exposing the
+dashboard beyond a trusted local network.
 
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.

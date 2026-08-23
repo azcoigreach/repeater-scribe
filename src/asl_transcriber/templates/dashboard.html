@@ -9,24 +9,38 @@
 <body>
   <header class="topbar">
     <div class="brand"><span class="brand-mark">RS</span><span>{{ app_name }}</span></div>
-    <div class="connection"><span class="pulse"></span><span id="connection-label">Listening to archive</span></div>
+    <nav class="nav"><button class="nav-button active" data-view="node-view">Node</button><button class="nav-button" data-view="recording-view">Transcripts</button><button class="nav-button" data-view="settings-view">Settings</button></nav>
+    <div class="top-actions"><div class="connection"><span class="pulse"></span><span id="connection-label">Live archive</span></div></div>
   </header>
   <main class="shell">
-    <section class="intro">
-      <div>
-        <p class="kicker">ASL3 archive monitor</p>
-        <h1>Radio traffic, made searchable.</h1>
-        <p class="lede">A quiet window into your repeater archive. New recordings appear here as they settle and move through local transcription.</p>
+    <section id="node-view" class="view active-view">
+      <div class="node-heading"><div><p class="kicker">AllStarLink node</p><h1>KM7GHS Ham Shack <span>668390</span></h1><p class="node-location">Virtual node · live AMI connection</p></div><div class="archive-badge"><span class="badge-label">ARCHIVE</span><strong>{{ archive_path }}</strong><span class="read-only">READ ONLY SOURCE</span></div></div>
+      <section class="stats" aria-label="Queue summary">
+        <article><span class="stat-label">Recordings</span><strong id="total-count">0</strong></article><article><span class="stat-label">Transcribed</span><strong id="completed-count">0</strong></article><article><span class="stat-label">In progress</span><strong id="processing-count">0</strong></article><article><span class="stat-label">Waiting</span><strong id="pending-count">0</strong></article>
+      </section>
+      <section class="node-panel">
+      <div class="section-head"><div><p class="kicker">Live node</p><h2>Connected stations</h2></div><span id="node-state" class="status processing">Checking AMI</span></div>
+      <div class="node-grid">
+        <div><span class="stat-label">Connected nodes</span><div id="connected-nodes" class="node-value">Loading...</div></div>
+        <div><span class="stat-label">Talking now</span><div id="talkers" class="node-value">None detected</div></div>
+        <div><span class="stat-label">Active channels</span><div id="active-channels" class="node-value">Loading...</div></div>
       </div>
-      <div class="archive-badge"><span class="badge-label">SOURCE</span><strong>{{ archive_path }}</strong><span class="read-only">READ ONLY</span></div>
+      <div id="stations" class="stations"><div class="empty">Loading station list...</div></div>
+      <details class="control-drawer" open>
+        <summary>Functions</summary>
+        <div class="controls">
+          <button id="refresh-node" class="control-button" type="button">Refresh status</button>
+          <button id="ping-node" class="control-button" type="button">Ping node</button>
+          <label class="node-selector">Operating node<input id="control-node-id" inputmode="numeric" value="668390" required></label>
+          <div id="command-buttons" class="command-buttons"></div>
+          <label class="confirm-label"><input id="command-confirm" type="checkbox"> Confirm node command</label>
+          <output id="control-result" class="control-result" aria-live="polite"></output>
+        </div>
+      </details>
+      </section>
     </section>
-    <section class="stats" aria-label="Queue summary">
-      <article><span class="stat-label">Total recordings</span><strong id="total-count">0</strong></article>
-      <article><span class="stat-label">Transcribed</span><strong id="completed-count">0</strong></article>
-      <article><span class="stat-label">In progress</span><strong id="processing-count">0</strong></article>
-      <article><span class="stat-label">Waiting</span><strong id="pending-count">0</strong></article>
-    </section>
-    <section class="workspace">
+    <section id="recording-view" class="view">
+      <section class="workspace">
       <div class="transcripts-panel">
         <div class="section-head">
           <div><p class="kicker">Archive index</p><h2>Recent recordings</h2></div>
@@ -38,6 +52,10 @@
         <div class="section-head"><div><p class="kicker">Node signals</p><h2>Activity</h2></div><span id="activity-count" class="count">0</span></div>
         <div id="activity" class="activity"><div class="empty">No activity log found.</div></div>
       </aside>
+      </section>
+    </section>
+    <section id="settings-view" class="view settings-view">
+      <p class="kicker">Application settings</p><h1>Settings</h1><div class="settings-grid"><div><h2>Appearance</h2><p>Dark operator theme is active for this dashboard.</p></div><div><h2>Node connection</h2><p>AMI status is read from the configured AllStarLink node. Credentials remain server-side and are never shown in the browser.</p></div><div><h2>Archive policy</h2><p>Recordings are read-only. Active files remain waiting until their size stops changing.</p></div></div>
     </section>
   </main>
   <script src="/static/dashboard.js"></script>
