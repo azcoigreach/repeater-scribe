@@ -377,19 +377,6 @@ function setPanelVisible(panelId, visible) {
   renderAll();
   persist();
 }
-function splitPanel(panelId, direction) {
-  const sourceGroup = findGroupWithPanel(state.tree, panelId);
-  if (!sourceGroup || sourceGroup.panels.length < 2) return;
-  const groupId = sourceGroup.id;
-  const remaining = sourceGroup.panels.filter(panel => panel !== panelId);
-  const keptGroup = { type: 'group', id: groupId, panels: remaining, active: remaining[0] };
-  const newGroup = makeGroup(panelId);
-  const replacement = { type: 'split', direction, sizes: [0.5, 0.5], children: [keptGroup, newGroup] };
-  state.tree = replaceInTree(state.tree, groupId, replacement);
-  renderAll();
-  persist();
-}
-
 const DROP_CLASSES = ['drop-center', 'drop-left', 'drop-right', 'drop-top', 'drop-bottom'];
 let activeDrop = null;
 
@@ -548,8 +535,6 @@ function renderGroup(node) {
 
     const actions = document.createElement('div');
     actions.className = 'dock-group-actions';
-    actions.appendChild(iconButton('&#8677;', 'Split right', () => splitPanel(node.active, 'row')));
-    actions.appendChild(iconButton('&#8681;', 'Split down', () => splitPanel(node.active, 'column')));
     actions.appendChild(iconButton('&#8599;', 'Undock', () => undockPanel(node.active)));
     const closeButton = iconButton('&times;', 'Close', () => closePanel(node.active));
     closeButton.classList.add('dock-close');
