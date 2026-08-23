@@ -98,7 +98,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await asyncio.gather(watcher, return_exceptions=True)
 
 
-app = FastAPI(title=settings.app_name, version="0.2.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 
@@ -122,7 +122,7 @@ def health() -> dict[str, str | bool]:
     return {
         "status": "ok",
         "service": settings.app_name,
-        "version": "0.2.0",
+        "version": "0.3.0",
         "ready": True,
     }
 
@@ -305,16 +305,9 @@ class NodeFunctionRequest(BaseModel):
     function: str
 
 
-@app.post("/api/v1/node/{node_id}/function")
-def node_function(
-    node_id: int,
-    request: NodeFunctionRequest,
-    x_api_key: str | None = Header(default=None),
-) -> dict[str, object]:
+def execute_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
     if not settings.ami_control_enabled:
         raise HTTPException(status_code=503, detail="AMI node control is disabled")
-    if not settings.api_key or x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="A valid API key is required")
     if re.fullmatch(r"[0-9*#A-D]+", request.function.strip().upper()) is None:
         raise HTTPException(status_code=422, detail="Invalid AllStar function code")
     try:
@@ -322,6 +315,24 @@ def node_function(
     except AmiError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return {"node_id": node_id, "function": request.function.strip().upper(), "response": response.headers}
+
+
+@app.post("/api/v1/node/{node_id}/function")
+def node_function(
+    node_id: int,
+    request: NodeFunctionRequest,
+    x_api_key: str | None = Header(default=None),
+) -> dict[str, object]:
+    if not settings.api_key or x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="A valid API key is required")
+    return execute_node_function(node_id, request)
+
+
+@app.post("/ui/node/{node_id}/function")
+def ui_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
+    if settings.auth_mode != "off":
+        raise HTTPException(status_code=401, detail="Web authentication is required")
+    return execute_node_function(node_id, request)
 
 
 @app.post("/api/v1/ingestion/scan")

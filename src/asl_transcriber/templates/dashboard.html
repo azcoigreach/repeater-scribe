@@ -3,61 +3,163 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ app_name }} dashboard</title>
+  <title>REPEATER SCRIBE dashboard</title>
   <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark">RS</span><span>{{ app_name }}</span></div>
-    <nav class="nav"><button class="nav-button active" data-view="node-view">Node</button><button class="nav-button" data-view="recording-view">Transcripts</button><button class="nav-button" data-view="settings-view">Settings</button></nav>
-    <div class="top-actions"><div class="connection"><span class="pulse"></span><span id="connection-label">Live archive</span></div></div>
-  </header>
-  <main class="shell">
-    <section id="node-view" class="view active-view">
-      <div class="node-heading"><div><p class="kicker">AllStarLink node</p><h1>KM7GHS Ham Shack <span>668390</span></h1><p class="node-location">Virtual node · live AMI connection</p></div><div class="archive-badge"><span class="badge-label">ARCHIVE</span><strong>{{ archive_path }}</strong><span class="read-only">READ ONLY SOURCE</span></div></div>
-      <section class="stats" aria-label="Queue summary">
-        <article><span class="stat-label">Recordings</span><strong id="total-count">0</strong></article><article><span class="stat-label">Transcribed</span><strong id="completed-count">0</strong></article><article><span class="stat-label">In progress</span><strong id="processing-count">0</strong></article><article><span class="stat-label">Waiting</span><strong id="pending-count">0</strong></article>
-      </section>
-      <section class="node-panel">
-      <div class="section-head"><div><p class="kicker">Live node</p><h2>Connected stations</h2></div><span id="node-state" class="status processing">Checking AMI</span></div>
-      <div class="node-grid">
-        <div><span class="stat-label">Connected nodes</span><div id="connected-nodes" class="node-value">Loading...</div></div>
-        <div><span class="stat-label">Talking now</span><div id="talkers" class="node-value">None detected</div></div>
-        <div><span class="stat-label">Active channels</span><div id="active-channels" class="node-value">Loading...</div></div>
+    <div class="brand"><img class="brand-logo" src="/static/logo.png" alt="REPEATER SCRIBE"></div>
+    <div class="top-actions">
+      <div class="connection"><span class="pulse"></span><span id="connection-label">Live archive</span></div>
+      <div class="menu" id="main-menu">
+        <button class="menu-trigger icon-button" id="main-menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Open menu"><span class="hamburger-icon" aria-hidden="true"></span></button>
+        <div class="menu-panel menu-panel-right" id="main-menu-panel" hidden>
+          <div class="menu-item has-submenu" data-submenu="view-submenu" role="button" tabindex="0">
+            <span>VIEW</span><span class="submenu-caret">&#9666;</span>
+          </div>
+          <div class="submenu" id="view-submenu" hidden>
+            <div class="menu-item has-submenu" data-submenu="windows-submenu" role="button" tabindex="0">
+              <span>WINDOWS</span><span class="submenu-caret">&#9666;</span>
+            </div>
+            <div class="submenu" id="windows-submenu" hidden>
+              <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
+              <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
+              <label><input type="checkbox" data-toggle-win="stations" checked> Connected stations</label>
+              <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
+              <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
+              <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
+              <label><input type="checkbox" id="toggle-properties" data-toggle-win="properties"> Properties</label>
+            </div>
+            <div class="menu-item has-submenu" data-submenu="layout-submenu" role="button" tabindex="0">
+              <span>LAYOUTS</span><span class="submenu-caret">&#9666;</span>
+            </div>
+            <div class="submenu" id="layout-submenu" hidden>
+              <button id="layout-save" class="menu-action" type="button">Save current as preset&hellip;</button>
+              <div id="layout-preset-list" class="preset-list"><p class="empty-note">No saved presets</p></div>
+              <button id="reset-layout" class="menu-action" type="button">Reset to default</button>
+            </div>
+          </div>
+          <div class="menu-item" id="open-settings" role="button" tabindex="0"><span>Settings</span></div>
+        </div>
       </div>
-      <div id="stations" class="stations"><div class="empty">Loading station list...</div></div>
-      <details class="control-drawer" open>
-        <summary>Functions</summary>
+    </div>
+  </header>
+
+  <main id="desktop" class="desktop">
+    <div id="dock-root" class="dock-root"></div>
+    <div id="float-layer" class="float-layer"></div>
+
+    <section class="win" data-win="queue" data-title="Queue summary">
+      <header class="win-titlebar">
+        <span class="win-title">Queue summary</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body">
+        <section class="stats" aria-label="Queue summary">
+          <article><span class="stat-label">Recordings</span><strong id="total-count">0</strong></article>
+          <article><span class="stat-label">Transcribed</span><strong id="completed-count">0</strong></article>
+          <article><span class="stat-label">In progress</span><strong id="processing-count">0</strong></article>
+          <article><span class="stat-label">Waiting</span><strong id="pending-count">0</strong></article>
+        </section>
+        <div class="archive-badge"><span class="badge-label">ARCHIVE</span><strong>{{ archive_path }}</strong><span class="read-only">READ ONLY SOURCE</span></div>
+      </div>
+    </section>
+
+    <section class="win" data-win="node" data-title="Node status">
+      <header class="win-titlebar">
+        <span class="status-dot offline" id="node-status-dot" aria-hidden="true"></span>
+        <span class="win-title">Node 668390</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body">
+        <div class="section-head"><p class="node-location">Virtual node &middot; live AMI connection</p><span id="node-state" class="status processing">Checking AMI</span></div>
+        <div class="node-grid">
+          <div><span class="stat-label">Connected nodes</span><div id="connected-nodes" class="node-value">Loading...</div></div>
+          <div><span class="stat-label">Talking now</span><div id="talkers" class="node-value">None detected</div></div>
+          <div><span class="stat-label">Active channels</span><div id="active-channels" class="node-value">Loading...</div></div>
+        </div>
+        <button id="refresh-node" class="control-button" type="button">Refresh status</button>
+      </div>
+    </section>
+
+    <section class="win" data-win="stations" data-title="Connected stations">
+      <header class="win-titlebar">
+        <span class="win-title">Connected stations</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body">
+        <details class="collapsible-table" open>
+          <summary>Stations <span id="stations-count" class="count">0</span></summary>
+          <table class="stations-table">
+            <thead><tr><th></th><th>Node</th><th>Name</th><th>State</th><th></th></tr></thead>
+            <tbody id="stations"><tr><td colspan="5" class="empty">Loading station list...</td></tr></tbody>
+          </table>
+        </details>
+      </div>
+    </section>
+
+    <section class="win" data-win="controls" data-title="Node controls">
+      <header class="win-titlebar">
+        <span class="win-title">Node controls</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body">
         <div class="controls">
-          <button id="refresh-node" class="control-button" type="button">Refresh status</button>
-          <button id="ping-node" class="control-button" type="button">Ping node</button>
-          <label class="node-selector">Operating node<input id="control-node-id" inputmode="numeric" value="668390" required></label>
-          <div id="command-buttons" class="command-buttons"></div>
-          <label class="confirm-label"><input id="command-confirm" type="checkbox"> Confirm node command</label>
+          <div class="controls-row">
+            <label class="node-selector">Operating node<input id="control-node-id" inputmode="numeric" value="668390" required></label>
+            <label class="node-selector">Command<select id="command-buttons" class="command-select"></select></label>
+          </div>
+          <div class="controls-row">
+            <button id="run-command" class="control-button primary" type="button">Run command</button>
+            <button id="ping-node" class="control-button" type="button">Ping node</button>
+            <label class="confirm-label"><input id="command-confirm" type="checkbox"> Confirm node command</label>
+          </div>
+          <div class="controls-row">
+            <label class="node-selector">Function code<input id="function-code" placeholder="e.g. *3" maxlength="12"></label>
+            <button id="run-function" class="control-button" type="button">Send function</button>
+          </div>
           <output id="control-result" class="control-result" aria-live="polite"></output>
         </div>
-      </details>
-      </section>
-    </section>
-    <section id="recording-view" class="view">
-      <section class="workspace">
-      <div class="transcripts-panel">
-        <div class="section-head">
-          <div><p class="kicker">Archive index</p><h2>Recent recordings</h2></div>
-          <label class="search"><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="Search transcripts" autocomplete="off"></label>
-        </div>
-        <div id="recordings" class="recordings" aria-live="polite"><div class="empty">Loading recordings...</div></div>
       </div>
-      <aside class="activity-panel">
-        <div class="section-head"><div><p class="kicker">Node signals</p><h2>Activity</h2></div><span id="activity-count" class="count">0</span></div>
-        <div id="activity" class="activity"><div class="empty">No activity log found.</div></div>
-      </aside>
-      </section>
     </section>
-    <section id="settings-view" class="view settings-view">
-      <p class="kicker">Application settings</p><h1>Settings</h1><div class="settings-grid"><div><h2>Appearance</h2><p>Dark operator theme is active for this dashboard.</p></div><div><h2>Node connection</h2><p>AMI status is read from the configured AllStarLink node. Credentials remain server-side and are never shown in the browser.</p></div><div><h2>Archive policy</h2><p>Recordings are read-only. Active files remain waiting until their size stops changing.</p></div></div>
+
+    <section class="win win-transcripts" data-win="transcripts" data-title="Transcripts">
+      <header class="win-titlebar">
+        <span class="win-title">Transcripts</span>
+        <label class="search"><span aria-hidden="true">&#8981;</span><input id="search-input" type="search" placeholder="Search transcripts" autocomplete="off"></label>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body"><div id="recordings" class="recordings" aria-live="polite"><div class="empty">Loading recordings...</div></div></div>
+    </section>
+
+    <section class="win" data-win="activity" data-title="Activity log">
+      <header class="win-titlebar">
+        <span class="win-title">Activity log</span>
+        <span id="activity-count" class="count">0</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body"><div id="activity" class="activity"><div class="empty">No activity log found.</div></div></div>
+    </section>
+
+    <section class="win" data-win="properties" data-title="Properties">
+      <header class="win-titlebar">
+        <span class="win-title">Properties</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body"><p class="empty">No item selected.</p></div>
     </section>
   </main>
+
+  <div id="settings-modal" class="modal" hidden>
+    <div class="modal-content">
+      <div class="modal-head"><h2>Settings</h2><button id="close-settings" class="icon-button" type="button" aria-label="Close settings">&#10005;</button></div>
+      <div class="settings-grid">
+        <div><h3>Appearance</h3><p>Dark operator theme is active for this dashboard.</p></div>
+        <div><h3>Node connection</h3><p>AMI status is read from the configured AllStarLink node. Credentials remain server-side and are never shown in the browser.</p></div>
+        <div><h3>Archive policy</h3><p>Recordings are read-only. Active files remain waiting until their size stops changing.</p></div>
+      </div>
+    </div>
+  </div>
   <script src="/static/dashboard.js"></script>
 </body>
 </html>

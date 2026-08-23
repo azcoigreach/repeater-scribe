@@ -1,7 +1,7 @@
 services:
-  asl-transcriber:
+  repeater-scribe:
     build: .
-    container_name: asl-transcriber
+    container_name: repeater-scribe
     env_file:
       - .env
     ports:
