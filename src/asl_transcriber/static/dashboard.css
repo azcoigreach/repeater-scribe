@@ -9,7 +9,7 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 /* Topbar */
 .topbar { height: 60px; padding: 0 clamp(16px, 3vw, 40px); display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { display: flex; align-items: center; gap: 11px; font: 700 13px/1.1 "IBM Plex Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
-.brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 7px; background: var(--green); color: var(--panel); font-size: 11px; font-weight: 700; }
+.brand-logo { height: 38px; width: auto; display: block; }
 .menu-bar { position: relative; }
 .menu { position: relative; }
 .menu-trigger { border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; background: var(--paper); color: var(--ink); cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
