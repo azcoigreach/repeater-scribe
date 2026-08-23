@@ -26,17 +26,6 @@
             <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
             <label><input type="checkbox" id="toggle-properties" data-toggle-win="properties"> Properties</label>
           </div>
-          <div class="menu-item has-submenu" data-submenu="mode-submenu" role="button" tabindex="0">
-            <span>Display mode</span><span class="submenu-caret">&#9666;</span>
-          </div>
-          <div class="submenu" id="mode-submenu" hidden>
-            <div class="mode-buttons">
-              <button id="mode-structured" class="menu-action" type="button">Structured</button>
-              <button id="mode-freeform" class="menu-action" type="button">Freeform</button>
-            </div>
-            <label><input type="checkbox" id="constraint-no-overlap"> Prevent window overlap</label>
-            <label><input type="checkbox" id="constraint-bound"> Keep windows on screen</label>
-          </div>
           <div class="menu-item has-submenu" data-submenu="layout-submenu" role="button" tabindex="0">
             <span>Layout presets</span><span class="submenu-caret">&#9666;</span>
           </div>
@@ -52,10 +41,13 @@
   </header>
 
   <main id="desktop" class="desktop">
+    <div id="dock-root" class="dock-root"></div>
+    <div id="float-layer" class="float-layer"></div>
+
     <section class="win" data-win="queue" data-title="Queue summary">
       <header class="win-titlebar">
         <span class="win-title">Queue summary</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <section class="stats" aria-label="Queue summary">
@@ -72,7 +64,7 @@
       <header class="win-titlebar">
         <span class="status-dot offline" id="node-status-dot" aria-hidden="true"></span>
         <span class="win-title">Node 668390</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <div class="section-head"><p class="node-location">Virtual node &middot; live AMI connection</p><span id="node-state" class="status processing">Checking AMI</span></div>
@@ -88,7 +80,7 @@
     <section class="win" data-win="stations" data-title="Connected stations">
       <header class="win-titlebar">
         <span class="win-title">Connected stations</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <details class="collapsible-table" open>
@@ -104,7 +96,7 @@
     <section class="win" data-win="controls" data-title="Node controls">
       <header class="win-titlebar">
         <span class="win-title">Node controls</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <div class="controls">
@@ -130,7 +122,7 @@
       <header class="win-titlebar">
         <span class="win-title">Transcripts</span>
         <label class="search"><span aria-hidden="true">&#8981;</span><input id="search-input" type="search" placeholder="Search transcripts" autocomplete="off"></label>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body"><div id="recordings" class="recordings" aria-live="polite"><div class="empty">Loading recordings...</div></div></div>
     </section>
@@ -139,15 +131,15 @@
       <header class="win-titlebar">
         <span class="win-title">Activity log</span>
         <span id="activity-count" class="count">0</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body"><div id="activity" class="activity"><div class="empty">No activity log found.</div></div></div>
     </section>
 
-    <section class="win win-hidden" data-win="properties" data-title="Properties">
+    <section class="win" data-win="properties" data-title="Properties">
       <header class="win-titlebar">
         <span class="win-title">Properties</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body"><p class="empty">No item selected.</p></div>
     </section>

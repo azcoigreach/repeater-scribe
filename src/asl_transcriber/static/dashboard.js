@@ -204,73 +204,65 @@ document.querySelector('#open-settings').addEventListener('click', () => {
 document.querySelector('#close-settings').addEventListener('click', () => settingsModal.setAttribute('hidden', ''));
 settingsModal.addEventListener('click', event => { if (event.target === settingsModal) settingsModal.setAttribute('hidden', ''); });
 
-/* Draggable, resizable, collapsible, closable windows with two independent constraint toggles:
-   "no overlap" (mode 1's collision avoidance) and "bound to screen" (mode 1's viewport limit).
-   Both on = structured mode; both off = freeform mode; either can be toggled independently. */
+/* VS Code / AvalonDock-style window manager:
+   - Docked panels live in a tree of splits (row/column) and tab groups; the tree structure
+     guarantees they never overlap and never leave the dock area, no per-window math needed.
+   - Any panel can be undocked into a floating window (absolute position, draggable, resizable),
+     always clamped to the visible browser viewport since we can't spawn real OS windows.
+   - Docking, undocking, retabbing, splitting, and resizing all mutate a single `state` tree that
+     is re-rendered and persisted after every change. */
 const desktop = document.querySelector('#desktop');
-const LAYOUT_KEY = 'dashboard-layout';
+const dockRoot = document.querySelector('#dock-root');
+const floatLayer = document.querySelector('#float-layer');
+const STATE_KEY = 'dashboard-dock-state';
 const PRESETS_KEY = 'dashboard-layout-presets';
-const CONSTRAINTS_KEY = 'dashboard-constraints';
-const DOCK_WIDTH = 340;
-const GRID = 26;
 let topZ = 10;
+let groupSeq = 0;
 
-const DEFAULT_ORDER = ['queue', 'node', 'stations', 'controls', 'transcripts', 'activity'];
-const PANEL_SIZES = {
-  queue: { w: 320, h: 210 },
-  node: { w: 380, h: 290 },
-  stations: { w: 380, h: 290 },
-  controls: { w: 420, h: 300 },
-  transcripts: { w: 640, h: 480 },
-  activity: { w: 360, h: 300 },
+const PANEL_TITLES = {
+  queue: 'Queue summary',
+  node: 'Node status',
+  stations: 'Connected stations',
+  controls: 'Node controls',
+  transcripts: 'Transcripts',
+  activity: 'Activity log',
+  properties: 'Properties',
 };
+const ALL_PANELS = Object.keys(PANEL_TITLES);
 
-function snap(value) {
-  return Math.round(value / GRID) * GRID;
+function makeGroup(...panels) {
+  return { type: 'group', id: `group-${groupSeq++}`, panels: [...panels], active: panels[0] };
 }
 
-function loadConstraints() {
-  try { return { noOverlap: true, bound: true, ...JSON.parse(localStorage.getItem(CONSTRAINTS_KEY) || '{}') }; } catch { return { noOverlap: true, bound: true }; }
+function defaultTree() {
+  groupSeq = 0;
+  return {
+    type: 'split', direction: 'column', sizes: [0.36, 0.64],
+    children: [
+      { type: 'split', direction: 'row', sizes: [0.22, 0.45, 0.33], children: [
+        makeGroup('queue'), makeGroup('node'), makeGroup('controls'),
+      ] },
+      { type: 'split', direction: 'row', sizes: [0.6, 0.4], children: [
+        makeGroup('transcripts'),
+        { type: 'split', direction: 'column', sizes: [0.5, 0.5], children: [makeGroup('stations'), makeGroup('activity')] },
+      ] },
+    ],
+  };
 }
-function saveConstraints() {
-  localStorage.setItem(CONSTRAINTS_KEY, JSON.stringify(constraints));
-}
-let constraints = loadConstraints();
 
-/* Best-fit tiling: lays out currently visible standard windows, in order, wrapped to fit the
-   available width, snapped to the grid. Used for the initial layout, resets, and whenever mode 1
-   (no overlap + bound to screen) needs to make room for an opened/closed window or a resize. */
-function autoFitLayout(maxWidthOverride) {
-  const width = Math.max(maxWidthOverride || desktop.clientWidth || window.innerWidth, 320);
-  const visible = DEFAULT_ORDER
-    .map(id => document.querySelector(`.win[data-win="${id}"]`))
-    .filter(win => win && !win.classList.contains('win-hidden'));
-  let x = GRID;
-  let y = GRID;
-  let rowHeight = 0;
-  visible.forEach(win => {
-    const size = PANEL_SIZES[win.dataset.win];
-    const w = Math.min(size.w, Math.max(width - GRID * 2, 260));
-    const h = size.h;
-    if (x > GRID && x + w + GRID > width) {
-      x = GRID;
-      y += rowHeight + GRID;
-      rowHeight = 0;
+function loadState() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STATE_KEY));
+    if (raw && raw.tree) {
+      const maxId = JSON.stringify(raw.tree).match(/group-(\d+)/g) || [];
+      groupSeq = maxId.reduce((max, id) => Math.max(max, Number(id.split('-')[1]) + 1), 0);
+      return raw;
     }
-    win.style.left = `${snap(x)}px`;
-    win.style.top = `${snap(y)}px`;
-    win.style.width = `${snap(w)}px`;
-    win.style.height = `${snap(h)}px`;
-    x += w + GRID;
-    rowHeight = Math.max(rowHeight, h);
-  });
+  } catch { /* fall through to default */ }
+  return { tree: defaultTree(), floating: {}, hidden: ['properties'] };
 }
-
-function loadLayout() {
-  try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); } catch { return {}; }
-}
-function saveLayout(layout) {
-  localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+function persist() {
+  localStorage.setItem(STATE_KEY, JSON.stringify(state));
 }
 function loadPresets() {
   try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); } catch { return {}; }
@@ -279,48 +271,129 @@ function savePresets(presets) {
   localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
 }
 
-function snapshotLayout() {
-  const snapshot = {};
-  document.querySelectorAll('.win').forEach(win => {
-    snapshot[win.dataset.win] = {
-      top: win.style.top || undefined,
-      left: win.style.left || undefined,
-      width: win.style.width || undefined,
-      height: win.style.height || undefined,
-      collapsed: win.classList.contains('collapsed'),
-      hidden: win.classList.contains('win-hidden'),
-      docked: win.classList.contains('docked'),
-    };
+let state = loadState();
+
+/* Tree helpers */
+function findGroupWithPanel(node, panelId) {
+  if (!node) return null;
+  if (node.type === 'group') return node.panels.includes(panelId) ? node : null;
+  for (const child of node.children) {
+    const found = findGroupWithPanel(child, panelId);
+    if (found) return found;
+  }
+  return null;
+}
+function findGroupById(node, groupId) {
+  if (!node) return null;
+  if (node.type === 'group') return node.id === groupId ? node : null;
+  for (const child of node.children) {
+    const found = findGroupById(child, groupId);
+    if (found) return found;
+  }
+  return null;
+}
+function normalizeSizes(sizes) {
+  const total = sizes.reduce((sum, size) => sum + size, 0) || 1;
+  return sizes.map(size => size / total);
+}
+function removePanelFromTree(node, panelId) {
+  if (!node) return null;
+  if (node.type === 'group') {
+    node.panels = node.panels.filter(panel => panel !== panelId);
+    if (!node.panels.length) return null;
+    if (node.active === panelId) node.active = node.panels[0];
+    return node;
+  }
+  const survivors = [];
+  const survivorSizes = [];
+  node.children.forEach((child, index) => {
+    const result = removePanelFromTree(child, panelId);
+    if (result) { survivors.push(result); survivorSizes.push(node.sizes[index]); }
   });
-  return snapshot;
+  if (!survivors.length) return null;
+  if (survivors.length === 1) return survivors[0];
+  node.children = survivors;
+  node.sizes = normalizeSizes(survivorSizes);
+  return node;
+}
+function replaceInTree(node, targetId, replacement) {
+  if (node.type === 'group') return node.id === targetId ? replacement : node;
+  node.children = node.children.map(child => replaceInTree(child, targetId, replacement));
+  return node;
+}
+function dockPanelDefault(panelId) {
+  const newGroup = makeGroup(panelId);
+  if (!state.tree) { state.tree = newGroup; return; }
+  if (state.tree.type === 'split' && state.tree.direction === 'row') {
+    state.tree.children.push(newGroup);
+    state.tree.sizes = normalizeSizes([...state.tree.sizes, 1]);
+  } else {
+    state.tree = { type: 'split', direction: 'row', sizes: [0.7, 0.3], children: [state.tree, newGroup] };
+  }
+}
+function floatingCount() {
+  return Object.keys(state.floating).length;
+}
+function clampFloatRect(rect) {
+  const width = Math.min(Math.max(rect.width, 260), Math.max(desktop.clientWidth - 32, 260));
+  const height = Math.min(Math.max(rect.height, 160), Math.max(desktop.clientHeight - 32, 160));
+  const left = Math.min(Math.max(rect.left, 0), Math.max(desktop.clientWidth - width, 0));
+  const top = Math.min(Math.max(rect.top, 0), Math.max(desktop.clientHeight - height, 0));
+  return { left, top, width, height };
 }
 
-function applyLayout(snapshot) {
-  document.querySelectorAll('.win').forEach(win => {
-    const saved = snapshot[win.dataset.win];
-    if (!saved) return;
-    if (saved.top) win.style.top = saved.top;
-    if (saved.left) win.style.left = saved.left;
-    if (saved.width) win.style.width = saved.width;
-    if (saved.height) win.style.height = saved.height;
-    win.classList.toggle('collapsed', !!saved.collapsed);
-    win.classList.toggle('win-hidden', !!saved.hidden);
-    win.classList.toggle('docked', !!saved.docked);
-    const collapseButton = win.querySelector('.win-collapse');
-    if (collapseButton) collapseButton.textContent = saved.collapsed ? '+' : '–';
-  });
-  syncWindowMenuCheckboxes();
-  saveLayout(snapshot);
+/* Panel visibility actions */
+function undockPanel(panelId) {
+  state.tree = removePanelFromTree(state.tree, panelId);
+  state.floating[panelId] = clampFloatRect({ left: 60 + floatingCount() * 28, top: 60 + floatingCount() * 28, width: 420, height: 320 });
+  renderAll();
+  persist();
 }
-
-function persistAll() {
-  saveLayout(snapshotLayout());
+function dockFloatingPanel(panelId) {
+  delete state.floating[panelId];
+  dockPanelDefault(panelId);
+  renderAll();
+  persist();
+}
+function closePanel(panelId) {
+  state.tree = removePanelFromTree(state.tree, panelId);
+  delete state.floating[panelId];
+  if (!state.hidden.includes(panelId)) state.hidden.push(panelId);
+  const win = document.querySelector(`.win[data-win="${panelId}"]`);
+  win.classList.remove('floating');
+  win.style.display = 'none';
+  floatLayer.appendChild(win);
+  renderAll();
+  persist();
+}
+function setPanelVisible(panelId, visible) {
+  if (visible) {
+    state.hidden = state.hidden.filter(id => id !== panelId);
+    if (!findGroupWithPanel(state.tree, panelId) && !state.floating[panelId]) dockPanelDefault(panelId);
+  } else {
+    closePanel(panelId);
+    return;
+  }
+  renderAll();
+  persist();
+}
+function splitPanel(panelId, direction) {
+  const sourceGroup = findGroupWithPanel(state.tree, panelId);
+  if (!sourceGroup || sourceGroup.panels.length < 2) return;
+  const groupId = sourceGroup.id;
+  const remaining = sourceGroup.panels.filter(panel => panel !== panelId);
+  const keptGroup = { type: 'group', id: groupId, panels: remaining, active: remaining[0] };
+  const newGroup = makeGroup(panelId);
+  const replacement = { type: 'split', direction, sizes: [0.5, 0.5], children: [keptGroup, newGroup] };
+  state.tree = replaceInTree(state.tree, groupId, replacement);
+  renderAll();
+  persist();
 }
 
 function syncWindowMenuCheckboxes() {
   document.querySelectorAll('#windows-submenu input[type="checkbox"]').forEach(checkbox => {
-    const win = document.querySelector(`.win[data-win="${checkbox.dataset.toggleWin}"]`);
-    if (win) checkbox.checked = !win.classList.contains('win-hidden');
+    const panelId = checkbox.dataset.toggleWin;
+    checkbox.checked = !state.hidden.includes(panelId);
   });
 }
 
@@ -330,91 +403,193 @@ function bringToFront(win) {
   win.classList.add('active');
 }
 
-/* Collision + bounds helpers, applied only when the matching constraint is enabled */
-function rectOf(win) {
-  return { left: parseFloat(win.style.left) || 0, top: parseFloat(win.style.top) || 0, width: win.offsetWidth, height: win.offsetHeight };
-}
-function overlaps(a, b) {
-  return a.left < b.left + b.width && a.left + a.width > b.left && a.top < b.top + b.height && a.top + a.height > b.top;
-}
-function visibleWindows(exclude) {
-  return Array.from(document.querySelectorAll('.win')).filter(win => win !== exclude && !win.classList.contains('win-hidden'));
-}
-function collidesAt(win, left, top) {
-  const rect = { left, top, width: win.offsetWidth, height: win.offsetHeight };
-  return visibleWindows(win).some(other => overlaps(rect, rectOf(other)));
-}
-function clampToBounds(left, top, width, height) {
-  const maxLeft = Math.max(0, desktop.clientWidth - width);
-  const maxTop = Math.max(0, desktop.clientHeight - height);
-  return { left: Math.min(Math.max(left, 0), maxLeft), top: Math.min(Math.max(top, 0), maxTop) };
-}
-
-const lastGoodRect = new WeakMap();
-function captureGoodRect(win) {
-  if (!win.classList.contains('win-hidden')) lastGoodRect.set(win, rectOf(win));
-}
-
-/* Properties window docks to the right edge and cannot be moved or resized */
-function dockProperties(show) {
-  const win = document.querySelector('.win[data-win="properties"]');
-  if (!win) return;
-  if (show) {
-    win.classList.remove('win-hidden');
-    win.classList.add('docked');
-    const width = Math.min(DOCK_WIDTH, Math.max(240, desktop.clientWidth - GRID * 2));
-    const left = Math.max(GRID, desktop.clientWidth - width - GRID);
-    win.style.left = `${left}px`;
-    win.style.top = `${GRID}px`;
-    win.style.width = `${width}px`;
-    win.style.height = `${Math.max(200, desktop.clientHeight - GRID * 2)}px`;
-    if (constraints.noOverlap && constraints.bound) autoFitLayout(left - GRID);
-    bringToFront(win);
-  } else {
-    win.classList.add('win-hidden');
-    win.classList.remove('collapsed');
-    win.classList.remove('docked');
-    if (constraints.noOverlap && constraints.bound) autoFitLayout();
-  }
+/* Rendering: rebuild the dock tree DOM and reposition floating windows */
+function renderAll() {
+  ALL_PANELS.forEach(panelId => {
+    const win = document.querySelector(`.win[data-win="${panelId}"]`);
+    if (win) document.body.appendChild(win);
+  });
+  dockRoot.innerHTML = '';
+  if (state.tree) dockRoot.appendChild(renderNode(state.tree));
+  ALL_PANELS.forEach(panelId => {
+    const win = document.querySelector(`.win[data-win="${panelId}"]`);
+    if (state.floating[panelId]) {
+      const rect = state.floating[panelId];
+      win.classList.add('floating');
+      win.style.left = `${rect.left}px`;
+      win.style.top = `${rect.top}px`;
+      win.style.width = `${rect.width}px`;
+      win.style.height = `${rect.height}px`;
+      win.style.display = '';
+      floatLayer.appendChild(win);
+    } else if (state.hidden.includes(panelId) && !findGroupWithPanel(state.tree, panelId)) {
+      win.classList.remove('floating');
+      win.style.display = 'none';
+      floatLayer.appendChild(win);
+    }
+  });
   syncWindowMenuCheckboxes();
-  persistAll();
 }
 
-/* Showing/hiding a standard window; mode 1 (both constraints on) re-fits everything to make room */
-function setWindowVisible(win, visible) {
-  win.classList.toggle('win-hidden', !visible);
-  if (!visible) win.classList.remove('collapsed');
-  else captureGoodRect(win);
-  if (constraints.noOverlap && constraints.bound) autoFitLayout();
-  syncWindowMenuCheckboxes();
-  persistAll();
+function renderNode(node) {
+  if (node.type === 'group') return renderGroup(node);
+  const container = document.createElement('div');
+  container.className = `dock-split dock-${node.direction}`;
+  node.children.forEach((child, index) => {
+    const pane = document.createElement('div');
+    pane.className = 'dock-pane';
+    pane.style.flexBasis = `${(node.sizes[index] * 100).toFixed(4)}%`;
+    pane.appendChild(renderNode(child));
+    container.appendChild(pane);
+    if (index < node.children.length - 1) {
+      const splitter = document.createElement('div');
+      splitter.className = `dock-splitter dock-splitter-${node.direction}`;
+      attachSplitterDrag(splitter, node, index, container);
+      container.appendChild(splitter);
+    }
+  });
+  return container;
 }
 
-const savedLayout = loadLayout();
-if (!Object.keys(savedLayout).length) autoFitLayout();
+function renderGroup(node) {
+  const wrap = document.createElement('div');
+  wrap.className = 'dock-group';
+  wrap.dataset.groupId = node.id;
 
-document.querySelectorAll('.win').forEach(win => {
-  const id = win.dataset.win;
-  const saved = savedLayout[id];
-  if (saved) {
-    if (saved.top) win.style.top = saved.top;
-    if (saved.left) win.style.left = saved.left;
-    if (saved.width) win.style.width = saved.width;
-    if (saved.height) win.style.height = saved.height;
-    if (saved.collapsed) win.classList.add('collapsed');
-    if (saved.hidden) win.classList.add('win-hidden');
-    if (saved.docked) win.classList.add('docked');
+  const tabstrip = document.createElement('div');
+  tabstrip.className = 'dock-tabstrip';
+  node.panels.forEach(panelId => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = `dock-tab${panelId === node.active ? ' active' : ''}`;
+    tab.textContent = PANEL_TITLES[panelId];
+    tab.dataset.panel = panelId;
+    tab.addEventListener('click', () => { node.active = panelId; renderAll(); persist(); });
+    attachTabDrag(tab, panelId, node);
+    tabstrip.appendChild(tab);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'dock-group-actions';
+  if (node.panels.length > 1) {
+    actions.appendChild(iconButton('&#8677;', 'Split right', () => splitPanel(node.active, 'row')));
+    actions.appendChild(iconButton('&#8681;', 'Split down', () => splitPanel(node.active, 'column')));
   }
-  captureGoodRect(win);
+  actions.appendChild(iconButton('&#8599;', 'Undock', () => undockPanel(node.active)));
+  const closeButton = iconButton('&times;', 'Close', () => closePanel(node.active));
+  closeButton.classList.add('dock-close');
+  actions.appendChild(closeButton);
+  tabstrip.appendChild(actions);
+  wrap.appendChild(tabstrip);
 
+  const body = document.createElement('div');
+  body.className = 'dock-body';
+  node.panels.forEach(panelId => {
+    const win = document.querySelector(`.win[data-win="${panelId}"]`);
+    win.classList.remove('floating');
+    win.style.cssText = '';
+    win.style.display = panelId === node.active ? '' : 'none';
+    body.appendChild(win);
+  });
+  wrap.appendChild(body);
+  return wrap;
+}
+
+function iconButton(html, label, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.innerHTML = html;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+/* Splitters resize the two adjacent panes; sizes are stored as fractions of their combined share */
+function attachSplitterDrag(splitter, node, index, container) {
+  let dragging = null;
+  splitter.addEventListener('pointerdown', event => {
+    const panes = Array.from(container.children).filter(el => el.classList.contains('dock-pane'));
+    const a = panes[index];
+    const b = panes[index + 1];
+    dragging = {
+      startX: event.clientX,
+      startY: event.clientY,
+      aSize: node.direction === 'row' ? a.getBoundingClientRect().width : a.getBoundingClientRect().height,
+      bSize: node.direction === 'row' ? b.getBoundingClientRect().width : b.getBoundingClientRect().height,
+      a, b,
+    };
+    splitter.setPointerCapture(event.pointerId);
+  });
+  splitter.addEventListener('pointermove', event => {
+    if (!dragging) return;
+    const delta = node.direction === 'row' ? event.clientX - dragging.startX : event.clientY - dragging.startY;
+    const total = dragging.aSize + dragging.bSize;
+    let aPx = Math.min(Math.max(dragging.aSize + delta, 120), total - 120);
+    const bPx = total - aPx;
+    const pairTotal = node.sizes[index] + node.sizes[index + 1];
+    node.sizes[index] = (aPx / total) * pairTotal;
+    node.sizes[index + 1] = pairTotal - node.sizes[index];
+    dragging.a.style.flexBasis = `${(node.sizes[index] * 100).toFixed(4)}%`;
+    dragging.b.style.flexBasis = `${(node.sizes[index + 1] * 100).toFixed(4)}%`;
+  });
+  const stop = () => { if (dragging) { dragging = null; persist(); } };
+  splitter.addEventListener('pointerup', stop);
+  splitter.addEventListener('pointercancel', stop);
+}
+
+/* Dragging a tab: drop on another tab strip to retab, drop elsewhere to undock as floating */
+function attachTabDrag(tabEl, panelId, sourceGroup) {
+  let dragging = false;
+  tabEl.addEventListener('pointerdown', event => {
+    dragging = true;
+    tabEl.setPointerCapture(event.pointerId);
+  });
+  tabEl.addEventListener('pointermove', event => {
+    if (!dragging) return;
+    document.querySelectorAll('.dock-tabstrip.drop-target').forEach(strip => strip.classList.remove('drop-target'));
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const strip = target && target.closest('.dock-tabstrip');
+    if (strip) strip.classList.add('drop-target');
+  });
+  tabEl.addEventListener('pointerup', event => {
+    if (!dragging) return;
+    dragging = false;
+    document.querySelectorAll('.dock-tabstrip.drop-target').forEach(strip => strip.classList.remove('drop-target'));
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const groupEl = target && target.closest('.dock-group');
+    if (groupEl && groupEl.dataset.groupId !== sourceGroup.id) {
+      const destGroup = findGroupById(state.tree, groupEl.dataset.groupId);
+      if (destGroup) {
+        state.tree = removePanelFromTree(state.tree, panelId);
+        destGroup.panels.push(panelId);
+        destGroup.active = panelId;
+        renderAll();
+        persist();
+        return;
+      }
+    }
+    if (!groupEl && !target.closest('.dock-root')) {
+      const desktopRect = desktop.getBoundingClientRect();
+      state.tree = removePanelFromTree(state.tree, panelId);
+      state.floating[panelId] = clampFloatRect({ left: event.clientX - desktopRect.left - 60, top: event.clientY - desktopRect.top - 16, width: 420, height: 320 });
+      renderAll();
+      persist();
+    }
+  });
+}
+
+/* Floating window chrome: drag by title bar, resize via native corner handle, dock/close/collapse */
+ALL_PANELS.forEach(panelId => {
+  const win = document.querySelector(`.win[data-win="${panelId}"]`);
   const titlebar = win.querySelector('.win-titlebar');
   const collapseButton = win.querySelector('.win-collapse');
+  const dockButton = win.querySelector('.win-dock');
   const closeButton = win.querySelector('.win-close');
-  if (win.classList.contains('collapsed')) collapseButton.textContent = '+';
 
   let dragState = null;
   titlebar.addEventListener('pointerdown', event => {
-    if (win.classList.contains('docked')) return;
+    if (!win.classList.contains('floating')) return;
     if (event.target.closest('button, input, select, label')) return;
     bringToFront(win);
     const desktopRect = desktop.getBoundingClientRect();
@@ -422,8 +597,8 @@ document.querySelectorAll('.win').forEach(win => {
     dragState = {
       startX: event.clientX,
       startY: event.clientY,
-      startTop: winRect.top - desktopRect.top + desktop.scrollTop,
-      startLeft: winRect.left - desktopRect.left + desktop.scrollLeft,
+      startTop: winRect.top - desktopRect.top,
+      startLeft: winRect.left - desktopRect.left,
     };
     titlebar.setPointerCapture(event.pointerId);
   });
@@ -431,114 +606,39 @@ document.querySelectorAll('.win').forEach(win => {
     if (!dragState) return;
     const dx = event.clientX - dragState.startX;
     const dy = event.clientY - dragState.startY;
-    let left = dragState.startLeft + dx;
-    let top = dragState.startTop + dy;
-    if (constraints.noOverlap) { left = snap(left); top = snap(top); }
-    if (constraints.bound) {
-      const clamped = clampToBounds(left, top, win.offsetWidth, win.offsetHeight);
-      left = clamped.left;
-      top = clamped.top;
-    } else {
-      top = Math.max(0, top);
-    }
-    if (constraints.noOverlap && collidesAt(win, left, top)) {
-      const originalLeft = parseFloat(win.style.left) || 0;
-      const originalTop = parseFloat(win.style.top) || 0;
-      if (!collidesAt(win, left, originalTop)) top = originalTop;
-      else if (!collidesAt(win, originalLeft, top)) left = originalLeft;
-      else { left = originalLeft; top = originalTop; }
-    }
-    win.style.left = `${Math.max(0, left)}px`;
-    win.style.top = `${Math.max(0, top)}px`;
+    const rect = clampFloatRect({ left: dragState.startLeft + dx, top: dragState.startTop + dy, width: win.offsetWidth, height: win.offsetHeight });
+    win.style.left = `${rect.left}px`;
+    win.style.top = `${rect.top}px`;
+    state.floating[panelId] = rect;
   });
-  const stopDrag = () => {
-    if (!dragState) return;
-    dragState = null;
-    captureGoodRect(win);
-    persistAll();
-  };
+  const stopDrag = () => { if (dragState) { dragState = null; persist(); } };
   titlebar.addEventListener('pointerup', stopDrag);
   titlebar.addEventListener('pointercancel', stopDrag);
 
-  win.addEventListener('pointerdown', () => bringToFront(win));
+  win.addEventListener('pointerdown', () => { if (win.classList.contains('floating')) bringToFront(win); });
 
   new ResizeObserver(() => {
-    if (win.classList.contains('docked')) return;
-    let rect = rectOf(win);
-    if (constraints.bound) {
-      const maxWidth = desktop.clientWidth - rect.left;
-      const maxHeight = desktop.clientHeight - rect.top;
-      if (rect.width > maxWidth) { win.style.width = `${Math.max(220, maxWidth)}px`; }
-      if (rect.height > maxHeight) { win.style.height = `${Math.max(140, maxHeight)}px`; }
-      rect = rectOf(win);
-    }
-    if (constraints.noOverlap && collidesAt(win, rect.left, rect.top)) {
-      const good = lastGoodRect.get(win);
-      if (good) {
-        win.style.width = `${good.width}px`;
-        win.style.height = `${good.height}px`;
-      }
-    } else {
-      captureGoodRect(win);
-    }
-    persistAll();
+    if (!win.classList.contains('floating')) return;
+    const clamped = clampFloatRect({ left: parseFloat(win.style.left) || 0, top: parseFloat(win.style.top) || 0, width: win.offsetWidth, height: win.offsetHeight });
+    win.style.width = `${clamped.width}px`;
+    win.style.height = `${clamped.height}px`;
+    state.floating[panelId] = clamped;
+    persist();
   }).observe(win);
 
   collapseButton.addEventListener('click', () => {
     win.classList.toggle('collapsed');
     collapseButton.textContent = win.classList.contains('collapsed') ? '+' : '–';
-    persistAll();
   });
-
-  if (closeButton) {
-    closeButton.addEventListener('click', () => {
-      if (id === 'properties') dockProperties(false);
-      else setWindowVisible(win, false);
-    });
-  }
+  dockButton.addEventListener('click', () => dockFloatingPanel(panelId));
+  closeButton.addEventListener('click', () => closePanel(panelId));
 });
 
 document.querySelectorAll('#windows-submenu input[type="checkbox"]').forEach(checkbox => {
-  const win = document.querySelector(`.win[data-win="${checkbox.dataset.toggleWin}"]`);
-  if (!win) return;
-  checkbox.checked = !win.classList.contains('win-hidden');
-  checkbox.addEventListener('change', () => {
-    if (checkbox.dataset.toggleWin === 'properties') {
-      dockProperties(checkbox.checked);
-      return;
-    }
-    setWindowVisible(win, checkbox.checked);
-  });
+  checkbox.addEventListener('change', () => setPanelVisible(checkbox.dataset.toggleWin, checkbox.checked));
 });
 
-/* Display mode: two independent constraints, plus Structured/Freeform quick-select buttons */
-function applyConstraintsUI() {
-  document.querySelector('#constraint-no-overlap').checked = constraints.noOverlap;
-  document.querySelector('#constraint-bound').checked = constraints.bound;
-}
-document.querySelector('#constraint-no-overlap').addEventListener('change', event => {
-  constraints.noOverlap = event.target.checked;
-  saveConstraints();
-});
-document.querySelector('#constraint-bound').addEventListener('change', event => {
-  constraints.bound = event.target.checked;
-  saveConstraints();
-});
-document.querySelector('#mode-structured').addEventListener('click', () => {
-  constraints = { noOverlap: true, bound: true };
-  saveConstraints();
-  applyConstraintsUI();
-  autoFitLayout();
-  persistAll();
-});
-document.querySelector('#mode-freeform').addEventListener('click', () => {
-  constraints = { noOverlap: false, bound: false };
-  saveConstraints();
-  applyConstraintsUI();
-});
-applyConstraintsUI();
-
-/* Layout presets: save, apply, and remove named window arrangements */
+/* Layout presets: save, apply, and remove named dock/float arrangements */
 function renderPresetList() {
   const presets = loadPresets();
   const container = document.querySelector('#layout-preset-list');
@@ -554,7 +654,11 @@ function renderPresetList() {
     </div>`).join('');
   container.querySelectorAll('.preset-name').forEach(button => button.addEventListener('click', () => {
     const preset = loadPresets()[button.dataset.preset];
-    if (preset) applyLayout(preset);
+    if (preset) {
+      state = JSON.parse(JSON.stringify(preset));
+      renderAll();
+      persist();
+    }
   }));
   container.querySelectorAll('.preset-delete').forEach(button => button.addEventListener('click', () => {
     const presets = loadPresets();
@@ -567,39 +671,33 @@ document.querySelector('#layout-save').addEventListener('click', () => {
   const name = window.prompt('Name this layout preset');
   if (!name || !name.trim()) return;
   const presets = loadPresets();
-  presets[name.trim()] = snapshotLayout();
+  presets[name.trim()] = JSON.parse(JSON.stringify(state));
   savePresets(presets);
   renderPresetList();
 });
 document.querySelector('#reset-layout').addEventListener('click', () => {
-  localStorage.removeItem(LAYOUT_KEY);
-  dockProperties(false);
-  autoFitLayout();
-  persistAll();
+  state = { tree: defaultTree(), floating: {}, hidden: ['properties'] };
+  renderAll();
+  persist();
 });
 renderPresetList();
+
+renderAll();
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    const propertiesWin = document.querySelector('.win[data-win="properties"]');
-    const dockedOpen = propertiesWin && propertiesWin.classList.contains('docked') && !propertiesWin.classList.contains('win-hidden');
-    if (dockedOpen) {
-      dockProperties(true);
-    } else if (constraints.noOverlap && constraints.bound) {
-      autoFitLayout();
-    } else if (constraints.bound) {
-      visibleWindows().forEach(win => {
-        if (win.classList.contains('docked')) return;
-        const rect = rectOf(win);
-        const clamped = clampToBounds(rect.left, rect.top, rect.width, rect.height);
-        win.style.left = `${clamped.left}px`;
-        win.style.top = `${clamped.top}px`;
-      });
-    }
-    persistAll();
+    let changed = false;
+    Object.keys(state.floating).forEach(panelId => {
+      const clamped = clampFloatRect(state.floating[panelId]);
+      if (clamped.left !== state.floating[panelId].left || clamped.top !== state.floating[panelId].top
+        || clamped.width !== state.floating[panelId].width || clamped.height !== state.floating[panelId].height) {
+        state.floating[panelId] = clamped;
+        changed = true;
+      }
+    });
+    if (changed) { renderAll(); persist(); }
   }, 200);
 });
-
 

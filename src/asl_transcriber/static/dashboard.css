@@ -25,8 +25,6 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .submenu[hidden] { display: none; }
 .menu-action { border: 1px solid var(--green); border-radius: 6px; padding: 7px 10px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
 .menu-action:hover { background: var(--green); color: var(--panel); }
-.mode-buttons { display: flex; gap: 8px; }
-.mode-buttons .menu-action { flex: 1; }
 .preset-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow: auto; }
 .preset-row { display: flex; align-items: center; gap: 6px; }
 .preset-name { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -40,31 +38,51 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .icon-button { border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; font-size: 15px; }
 .icon-button:hover { border-color: var(--green); color: var(--green); }
 
-/* Desktop / windows */
-.desktop { position: relative; width: 100%; min-height: calc(100vh - 60px); overflow: auto; background: var(--paper); background-image: radial-gradient(circle, rgba(116,199,255,.06) 1px, transparent 1px); background-size: 26px 26px; }
-.win { position: absolute; display: flex; flex-direction: column; min-width: 260px; min-height: 140px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); resize: both; overflow: auto; transition: box-shadow .15s ease, border-color .15s ease; }
-.win:hover { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); }
-.win.active { border-color: var(--green); box-shadow: 0 18px 40px rgba(0,0,0,.4), 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent); }
-.win.win-hidden { display: none; }
-.win.collapsed { resize: none; height: auto !important; overflow: visible; }
-.win.collapsed .win-body { display: none; }
-.win.collapsed .win-titlebar { border-radius: var(--radius); }
-.win::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 10px; height: 10px; pointer-events: none; background-image: linear-gradient(135deg, transparent 0 45%, var(--muted) 45% 55%, transparent 55% 100%), linear-gradient(135deg, transparent 0 65%, var(--muted) 65% 75%, transparent 75% 100%); opacity: .6; }
-.win.collapsed::after { display: none; }
-.win-titlebar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: linear-gradient(180deg, color-mix(in srgb, var(--mint) 92%, white 8%), var(--mint)); border-bottom: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; cursor: move; user-select: none; }
+/* Desktop: a dock tree (splits + tab groups, never overlaps) plus a floating overlay layer */
+.desktop { position: relative; width: 100%; height: calc(100vh - 60px); overflow: hidden; background: var(--paper); background-image: radial-gradient(circle, rgba(116,199,255,.06) 1px, transparent 1px); background-size: 26px 26px; }
+.dock-root { position: absolute; inset: 0; display: flex; }
+.dock-split { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.dock-row { flex-direction: row; }
+.dock-column { flex-direction: column; }
+.dock-pane { position: relative; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.dock-splitter { flex: 0 0 6px; background: var(--line); cursor: col-resize; transition: background .15s ease; }
+.dock-splitter:hover { background: var(--green); }
+.dock-splitter-column { cursor: row-resize; }
+.dock-group { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; border: 1px solid var(--line); background: var(--panel); }
+.dock-tabstrip { display: flex; align-items: center; flex-shrink: 0; background: var(--mint); border-bottom: 1px solid var(--line); overflow-x: auto; }
+.dock-tab { flex-shrink: 0; padding: 9px 14px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+.dock-tab.active { color: var(--ink); background: rgba(255,255,255,.08); }
+.dock-tab:hover { color: var(--ink); }
+.dock-tabstrip.drop-target { outline: 2px dashed var(--green); outline-offset: -2px; }
+.dock-group-actions { margin-left: auto; display: flex; gap: 4px; padding: 0 8px; flex-shrink: 0; }
+.dock-group-actions button { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; flex-shrink: 0; }
+.dock-group-actions button:hover { border-color: var(--green); color: var(--green); }
+.dock-group-actions .dock-close:hover { border-color: #ff5c5c; color: #ff5c5c; }
+.dock-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; position: relative; }
+
+/* Floating (undocked) windows: always draggable/resizable, clamped to the visible viewport */
+.float-layer { position: absolute; inset: 0; pointer-events: none; }
+.win.floating { position: absolute; pointer-events: auto; display: flex; flex-direction: column; min-width: 260px; min-height: 140px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); resize: both; overflow: auto; transition: box-shadow .15s ease, border-color .15s ease; }
+.win.floating:hover { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); }
+.win.floating.active { border-color: var(--green); box-shadow: 0 18px 40px rgba(0,0,0,.4), 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent); }
+.win.floating.collapsed { resize: none; height: auto !important; overflow: visible; }
+.win.floating.collapsed .win-body { display: none; }
+.win.floating::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 10px; height: 10px; pointer-events: none; background-image: linear-gradient(135deg, transparent 0 45%, var(--muted) 45% 55%, transparent 55% 100%), linear-gradient(135deg, transparent 0 65%, var(--muted) 65% 75%, transparent 75% 100%); opacity: .6; }
+.win.floating.collapsed::after { display: none; }
+
+.win { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.win-titlebar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: linear-gradient(180deg, color-mix(in srgb, var(--mint) 92%, white 8%), var(--mint)); border-bottom: 1px solid var(--line); user-select: none; }
+.win.floating .win-titlebar { border-radius: var(--radius) var(--radius) 0 0; cursor: move; }
+.win:not(.floating) .win-actions { display: none; }
 .win-title { flex: 1; min-width: 0; color: var(--ink); font: 700 12px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .win-actions { display: flex; gap: 6px; }
-.win-collapse { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; transition: border-color .15s ease, color .15s ease; }
-.win-collapse:hover { border-color: var(--green); color: var(--green); }
-.win-close { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; }
+.win-collapse, .win-dock, .win-close { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; transition: border-color .15s ease, color .15s ease; }
+.win-collapse:hover, .win-dock:hover { border-color: var(--green); color: var(--green); }
 .win-close:hover { border-color: #ff5c5c; color: #ff5c5c; }
-.win-body { padding: 16px; flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.win-body { padding: 16px; flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .win-body::-webkit-scrollbar { width: 8px; height: 8px; }
 .win-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 .win-transcripts .win-titlebar { flex-wrap: wrap; row-gap: 8px; }
-.win.docked { resize: none; }
-.win.docked::after { display: none; }
-.win.docked .win-titlebar { cursor: default; }
 
 /* Status indicators */
 .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; flex-shrink: 0; }
@@ -143,11 +161,16 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 
 @media (max-width: 900px) {
   .topbar { height: auto; min-height: 56px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
-  .desktop { padding: 12px; background-size: 20px 20px; }
-  .win { position: static !important; width: 100% !important; height: auto !important; min-height: 0; margin-bottom: 14px; resize: none; }
-  .win::after { display: none; }
-  .win-titlebar { cursor: default; padding: 12px; }
-  .win-collapse, .win-close, .icon-button, .menu-trigger { width: 36px; height: 36px; }
+  .desktop { height: auto; overflow: visible; padding: 12px; background-size: 20px 20px; }
+  .dock-root { position: static; flex-direction: column; }
+  .dock-split { flex-direction: column !important; height: auto; }
+  .dock-pane { flex-basis: auto !important; min-height: 220px; }
+  .dock-splitter { display: none; }
+  .float-layer { position: static; }
+  .win.floating { position: static !important; width: 100% !important; height: auto !important; min-height: 0; margin-bottom: 14px; resize: none; }
+  .win.floating::after { display: none; }
+  .win.floating .win-titlebar { cursor: default; }
+  .win-collapse, .win-dock, .win-close, .icon-button, .menu-trigger { width: 36px; height: 36px; }
   .menu-panel, .submenu { left: auto; right: 0; width: min(280px, calc(100vw - 32px)); }
   .submenu { top: calc(100% + 8px); }
   .node-grid, .controls-row { grid-template-columns: 1fr; }
