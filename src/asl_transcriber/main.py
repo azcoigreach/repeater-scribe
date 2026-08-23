@@ -98,7 +98,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await asyncio.gather(watcher, return_exceptions=True)
 
 
-app = FastAPI(title=settings.app_name, version="0.2.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 
@@ -122,7 +122,7 @@ def health() -> dict[str, str | bool]:
     return {
         "status": "ok",
         "service": settings.app_name,
-        "version": "0.2.0",
+        "version": "0.3.0",
         "ready": True,
     }
 
