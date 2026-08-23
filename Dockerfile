@@ -8,6 +8,9 @@ WORKDIR /app
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
 
+RUN apt-get update && apt-get install --yes --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY . /app
 
 RUN python -m pip install --upgrade pip && \
