@@ -134,6 +134,25 @@ async function runCommand(name, target = null) {
 }
 loadCommands();
 
+document.querySelector('#run-function').addEventListener('click', async () => {
+  const nodeId = document.querySelector('#control-node-id').value.trim();
+  const functionInput = document.querySelector('#function-code');
+  const code = functionInput.value.trim();
+  if (!code) return;
+  if (!window.confirm(`Send function ${code} to node ${nodeId}?`)) return;
+  const response = await fetch(`/ui/node/${encodeURIComponent(nodeId)}/function`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ function: code }),
+  });
+  if (response.ok) {
+    setControlResult(`Function ${code} sent to node ${nodeId}.`);
+    functionInput.value = '';
+  } else {
+    const detail = await response.json().catch(() => ({}));
+    setControlResult(detail.detail || `Function failed (${response.status}).`, true);
+  }
+});
+
 searchInput.addEventListener('input', loadJobs);
 loadJobs();
 loadActivity();
@@ -171,6 +190,40 @@ const desktop = document.querySelector('#desktop');
 const LAYOUT_KEY = 'dashboard-layout';
 let topZ = 10;
 
+const DEFAULT_SIZES = {
+  queue: { w: 320, h: 210 },
+  node: { w: 380, h: 290 },
+  stations: { w: 380, h: 290 },
+  controls: { w: 420, h: 300 },
+  transcripts: { w: 640, h: 480 },
+  activity: { w: 360, h: 300 },
+};
+const DEFAULT_ORDER = ['queue', 'node', 'stations', 'controls', 'transcripts', 'activity'];
+const GAP = 16;
+
+function tileDefaultLayout() {
+  const maxWidth = Math.max(desktop.clientWidth || window.innerWidth, 320);
+  let x = GAP;
+  let y = GAP;
+  let rowHeight = 0;
+  DEFAULT_ORDER.forEach(id => {
+    const win = document.querySelector(`.win[data-win="${id}"]`);
+    const size = DEFAULT_SIZES[id];
+    if (!win || !size) return;
+    if (x > GAP && x + size.w + GAP > maxWidth) {
+      x = GAP;
+      y += rowHeight + GAP;
+      rowHeight = 0;
+    }
+    win.style.left = `${x}px`;
+    win.style.top = `${y}px`;
+    win.style.width = `${size.w}px`;
+    win.style.height = `${size.h}px`;
+    x += size.w + GAP;
+    rowHeight = Math.max(rowHeight, size.h);
+  });
+}
+
 function loadLayout() {
   try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); } catch { return {}; }
 }
@@ -189,11 +242,18 @@ function persistWin(win) {
   };
   saveLayout(layout);
 }
-function bringToFront(win) { win.style.zIndex = String(++topZ); }
+function bringToFront(win) {
+  win.style.zIndex = String(++topZ);
+  document.querySelectorAll('.win.active').forEach(other => other.classList.remove('active'));
+  win.classList.add('active');
+}
+
+const savedLayout = loadLayout();
+if (!Object.keys(savedLayout).length) tileDefaultLayout();
 
 document.querySelectorAll('.win').forEach(win => {
   const id = win.dataset.win;
-  const saved = loadLayout()[id];
+  const saved = savedLayout[id];
   if (saved) {
     if (saved.top) win.style.top = saved.top;
     if (saved.left) win.style.left = saved.left;
@@ -260,4 +320,12 @@ document.querySelectorAll('#windows-menu-panel input[type="checkbox"]').forEach(
 document.querySelector('#reset-layout').addEventListener('click', () => {
   localStorage.removeItem(LAYOUT_KEY);
   window.location.reload();
+});
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (!Object.keys(loadLayout()).length) tileDefaultLayout();
+  }, 200);
 });

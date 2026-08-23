@@ -30,7 +30,7 @@
   </header>
 
   <main id="desktop" class="desktop">
-    <section class="win" data-win="queue" data-title="Queue summary" style="top:16px;left:16px;width:320px;height:200px;">
+    <section class="win" data-win="queue" data-title="Queue summary">
       <header class="win-titlebar">
         <span class="win-title">Queue summary</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
@@ -46,7 +46,7 @@
       </div>
     </section>
 
-    <section class="win" data-win="node" data-title="Node status" style="top:16px;left:352px;width:380px;height:280px;">
+    <section class="win" data-win="node" data-title="Node status">
       <header class="win-titlebar">
         <span class="status-dot offline" id="node-status-dot" aria-hidden="true"></span>
         <span class="win-title">Node 668390</span>
@@ -63,7 +63,7 @@
       </div>
     </section>
 
-    <section class="win" data-win="stations" data-title="Connected stations" style="top:16px;left:748px;width:380px;height:280px;">
+    <section class="win" data-win="stations" data-title="Connected stations">
       <header class="win-titlebar">
         <span class="win-title">Connected stations</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
@@ -79,7 +79,7 @@
       </div>
     </section>
 
-    <section class="win" data-win="controls" data-title="Node controls" style="top:312px;left:16px;width:712px;height:250px;">
+    <section class="win" data-win="controls" data-title="Node controls">
       <header class="win-titlebar">
         <span class="win-title">Node controls</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
@@ -95,12 +95,16 @@
             <button id="ping-node" class="control-button" type="button">Ping node</button>
             <label class="confirm-label"><input id="command-confirm" type="checkbox"> Confirm node command</label>
           </div>
+          <div class="controls-row">
+            <label class="node-selector">Function code<input id="function-code" placeholder="e.g. *3" maxlength="12"></label>
+            <button id="run-function" class="control-button" type="button">Send function</button>
+          </div>
           <output id="control-result" class="control-result" aria-live="polite"></output>
         </div>
       </div>
     </section>
 
-    <section class="win win-transcripts" data-win="transcripts" data-title="Transcripts" style="top:312px;left:748px;width:640px;height:460px;">
+    <section class="win win-transcripts" data-win="transcripts" data-title="Transcripts">
       <header class="win-titlebar">
         <span class="win-title">Transcripts</span>
         <label class="search"><span aria-hidden="true">&#8981;</span><input id="search-input" type="search" placeholder="Search transcripts" autocomplete="off"></label>
@@ -109,7 +113,7 @@
       <div class="win-body"><div id="recordings" class="recordings" aria-live="polite"><div class="empty">Loading recordings...</div></div></div>
     </section>
 
-    <section class="win" data-win="activity" data-title="Activity log" style="top:582px;left:16px;width:712px;height:280px;">
+    <section class="win" data-win="activity" data-title="Activity log">
       <header class="win-titlebar">
         <span class="win-title">Activity log</span>
         <span id="activity-count" class="count">0</span>
