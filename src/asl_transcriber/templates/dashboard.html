@@ -9,23 +9,45 @@
 <body>
   <header class="topbar">
     <div class="brand"><img class="brand-logo" src="/static/logo.png" alt="{{ app_name }}"></div>
-    <div class="menu-bar">
-      <div class="menu" id="windows-menu">
-        <button class="menu-trigger" type="button" aria-haspopup="true" aria-expanded="false">Windows &#9662;</button>
-        <div class="menu-panel" id="windows-menu-panel" hidden>
-          <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
-          <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
-          <label><input type="checkbox" data-toggle-win="stations" checked> Connected stations</label>
-          <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
-          <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
-          <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
-          <button id="reset-layout" class="menu-reset" type="button">Reset layout</button>
-        </div>
-      </div>
-    </div>
     <div class="top-actions">
       <div class="connection"><span class="pulse"></span><span id="connection-label">Live archive</span></div>
-      <button id="open-settings" class="icon-button" type="button" aria-label="Open settings">&#9881;</button>
+      <div class="menu" id="main-menu">
+        <button class="menu-trigger icon-button" id="main-menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Open menu">&#9776;</button>
+        <div class="menu-panel menu-panel-right" id="main-menu-panel" hidden>
+          <div class="menu-item has-submenu" data-submenu="windows-submenu" role="button" tabindex="0">
+            <span>Windows</span><span class="submenu-caret">&#9666;</span>
+          </div>
+          <div class="submenu" id="windows-submenu" hidden>
+            <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
+            <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
+            <label><input type="checkbox" data-toggle-win="stations" checked> Connected stations</label>
+            <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
+            <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
+            <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
+            <label><input type="checkbox" id="toggle-properties" data-toggle-win="properties"> Properties</label>
+          </div>
+          <div class="menu-item has-submenu" data-submenu="mode-submenu" role="button" tabindex="0">
+            <span>Display mode</span><span class="submenu-caret">&#9666;</span>
+          </div>
+          <div class="submenu" id="mode-submenu" hidden>
+            <div class="mode-buttons">
+              <button id="mode-structured" class="menu-action" type="button">Structured</button>
+              <button id="mode-freeform" class="menu-action" type="button">Freeform</button>
+            </div>
+            <label><input type="checkbox" id="constraint-no-overlap"> Prevent window overlap</label>
+            <label><input type="checkbox" id="constraint-bound"> Keep windows on screen</label>
+          </div>
+          <div class="menu-item has-submenu" data-submenu="layout-submenu" role="button" tabindex="0">
+            <span>Layout presets</span><span class="submenu-caret">&#9666;</span>
+          </div>
+          <div class="submenu" id="layout-submenu" hidden>
+            <button id="layout-save" class="menu-action" type="button">Save current as preset&hellip;</button>
+            <div id="layout-preset-list" class="preset-list"><p class="empty-note">No saved presets</p></div>
+            <button id="reset-layout" class="menu-action" type="button">Reset to default</button>
+          </div>
+          <div class="menu-item" id="open-settings" role="button" tabindex="0"><span>Settings</span></div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -33,7 +55,7 @@
     <section class="win" data-win="queue" data-title="Queue summary">
       <header class="win-titlebar">
         <span class="win-title">Queue summary</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <section class="stats" aria-label="Queue summary">
@@ -50,7 +72,7 @@
       <header class="win-titlebar">
         <span class="status-dot offline" id="node-status-dot" aria-hidden="true"></span>
         <span class="win-title">Node 668390</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <div class="section-head"><p class="node-location">Virtual node &middot; live AMI connection</p><span id="node-state" class="status processing">Checking AMI</span></div>
@@ -66,7 +88,7 @@
     <section class="win" data-win="stations" data-title="Connected stations">
       <header class="win-titlebar">
         <span class="win-title">Connected stations</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <details class="collapsible-table" open>
@@ -82,7 +104,7 @@
     <section class="win" data-win="controls" data-title="Node controls">
       <header class="win-titlebar">
         <span class="win-title">Node controls</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <div class="controls">
@@ -108,7 +130,7 @@
       <header class="win-titlebar">
         <span class="win-title">Transcripts</span>
         <label class="search"><span aria-hidden="true">&#8981;</span><input id="search-input" type="search" placeholder="Search transcripts" autocomplete="off"></label>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body"><div id="recordings" class="recordings" aria-live="polite"><div class="empty">Loading recordings...</div></div></div>
     </section>
@@ -117,9 +139,17 @@
       <header class="win-titlebar">
         <span class="win-title">Activity log</span>
         <span id="activity-count" class="count">0</span>
-        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button></div>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body"><div id="activity" class="activity"><div class="empty">No activity log found.</div></div></div>
+    </section>
+
+    <section class="win win-hidden" data-win="properties" data-title="Properties">
+      <header class="win-titlebar">
+        <span class="win-title">Properties</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body"><p class="empty">No item selected.</p></div>
     </section>
   </main>
 

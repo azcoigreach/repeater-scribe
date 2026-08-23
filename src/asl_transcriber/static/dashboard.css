@@ -10,15 +10,30 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .topbar { height: 60px; padding: 0 clamp(16px, 3vw, 40px); display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { display: flex; align-items: center; gap: 11px; font: 700 13px/1.1 "IBM Plex Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
 .brand-logo { height: 38px; width: auto; display: block; }
-.menu-bar { position: relative; }
 .menu { position: relative; }
 .menu-trigger { border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; background: var(--paper); color: var(--ink); cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .menu-trigger:hover { border-color: var(--green); color: var(--green); }
-.menu-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 500; display: flex; flex-direction: column; gap: 10px; min-width: 220px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
+.menu-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 500; display: flex; flex-direction: column; gap: 4px; min-width: 220px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
+.menu-panel-right { left: auto; right: 0; }
 .menu-panel[hidden] { display: none; }
-.menu-panel label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; cursor: pointer; }
-.menu-reset { margin-top: 2px; border: 1px solid var(--green); border-radius: 6px; padding: 7px 10px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
-.menu-reset:hover { background: var(--green); color: var(--panel); }
+.menu-panel label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; cursor: pointer; padding: 6px 8px; border-radius: 6px; }
+.menu-panel label:hover { background: rgba(255,255,255,.06); }
+.menu-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 6px; color: var(--ink); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; }
+.menu-item:hover { background: rgba(255,255,255,.06); color: var(--green); }
+.submenu-caret { color: var(--muted); font-size: 10px; }
+.submenu { position: absolute; top: 0; right: calc(100% + 8px); z-index: 501; display: flex; flex-direction: column; gap: 8px; min-width: 240px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
+.submenu[hidden] { display: none; }
+.menu-action { border: 1px solid var(--green); border-radius: 6px; padding: 7px 10px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
+.menu-action:hover { background: var(--green); color: var(--panel); }
+.mode-buttons { display: flex; gap: 8px; }
+.mode-buttons .menu-action { flex: 1; }
+.preset-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow: auto; }
+.preset-row { display: flex; align-items: center; gap: 6px; }
+.preset-name { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-name:hover { border-color: var(--green); color: var(--green); }
+.preset-delete { flex-shrink: 0; border: 1px solid var(--line); border-radius: 6px; width: 26px; height: 26px; background: transparent; color: var(--muted); cursor: pointer; }
+.preset-delete:hover { border-color: #ff5c5c; color: #ff5c5c; }
+.empty-note { margin: 0; padding: 4px 8px; color: var(--muted); font-size: 12px; }
 .top-actions { margin-left: auto; display: flex; align-items: center; gap: 14px; }
 .connection { color: var(--muted); display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(116,199,255,.16); }
@@ -41,10 +56,15 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .win-actions { display: flex; gap: 6px; }
 .win-collapse { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; transition: border-color .15s ease, color .15s ease; }
 .win-collapse:hover { border-color: var(--green); color: var(--green); }
+.win-close { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; }
+.win-close:hover { border-color: #ff5c5c; color: #ff5c5c; }
 .win-body { padding: 16px; flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .win-body::-webkit-scrollbar { width: 8px; height: 8px; }
 .win-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 .win-transcripts .win-titlebar { flex-wrap: wrap; row-gap: 8px; }
+.win.docked { resize: none; }
+.win.docked::after { display: none; }
+.win.docked .win-titlebar { cursor: default; }
 
 /* Status indicators */
 .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; flex-shrink: 0; }
@@ -127,8 +147,9 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
   .win { position: static !important; width: 100% !important; height: auto !important; min-height: 0; margin-bottom: 14px; resize: none; }
   .win::after { display: none; }
   .win-titlebar { cursor: default; padding: 12px; }
-  .win-collapse, .icon-button, .menu-trigger { width: 36px; height: 36px; }
-  .menu-panel { left: auto; right: 0; width: min(280px, calc(100vw - 32px)); }
+  .win-collapse, .win-close, .icon-button, .menu-trigger { width: 36px; height: 36px; }
+  .menu-panel, .submenu { left: auto; right: 0; width: min(280px, calc(100vw - 32px)); }
+  .submenu { top: calc(100% + 8px); }
   .node-grid, .controls-row { grid-template-columns: 1fr; }
   .node-selector, .command-select, .node-selector input { min-width: 0; width: 100%; }
   .controls-row { align-items: stretch; }

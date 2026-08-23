@@ -164,33 +164,59 @@ stream.addEventListener('open', () => { document.querySelector('#connection-labe
 stream.addEventListener('job', () => { loadJobs(); });
 stream.addEventListener('error', () => { document.querySelector('#connection-label').textContent = 'Reconnecting to archive'; });
 
-/* Windows dropdown menu */
-const windowsMenuTrigger = document.querySelector('#windows-menu .menu-trigger');
-const windowsMenuPanel = document.querySelector('#windows-menu-panel');
-windowsMenuTrigger.addEventListener('click', () => {
-  const isHidden = windowsMenuPanel.hasAttribute('hidden');
-  windowsMenuPanel.toggleAttribute('hidden', !isHidden);
-  windowsMenuTrigger.setAttribute('aria-expanded', String(isHidden));
+/* Menu tree: top-right button opens a panel with Windows / Layout submenus and a Settings item */
+const mainMenuTrigger = document.querySelector('#main-menu-trigger');
+const mainMenuPanel = document.querySelector('#main-menu-panel');
+mainMenuTrigger.addEventListener('click', () => {
+  const isHidden = mainMenuPanel.hasAttribute('hidden');
+  mainMenuPanel.toggleAttribute('hidden', !isHidden);
+  mainMenuTrigger.setAttribute('aria-expanded', String(isHidden));
+  if (!isHidden) closeAllSubmenus();
+});
+function closeAllSubmenus() {
+  document.querySelectorAll('.submenu').forEach(submenu => submenu.setAttribute('hidden', ''));
+}
+document.querySelectorAll('.menu-item.has-submenu').forEach(item => {
+  const submenu = document.querySelector(`#${item.dataset.submenu}`);
+  const open = () => {
+    const isHidden = submenu.hasAttribute('hidden');
+    closeAllSubmenus();
+    submenu.toggleAttribute('hidden', !isHidden);
+  };
+  item.addEventListener('click', open);
+  item.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
 });
 document.addEventListener('click', event => {
-  if (!event.target.closest('#windows-menu') && !windowsMenuPanel.hasAttribute('hidden')) {
-    windowsMenuPanel.setAttribute('hidden', '');
-    windowsMenuTrigger.setAttribute('aria-expanded', 'false');
+  if (!event.target.closest('#main-menu') && !mainMenuPanel.hasAttribute('hidden')) {
+    mainMenuPanel.setAttribute('hidden', '');
+    mainMenuTrigger.setAttribute('aria-expanded', 'false');
+    closeAllSubmenus();
   }
 });
 
 /* Settings modal */
 const settingsModal = document.querySelector('#settings-modal');
-document.querySelector('#open-settings').addEventListener('click', () => settingsModal.removeAttribute('hidden'));
+document.querySelector('#open-settings').addEventListener('click', () => {
+  settingsModal.removeAttribute('hidden');
+  mainMenuPanel.setAttribute('hidden', '');
+  closeAllSubmenus();
+});
 document.querySelector('#close-settings').addEventListener('click', () => settingsModal.setAttribute('hidden', ''));
 settingsModal.addEventListener('click', event => { if (event.target === settingsModal) settingsModal.setAttribute('hidden', ''); });
 
-/* Draggable, resizable, collapsible windows with persisted layout */
+/* Draggable, resizable, collapsible, closable windows with two independent constraint toggles:
+   "no overlap" (mode 1's collision avoidance) and "bound to screen" (mode 1's viewport limit).
+   Both on = structured mode; both off = freeform mode; either can be toggled independently. */
 const desktop = document.querySelector('#desktop');
 const LAYOUT_KEY = 'dashboard-layout';
+const PRESETS_KEY = 'dashboard-layout-presets';
+const CONSTRAINTS_KEY = 'dashboard-constraints';
+const DOCK_WIDTH = 340;
+const GRID = 26;
 let topZ = 10;
 
-const DEFAULT_SIZES = {
+const DEFAULT_ORDER = ['queue', 'node', 'stations', 'controls', 'transcripts', 'activity'];
+const PANEL_SIZES = {
   queue: { w: 320, h: 210 },
   node: { w: 380, h: 290 },
   stations: { w: 380, h: 290 },
@@ -198,29 +224,45 @@ const DEFAULT_SIZES = {
   transcripts: { w: 640, h: 480 },
   activity: { w: 360, h: 300 },
 };
-const DEFAULT_ORDER = ['queue', 'node', 'stations', 'controls', 'transcripts', 'activity'];
-const GAP = 16;
 
-function tileDefaultLayout() {
-  const maxWidth = Math.max(desktop.clientWidth || window.innerWidth, 320);
-  let x = GAP;
-  let y = GAP;
+function snap(value) {
+  return Math.round(value / GRID) * GRID;
+}
+
+function loadConstraints() {
+  try { return { noOverlap: true, bound: true, ...JSON.parse(localStorage.getItem(CONSTRAINTS_KEY) || '{}') }; } catch { return { noOverlap: true, bound: true }; }
+}
+function saveConstraints() {
+  localStorage.setItem(CONSTRAINTS_KEY, JSON.stringify(constraints));
+}
+let constraints = loadConstraints();
+
+/* Best-fit tiling: lays out currently visible standard windows, in order, wrapped to fit the
+   available width, snapped to the grid. Used for the initial layout, resets, and whenever mode 1
+   (no overlap + bound to screen) needs to make room for an opened/closed window or a resize. */
+function autoFitLayout(maxWidthOverride) {
+  const width = Math.max(maxWidthOverride || desktop.clientWidth || window.innerWidth, 320);
+  const visible = DEFAULT_ORDER
+    .map(id => document.querySelector(`.win[data-win="${id}"]`))
+    .filter(win => win && !win.classList.contains('win-hidden'));
+  let x = GRID;
+  let y = GRID;
   let rowHeight = 0;
-  DEFAULT_ORDER.forEach(id => {
-    const win = document.querySelector(`.win[data-win="${id}"]`);
-    const size = DEFAULT_SIZES[id];
-    if (!win || !size) return;
-    if (x > GAP && x + size.w + GAP > maxWidth) {
-      x = GAP;
-      y += rowHeight + GAP;
+  visible.forEach(win => {
+    const size = PANEL_SIZES[win.dataset.win];
+    const w = Math.min(size.w, Math.max(width - GRID * 2, 260));
+    const h = size.h;
+    if (x > GRID && x + w + GRID > width) {
+      x = GRID;
+      y += rowHeight + GRID;
       rowHeight = 0;
     }
-    win.style.left = `${x}px`;
-    win.style.top = `${y}px`;
-    win.style.width = `${size.w}px`;
-    win.style.height = `${size.h}px`;
-    x += size.w + GAP;
-    rowHeight = Math.max(rowHeight, size.h);
+    win.style.left = `${snap(x)}px`;
+    win.style.top = `${snap(y)}px`;
+    win.style.width = `${snap(w)}px`;
+    win.style.height = `${snap(h)}px`;
+    x += w + GRID;
+    rowHeight = Math.max(rowHeight, h);
   });
 }
 
@@ -230,26 +272,126 @@ function loadLayout() {
 function saveLayout(layout) {
   localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
 }
-function persistWin(win) {
-  const layout = loadLayout();
-  layout[win.dataset.win] = {
-    top: win.style.top || undefined,
-    left: win.style.left || undefined,
-    width: win.style.width || undefined,
-    height: win.style.height || undefined,
-    collapsed: win.classList.contains('collapsed'),
-    hidden: win.classList.contains('win-hidden'),
-  };
-  saveLayout(layout);
+function loadPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); } catch { return {}; }
 }
+function savePresets(presets) {
+  localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+}
+
+function snapshotLayout() {
+  const snapshot = {};
+  document.querySelectorAll('.win').forEach(win => {
+    snapshot[win.dataset.win] = {
+      top: win.style.top || undefined,
+      left: win.style.left || undefined,
+      width: win.style.width || undefined,
+      height: win.style.height || undefined,
+      collapsed: win.classList.contains('collapsed'),
+      hidden: win.classList.contains('win-hidden'),
+      docked: win.classList.contains('docked'),
+    };
+  });
+  return snapshot;
+}
+
+function applyLayout(snapshot) {
+  document.querySelectorAll('.win').forEach(win => {
+    const saved = snapshot[win.dataset.win];
+    if (!saved) return;
+    if (saved.top) win.style.top = saved.top;
+    if (saved.left) win.style.left = saved.left;
+    if (saved.width) win.style.width = saved.width;
+    if (saved.height) win.style.height = saved.height;
+    win.classList.toggle('collapsed', !!saved.collapsed);
+    win.classList.toggle('win-hidden', !!saved.hidden);
+    win.classList.toggle('docked', !!saved.docked);
+    const collapseButton = win.querySelector('.win-collapse');
+    if (collapseButton) collapseButton.textContent = saved.collapsed ? '+' : '–';
+  });
+  syncWindowMenuCheckboxes();
+  saveLayout(snapshot);
+}
+
+function persistAll() {
+  saveLayout(snapshotLayout());
+}
+
+function syncWindowMenuCheckboxes() {
+  document.querySelectorAll('#windows-submenu input[type="checkbox"]').forEach(checkbox => {
+    const win = document.querySelector(`.win[data-win="${checkbox.dataset.toggleWin}"]`);
+    if (win) checkbox.checked = !win.classList.contains('win-hidden');
+  });
+}
+
 function bringToFront(win) {
   win.style.zIndex = String(++topZ);
   document.querySelectorAll('.win.active').forEach(other => other.classList.remove('active'));
   win.classList.add('active');
 }
 
+/* Collision + bounds helpers, applied only when the matching constraint is enabled */
+function rectOf(win) {
+  return { left: parseFloat(win.style.left) || 0, top: parseFloat(win.style.top) || 0, width: win.offsetWidth, height: win.offsetHeight };
+}
+function overlaps(a, b) {
+  return a.left < b.left + b.width && a.left + a.width > b.left && a.top < b.top + b.height && a.top + a.height > b.top;
+}
+function visibleWindows(exclude) {
+  return Array.from(document.querySelectorAll('.win')).filter(win => win !== exclude && !win.classList.contains('win-hidden'));
+}
+function collidesAt(win, left, top) {
+  const rect = { left, top, width: win.offsetWidth, height: win.offsetHeight };
+  return visibleWindows(win).some(other => overlaps(rect, rectOf(other)));
+}
+function clampToBounds(left, top, width, height) {
+  const maxLeft = Math.max(0, desktop.clientWidth - width);
+  const maxTop = Math.max(0, desktop.clientHeight - height);
+  return { left: Math.min(Math.max(left, 0), maxLeft), top: Math.min(Math.max(top, 0), maxTop) };
+}
+
+const lastGoodRect = new WeakMap();
+function captureGoodRect(win) {
+  if (!win.classList.contains('win-hidden')) lastGoodRect.set(win, rectOf(win));
+}
+
+/* Properties window docks to the right edge and cannot be moved or resized */
+function dockProperties(show) {
+  const win = document.querySelector('.win[data-win="properties"]');
+  if (!win) return;
+  if (show) {
+    win.classList.remove('win-hidden');
+    win.classList.add('docked');
+    const width = Math.min(DOCK_WIDTH, Math.max(240, desktop.clientWidth - GRID * 2));
+    const left = Math.max(GRID, desktop.clientWidth - width - GRID);
+    win.style.left = `${left}px`;
+    win.style.top = `${GRID}px`;
+    win.style.width = `${width}px`;
+    win.style.height = `${Math.max(200, desktop.clientHeight - GRID * 2)}px`;
+    if (constraints.noOverlap && constraints.bound) autoFitLayout(left - GRID);
+    bringToFront(win);
+  } else {
+    win.classList.add('win-hidden');
+    win.classList.remove('collapsed');
+    win.classList.remove('docked');
+    if (constraints.noOverlap && constraints.bound) autoFitLayout();
+  }
+  syncWindowMenuCheckboxes();
+  persistAll();
+}
+
+/* Showing/hiding a standard window; mode 1 (both constraints on) re-fits everything to make room */
+function setWindowVisible(win, visible) {
+  win.classList.toggle('win-hidden', !visible);
+  if (!visible) win.classList.remove('collapsed');
+  else captureGoodRect(win);
+  if (constraints.noOverlap && constraints.bound) autoFitLayout();
+  syncWindowMenuCheckboxes();
+  persistAll();
+}
+
 const savedLayout = loadLayout();
-if (!Object.keys(savedLayout).length) tileDefaultLayout();
+if (!Object.keys(savedLayout).length) autoFitLayout();
 
 document.querySelectorAll('.win').forEach(win => {
   const id = win.dataset.win;
@@ -261,14 +403,18 @@ document.querySelectorAll('.win').forEach(win => {
     if (saved.height) win.style.height = saved.height;
     if (saved.collapsed) win.classList.add('collapsed');
     if (saved.hidden) win.classList.add('win-hidden');
+    if (saved.docked) win.classList.add('docked');
   }
+  captureGoodRect(win);
 
   const titlebar = win.querySelector('.win-titlebar');
   const collapseButton = win.querySelector('.win-collapse');
+  const closeButton = win.querySelector('.win-close');
   if (win.classList.contains('collapsed')) collapseButton.textContent = '+';
 
   let dragState = null;
   titlebar.addEventListener('pointerdown', event => {
+    if (win.classList.contains('docked')) return;
     if (event.target.closest('button, input, select, label')) return;
     bringToFront(win);
     const desktopRect = desktop.getBoundingClientRect();
@@ -285,47 +431,175 @@ document.querySelectorAll('.win').forEach(win => {
     if (!dragState) return;
     const dx = event.clientX - dragState.startX;
     const dy = event.clientY - dragState.startY;
-    win.style.left = `${Math.max(0, dragState.startLeft + dx)}px`;
-    win.style.top = `${Math.max(0, dragState.startTop + dy)}px`;
+    let left = dragState.startLeft + dx;
+    let top = dragState.startTop + dy;
+    if (constraints.noOverlap) { left = snap(left); top = snap(top); }
+    if (constraints.bound) {
+      const clamped = clampToBounds(left, top, win.offsetWidth, win.offsetHeight);
+      left = clamped.left;
+      top = clamped.top;
+    } else {
+      top = Math.max(0, top);
+    }
+    if (constraints.noOverlap && collidesAt(win, left, top)) {
+      const originalLeft = parseFloat(win.style.left) || 0;
+      const originalTop = parseFloat(win.style.top) || 0;
+      if (!collidesAt(win, left, originalTop)) top = originalTop;
+      else if (!collidesAt(win, originalLeft, top)) left = originalLeft;
+      else { left = originalLeft; top = originalTop; }
+    }
+    win.style.left = `${Math.max(0, left)}px`;
+    win.style.top = `${Math.max(0, top)}px`;
   });
   const stopDrag = () => {
     if (!dragState) return;
     dragState = null;
-    persistWin(win);
+    captureGoodRect(win);
+    persistAll();
   };
   titlebar.addEventListener('pointerup', stopDrag);
   titlebar.addEventListener('pointercancel', stopDrag);
 
   win.addEventListener('pointerdown', () => bringToFront(win));
 
-  new ResizeObserver(() => persistWin(win)).observe(win);
+  new ResizeObserver(() => {
+    if (win.classList.contains('docked')) return;
+    let rect = rectOf(win);
+    if (constraints.bound) {
+      const maxWidth = desktop.clientWidth - rect.left;
+      const maxHeight = desktop.clientHeight - rect.top;
+      if (rect.width > maxWidth) { win.style.width = `${Math.max(220, maxWidth)}px`; }
+      if (rect.height > maxHeight) { win.style.height = `${Math.max(140, maxHeight)}px`; }
+      rect = rectOf(win);
+    }
+    if (constraints.noOverlap && collidesAt(win, rect.left, rect.top)) {
+      const good = lastGoodRect.get(win);
+      if (good) {
+        win.style.width = `${good.width}px`;
+        win.style.height = `${good.height}px`;
+      }
+    } else {
+      captureGoodRect(win);
+    }
+    persistAll();
+  }).observe(win);
 
   collapseButton.addEventListener('click', () => {
     win.classList.toggle('collapsed');
     collapseButton.textContent = win.classList.contains('collapsed') ? '+' : '–';
-    persistWin(win);
+    persistAll();
   });
+
+  if (closeButton) {
+    closeButton.addEventListener('click', () => {
+      if (id === 'properties') dockProperties(false);
+      else setWindowVisible(win, false);
+    });
+  }
 });
 
-document.querySelectorAll('#windows-menu-panel input[type="checkbox"]').forEach(checkbox => {
+document.querySelectorAll('#windows-submenu input[type="checkbox"]').forEach(checkbox => {
   const win = document.querySelector(`.win[data-win="${checkbox.dataset.toggleWin}"]`);
   if (!win) return;
   checkbox.checked = !win.classList.contains('win-hidden');
   checkbox.addEventListener('change', () => {
-    win.classList.toggle('win-hidden', !checkbox.checked);
-    persistWin(win);
+    if (checkbox.dataset.toggleWin === 'properties') {
+      dockProperties(checkbox.checked);
+      return;
+    }
+    setWindowVisible(win, checkbox.checked);
   });
 });
 
+/* Display mode: two independent constraints, plus Structured/Freeform quick-select buttons */
+function applyConstraintsUI() {
+  document.querySelector('#constraint-no-overlap').checked = constraints.noOverlap;
+  document.querySelector('#constraint-bound').checked = constraints.bound;
+}
+document.querySelector('#constraint-no-overlap').addEventListener('change', event => {
+  constraints.noOverlap = event.target.checked;
+  saveConstraints();
+});
+document.querySelector('#constraint-bound').addEventListener('change', event => {
+  constraints.bound = event.target.checked;
+  saveConstraints();
+});
+document.querySelector('#mode-structured').addEventListener('click', () => {
+  constraints = { noOverlap: true, bound: true };
+  saveConstraints();
+  applyConstraintsUI();
+  autoFitLayout();
+  persistAll();
+});
+document.querySelector('#mode-freeform').addEventListener('click', () => {
+  constraints = { noOverlap: false, bound: false };
+  saveConstraints();
+  applyConstraintsUI();
+});
+applyConstraintsUI();
+
+/* Layout presets: save, apply, and remove named window arrangements */
+function renderPresetList() {
+  const presets = loadPresets();
+  const container = document.querySelector('#layout-preset-list');
+  const names = Object.keys(presets);
+  if (!names.length) {
+    container.innerHTML = '<p class="empty-note">No saved presets</p>';
+    return;
+  }
+  container.innerHTML = names.map(name => `
+    <div class="preset-row">
+      <button class="preset-name" type="button" data-preset="${esc(name)}">${esc(name)}</button>
+      <button class="preset-delete" type="button" data-remove-preset="${esc(name)}" aria-label="Delete preset ${esc(name)}">&times;</button>
+    </div>`).join('');
+  container.querySelectorAll('.preset-name').forEach(button => button.addEventListener('click', () => {
+    const preset = loadPresets()[button.dataset.preset];
+    if (preset) applyLayout(preset);
+  }));
+  container.querySelectorAll('.preset-delete').forEach(button => button.addEventListener('click', () => {
+    const presets = loadPresets();
+    delete presets[button.dataset.removePreset];
+    savePresets(presets);
+    renderPresetList();
+  }));
+}
+document.querySelector('#layout-save').addEventListener('click', () => {
+  const name = window.prompt('Name this layout preset');
+  if (!name || !name.trim()) return;
+  const presets = loadPresets();
+  presets[name.trim()] = snapshotLayout();
+  savePresets(presets);
+  renderPresetList();
+});
 document.querySelector('#reset-layout').addEventListener('click', () => {
   localStorage.removeItem(LAYOUT_KEY);
-  window.location.reload();
+  dockProperties(false);
+  autoFitLayout();
+  persistAll();
 });
+renderPresetList();
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if (!Object.keys(loadLayout()).length) tileDefaultLayout();
+    const propertiesWin = document.querySelector('.win[data-win="properties"]');
+    const dockedOpen = propertiesWin && propertiesWin.classList.contains('docked') && !propertiesWin.classList.contains('win-hidden');
+    if (dockedOpen) {
+      dockProperties(true);
+    } else if (constraints.noOverlap && constraints.bound) {
+      autoFitLayout();
+    } else if (constraints.bound) {
+      visibleWindows().forEach(win => {
+        if (win.classList.contains('docked')) return;
+        const rect = rectOf(win);
+        const clamped = clampToBounds(rect.left, rect.top, rect.width, rect.height);
+        win.style.left = `${clamped.left}px`;
+        win.style.top = `${clamped.top}px`;
+      });
+    }
+    persistAll();
   }, 200);
 });
+
+
