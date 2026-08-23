@@ -48,12 +48,16 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .dock-splitter { flex: 0 0 6px; background: var(--line); cursor: col-resize; transition: background .15s ease; }
 .dock-splitter:hover { background: var(--green); }
 .dock-splitter-column { cursor: row-resize; }
-.dock-group { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; border: 1px solid var(--line); background: var(--panel); }
+.dock-group { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; border: 1px solid var(--line); background: var(--panel); }
 .dock-tabstrip { display: flex; align-items: center; flex-shrink: 0; background: var(--mint); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .dock-tab { flex-shrink: 0; padding: 9px 14px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
 .dock-tab.active { color: var(--ink); background: rgba(255,255,255,.08); }
 .dock-tab:hover { color: var(--ink); }
-.dock-tabstrip.drop-target { outline: 2px dashed var(--green); outline-offset: -2px; }
+.dock-group.drop-center { outline: 3px solid var(--green); outline-offset: -3px; }
+.dock-group.drop-left { box-shadow: inset 6px 0 var(--green); }
+.dock-group.drop-right { box-shadow: inset -6px 0 var(--green); }
+.dock-group.drop-top { box-shadow: inset 0 6px var(--green); }
+.dock-group.drop-bottom { box-shadow: inset 0 -6px var(--green); }
 .dock-group-actions { margin-left: auto; display: flex; gap: 4px; padding: 0 8px; flex-shrink: 0; }
 .dock-group-actions button { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; flex-shrink: 0; }
 .dock-group-actions button:hover { border-color: var(--green); color: var(--green); }
@@ -73,7 +77,12 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .win { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .win-titlebar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: linear-gradient(180deg, color-mix(in srgb, var(--mint) 92%, white 8%), var(--mint)); border-bottom: 1px solid var(--line); user-select: none; }
 .win.floating .win-titlebar { border-radius: var(--radius) var(--radius) 0 0; cursor: move; }
+.dock-group:not(.singleton) .win-titlebar { display: none; }
 .win:not(.floating) .win-actions { display: none; }
+.dock-group.singleton .win-titlebar { cursor: grab; }
+.dock-group.singleton .win-titlebar:active { cursor: grabbing; }
+.dock-group.singleton .win-actions { display: flex; }
+.dock-group.singleton .win-collapse { display: none; }
 .win-title { flex: 1; min-width: 0; color: var(--ink); font: 700 12px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .win-actions { display: flex; gap: 6px; }
 .win-collapse, .win-dock, .win-close { border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); width: 22px; height: 22px; line-height: 1; cursor: pointer; transition: border-color .15s ease, color .15s ease; }

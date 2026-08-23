@@ -390,6 +390,73 @@ function splitPanel(panelId, direction) {
   persist();
 }
 
+const DROP_CLASSES = ['drop-center', 'drop-left', 'drop-right', 'drop-top', 'drop-bottom'];
+let activeDrop = null;
+
+function clearDockTargets() {
+  document.querySelectorAll('.dock-group').forEach(group => group.classList.remove(...DROP_CLASSES));
+  activeDrop = null;
+}
+
+function updateDockTarget(clientX, clientY, panelId) {
+  clearDockTargets();
+  const groupEl = document.elementsFromPoint(clientX, clientY)
+    .map(element => element.closest('.dock-group'))
+    .find(Boolean);
+  if (!groupEl) return null;
+
+  const targetGroup = findGroupById(state.tree, groupEl.dataset.groupId);
+  const sourceGroup = findGroupWithPanel(state.tree, panelId);
+  if (!targetGroup || (sourceGroup?.id === targetGroup.id && sourceGroup.panels.length === 1)) return null;
+
+  const rect = groupEl.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const edgeX = Math.min(72, rect.width * 0.24);
+  const edgeY = Math.min(72, rect.height * 0.24);
+  let zone = null;
+  if (y <= 42) zone = 'center';
+  else if (x <= edgeX) zone = 'left';
+  else if (x >= rect.width - edgeX) zone = 'right';
+  else if (y <= edgeY) zone = 'top';
+  else if (y >= rect.height - edgeY) zone = 'bottom';
+  if (!zone) return null;
+
+  groupEl.classList.add(`drop-${zone}`);
+  activeDrop = { groupId: targetGroup.id, zone };
+  return activeDrop;
+}
+
+function dockPanelAt(panelId, targetGroupId, zone) {
+  const sourceGroup = findGroupWithPanel(state.tree, panelId);
+  if (sourceGroup?.id === targetGroupId && zone === 'center') return;
+
+  state.tree = removePanelFromTree(state.tree, panelId);
+  delete state.floating[panelId];
+  state.hidden = state.hidden.filter(id => id !== panelId);
+  const targetGroup = findGroupById(state.tree, targetGroupId);
+  if (!targetGroup) {
+    dockPanelDefault(panelId);
+  } else if (zone === 'center') {
+    targetGroup.panels.push(panelId);
+    targetGroup.active = panelId;
+  } else {
+    const incoming = makeGroup(panelId);
+    const direction = zone === 'left' || zone === 'right' ? 'row' : 'column';
+    const incomingFirst = zone === 'left' || zone === 'top';
+    const replacement = {
+      type: 'split',
+      direction,
+      sizes: [0.5, 0.5],
+      children: incomingFirst ? [incoming, targetGroup] : [targetGroup, incoming],
+    };
+    state.tree = replaceInTree(state.tree, targetGroupId, replacement);
+  }
+  clearDockTargets();
+  renderAll();
+  persist();
+}
+
 function syncWindowMenuCheckboxes() {
   document.querySelectorAll('#windows-submenu input[type="checkbox"]').forEach(checkbox => {
     const panelId = checkbox.dataset.toggleWin;
@@ -416,9 +483,15 @@ function renderAll() {
     if (state.floating[panelId]) {
       const rect = state.floating[panelId];
       const collapseButton = win.querySelector('.win-collapse');
+      const dockButton = win.querySelector('.win-dock');
       win.classList.add('floating');
       win.classList.toggle('collapsed', !!rect.collapsed);
       if (collapseButton) collapseButton.textContent = rect.collapsed ? '+' : '–';
+      if (dockButton) {
+        dockButton.innerHTML = '&#8600;';
+        dockButton.setAttribute('aria-label', 'Dock window');
+        dockButton.title = 'Dock window';
+      }
       win.style.left = `${rect.left}px`;
       win.style.top = `${rect.top}px`;
       win.style.width = `${rect.width}px`;
@@ -456,34 +529,34 @@ function renderNode(node) {
 
 function renderGroup(node) {
   const wrap = document.createElement('div');
-  wrap.className = 'dock-group';
+  wrap.className = `dock-group${node.panels.length === 1 ? ' singleton' : ''}`;
   wrap.dataset.groupId = node.id;
 
-  const tabstrip = document.createElement('div');
-  tabstrip.className = 'dock-tabstrip';
-  node.panels.forEach(panelId => {
-    const tab = document.createElement('button');
-    tab.type = 'button';
-    tab.className = `dock-tab${panelId === node.active ? ' active' : ''}`;
-    tab.textContent = PANEL_TITLES[panelId];
-    tab.dataset.panel = panelId;
-    tab.addEventListener('click', () => { node.active = panelId; renderAll(); persist(); });
-    attachTabDrag(tab, panelId, node);
-    tabstrip.appendChild(tab);
-  });
-
-  const actions = document.createElement('div');
-  actions.className = 'dock-group-actions';
   if (node.panels.length > 1) {
+    const tabstrip = document.createElement('div');
+    tabstrip.className = 'dock-tabstrip';
+    node.panels.forEach(panelId => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = `dock-tab${panelId === node.active ? ' active' : ''}`;
+      tab.textContent = PANEL_TITLES[panelId];
+      tab.dataset.panel = panelId;
+      tab.addEventListener('click', () => { node.active = panelId; renderAll(); persist(); });
+      attachTabDrag(tab, panelId, node);
+      tabstrip.appendChild(tab);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'dock-group-actions';
     actions.appendChild(iconButton('&#8677;', 'Split right', () => splitPanel(node.active, 'row')));
     actions.appendChild(iconButton('&#8681;', 'Split down', () => splitPanel(node.active, 'column')));
+    actions.appendChild(iconButton('&#8599;', 'Undock', () => undockPanel(node.active)));
+    const closeButton = iconButton('&times;', 'Close', () => closePanel(node.active));
+    closeButton.classList.add('dock-close');
+    actions.appendChild(closeButton);
+    tabstrip.appendChild(actions);
+    wrap.appendChild(tabstrip);
   }
-  actions.appendChild(iconButton('&#8599;', 'Undock', () => undockPanel(node.active)));
-  const closeButton = iconButton('&times;', 'Close', () => closePanel(node.active));
-  closeButton.classList.add('dock-close');
-  actions.appendChild(closeButton);
-  tabstrip.appendChild(actions);
-  wrap.appendChild(tabstrip);
 
   const body = document.createElement('div');
   body.className = 'dock-body';
@@ -492,6 +565,12 @@ function renderGroup(node) {
     win.classList.remove('floating', 'collapsed');
     win.style.cssText = '';
     win.style.display = panelId === node.active ? '' : 'none';
+    const dockButton = win.querySelector('.win-dock');
+    if (dockButton) {
+      dockButton.innerHTML = '&#8599;';
+      dockButton.setAttribute('aria-label', 'Undock window');
+      dockButton.title = 'Undock window';
+    }
     body.appendChild(win);
   });
   wrap.appendChild(body);
@@ -541,7 +620,7 @@ function attachSplitterDrag(splitter, node, index, container) {
   splitter.addEventListener('pointercancel', stop);
 }
 
-/* Dragging a tab: drop on another tab strip to retab, drop elsewhere to undock as floating */
+/* Dragging a tab: title/header drops create tabs; highlighted edge drops split only that pane. */
 function attachTabDrag(tabEl, panelId, sourceGroup) {
   let dragging = false;
   tabEl.addEventListener('pointerdown', event => {
@@ -550,32 +629,27 @@ function attachTabDrag(tabEl, panelId, sourceGroup) {
   });
   tabEl.addEventListener('pointermove', event => {
     if (!dragging) return;
-    document.querySelectorAll('.dock-tabstrip.drop-target').forEach(strip => strip.classList.remove('drop-target'));
-    const target = document.elementFromPoint(event.clientX, event.clientY);
-    const strip = target && target.closest('.dock-tabstrip');
-    if (strip) strip.classList.add('drop-target');
+    updateDockTarget(event.clientX, event.clientY, panelId);
   });
   tabEl.addEventListener('pointerup', event => {
     if (!dragging) return;
     dragging = false;
-    document.querySelectorAll('.dock-tabstrip.drop-target').forEach(strip => strip.classList.remove('drop-target'));
-    const target = document.elementFromPoint(event.clientX, event.clientY);
-    const groupEl = target && target.closest('.dock-group');
-    if (groupEl && groupEl.dataset.groupId !== sourceGroup.id) {
-      const destGroup = findGroupById(state.tree, groupEl.dataset.groupId);
-      if (destGroup) {
-        state.tree = removePanelFromTree(state.tree, panelId);
-        destGroup.panels.push(panelId);
-        destGroup.active = panelId;
-        renderAll();
-        persist();
-        return;
-      }
+    const drop = updateDockTarget(event.clientX, event.clientY, panelId);
+    if (drop) {
+      dockPanelAt(panelId, drop.groupId, drop.zone);
+      return;
     }
-    if (!groupEl && !target.closest('.dock-root')) {
+    clearDockTargets();
+    const dockRect = dockRoot.getBoundingClientRect();
+    const outsideDock = event.clientX < dockRect.left || event.clientX > dockRect.right
+      || event.clientY < dockRect.top || event.clientY > dockRect.bottom;
+    if (outsideDock) {
       const desktopRect = desktop.getBoundingClientRect();
       state.tree = removePanelFromTree(state.tree, panelId);
-      state.floating[panelId] = clampFloatRect({ left: event.clientX - desktopRect.left - 60, top: event.clientY - desktopRect.top - 16, width: 420, height: 320 });
+      state.floating[panelId] = {
+        ...clampFloatRect({ left: event.clientX - desktopRect.left - 60, top: event.clientY - desktopRect.top - 16, width: 420, height: 320 }),
+        collapsed: false,
+      };
       renderAll();
       persist();
     }
@@ -591,9 +665,15 @@ ALL_PANELS.forEach(panelId => {
   const closeButton = win.querySelector('.win-close');
 
   let dragState = null;
+  let dockDragState = false;
   titlebar.addEventListener('pointerdown', event => {
-    if (!win.classList.contains('floating')) return;
     if (event.target.closest('button, input, select, label')) return;
+    if (!win.classList.contains('floating')) {
+      if (!titlebar.closest('.dock-group.singleton')) return;
+      dockDragState = true;
+      titlebar.setPointerCapture(event.pointerId);
+      return;
+    }
     bringToFront(win);
     const desktopRect = desktop.getBoundingClientRect();
     const winRect = win.getBoundingClientRect();
@@ -606,6 +686,10 @@ ALL_PANELS.forEach(panelId => {
     titlebar.setPointerCapture(event.pointerId);
   });
   titlebar.addEventListener('pointermove', event => {
+    if (dockDragState) {
+      updateDockTarget(event.clientX, event.clientY, panelId);
+      return;
+    }
     if (!dragState) return;
     const dx = event.clientX - dragState.startX;
     const dy = event.clientY - dragState.startY;
@@ -613,10 +697,21 @@ ALL_PANELS.forEach(panelId => {
     win.style.left = `${rect.left}px`;
     win.style.top = `${rect.top}px`;
     state.floating[panelId] = { ...state.floating[panelId], ...rect };
+    updateDockTarget(event.clientX, event.clientY, panelId);
   });
-  const stopDrag = () => { if (dragState) { dragState = null; persist(); } };
-  titlebar.addEventListener('pointerup', stopDrag);
-  titlebar.addEventListener('pointercancel', stopDrag);
+  titlebar.addEventListener('pointerup', event => {
+    if (!dragState && !dockDragState) return;
+    const drop = updateDockTarget(event.clientX, event.clientY, panelId);
+    dragState = null;
+    dockDragState = false;
+    if (drop) dockPanelAt(panelId, drop.groupId, drop.zone);
+    else { clearDockTargets(); persist(); }
+  });
+  titlebar.addEventListener('pointercancel', () => {
+    dragState = null;
+    dockDragState = false;
+    clearDockTargets();
+  });
 
   win.addEventListener('pointerdown', () => { if (win.classList.contains('floating')) bringToFront(win); });
 
@@ -637,7 +732,10 @@ ALL_PANELS.forEach(panelId => {
       persist();
     }
   });
-  dockButton.addEventListener('click', () => dockFloatingPanel(panelId));
+  dockButton.addEventListener('click', () => {
+    if (win.classList.contains('floating')) dockFloatingPanel(panelId);
+    else undockPanel(panelId);
+  });
   closeButton.addEventListener('click', () => closePanel(panelId));
 });
 
