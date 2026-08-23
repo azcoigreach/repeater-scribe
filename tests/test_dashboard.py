@@ -13,5 +13,5 @@ def test_dashboard_page_is_available(monkeypatch, tmp_path) -> None:
         response = client.get("/")
 
     assert response.status_code == 200
-    assert "Radio traffic, made searchable." in response.text
+    assert "Connected stations" in response.text
     assert "/static/dashboard.css" in response.text
