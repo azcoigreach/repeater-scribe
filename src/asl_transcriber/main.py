@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -15,13 +16,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from asl_transcriber.allstar_stats import (
-    AllStarStatsError,
-    favorite_public_targets,
-    refresh_target,
-)
 from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal, get_db
@@ -33,14 +30,21 @@ from asl_transcriber.favorites import (
     record_remote_key_transition,
     update_favorite,
 )
+from asl_transcriber.models import Favorite
 from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.runtime import ArchiveRuntime
+from asl_transcriber.topology import (
+    TopologyService,
+    ensure_topology_crawl,
+    serialize_topology,
+)
 from asl_transcriber.transcription.faster_whisper import FasterWhisperEngine
 
 logger = logging.getLogger(__name__)
 runtime = ArchiveRuntime(settings.archive_path_list)
 node_monitor: NodeStateService | None = None
+topology_service: TopologyService | None = None
 
 NODE_COMMANDS = [
     {"name": "Announce", "template": "rpt cmd {node} status 11", "target": False},
@@ -112,7 +116,7 @@ def current_runtime() -> ArchiveRuntime:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global node_monitor
+    global node_monitor, topology_service
     active_runtime = current_runtime()
     active_runtime.scan_once()
     engine = FasterWhisperEngine(
@@ -138,35 +142,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     async def persist_key_transition(transition: RemoteKeyTransition) -> None:
         await asyncio.to_thread(record_remote_key_transition, SessionLocal, transition)
 
-    def public_targets() -> dict[str, list[str]]:
-        with SessionLocal() as session:
-            return favorite_public_targets(session)
-
-    async def poll_favorite_stats() -> None:
-        while True:
-            targets = await asyncio.to_thread(public_targets)
-            if not targets:
-                await asyncio.sleep(settings.favorite_stats_request_interval_seconds)
-                continue
-            for target, home_nodes in targets.items():
-                try:
-                    await asyncio.to_thread(
-                        refresh_target,
-                        SessionLocal,
-                        target,
-                        home_nodes,
-                        base_url=settings.favorite_stats_base_url,
-                        timeout_seconds=settings.favorite_stats_timeout_seconds,
-                    )
-                except AllStarStatsError as error:
-                    logger.warning("Could not refresh AllStar stats for %s: %s", target, error)
-                except Exception:
-                    logger.exception("Favorite stats refresh failed for %s", target)
-                await asyncio.sleep(settings.favorite_stats_request_interval_seconds)
-
     watcher = asyncio.create_task(poll_archive())
-    favorite_watcher = (
-        asyncio.create_task(poll_favorite_stats()) if settings.favorite_stats_enabled else None
+    topology_service = (
+        TopologyService(
+            SessionLocal,
+            base_url=settings.favorite_stats_base_url,
+            request_interval_seconds=settings.favorite_stats_request_interval_seconds,
+            timeout_seconds=settings.favorite_stats_timeout_seconds,
+            favorite_refresh_seconds=settings.favorite_stats_refresh_seconds,
+            max_nodes=settings.topology_max_nodes,
+            max_depth=settings.topology_max_depth,
+            refresh_seconds=settings.topology_refresh_seconds,
+            cache_seconds=settings.topology_node_cache_seconds,
+        )
+        if settings.favorite_stats_enabled
+        else None
+    )
+    topology_watcher = (
+        asyncio.create_task(topology_service.run()) if topology_service is not None else None
     )
     node_monitor = (
         NodeStateService(settings, transition_callback=persist_key_transition)
@@ -180,13 +173,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     finally:
         watcher.cancel()
         tasks = [watcher]
-        if favorite_watcher is not None:
-            favorite_watcher.cancel()
-            tasks.append(favorite_watcher)
+        if topology_watcher is not None:
+            topology_watcher.cancel()
+            tasks.append(topology_watcher)
         await asyncio.gather(*tasks, return_exceptions=True)
         if node_monitor is not None:
             await node_monitor.stop()
         node_monitor = None
+        topology_service = None
 
 
 app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
@@ -428,6 +422,84 @@ def ui_delete_favorite(
 ) -> dict[str, bool]:
     require_ui_write()
     return delete_favorite_record(home, favorite_id, db)
+
+
+@app.get("/api/v1/nodes/{home}/topology")
+def topology_graph(
+    home: str,
+    root: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, object]:
+    home = validate_node_identifier(home, label="home node")
+    root = validate_node_identifier(root, label="topology root")
+    return serialize_topology(
+        db,
+        home,
+        root,
+        stale_seconds=settings.favorite_stats_stale_seconds,
+    )
+
+
+@app.post("/ui/nodes/{home}/topology/{root}/crawl")
+def ui_start_topology_crawl(
+    home: str,
+    root: str,
+    db: Annotated[Session, Depends(get_db)],
+    restart: bool = False,
+) -> dict[str, object]:
+    require_ui_write()
+    if topology_service is None:
+        raise HTTPException(status_code=503, detail="AllStar topology crawling is disabled")
+    home = validate_node_identifier(home, label="home node")
+    root = validate_node_identifier(root, label="topology root")
+    favorite = db.scalar(
+        select(Favorite.id).where(
+            Favorite.home_node == home,
+            Favorite.target_identifier == root,
+        )
+    )
+    if favorite is None:
+        raise HTTPException(status_code=404, detail="Topology root must be a favorite node")
+    try:
+        ensure_topology_crawl(
+            db,
+            home,
+            root,
+            max_nodes=settings.topology_max_nodes,
+            max_depth=settings.topology_max_depth,
+            restart=restart,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return serialize_topology(
+        db,
+        home,
+        root,
+        stale_seconds=settings.favorite_stats_stale_seconds,
+    )
+
+
+@app.get("/api/v1/nodes/{home}/topology/events")
+async def topology_events(home: str, root: str) -> StreamingResponse:
+    service = topology_service
+    if service is None:
+        raise HTTPException(status_code=503, detail="AllStar topology crawling is disabled")
+    home = validate_node_identifier(home, label="home node")
+    root = validate_node_identifier(root, label="topology root")
+
+    async def stream() -> AsyncIterator[str]:
+        yield "retry: 3000\n\n"
+        async for event in service.events(settings.topology_sse_heartbeat_seconds):
+            if event.get("heartbeat"):
+                yield ": keepalive\n\n"
+            elif event.get("home_node") == home and event.get("root") == root:
+                yield f"event: topology-update\ndata: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 class LinkControlRequest(BaseModel):

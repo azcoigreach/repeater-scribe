@@ -17,7 +17,9 @@ class Node(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
     local_node: Mapped[int | None] = mapped_column(Integer, nullable=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -34,7 +36,9 @@ class Recording(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
     source_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
@@ -58,7 +62,9 @@ class IngestionJob(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
     source_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     archive_root: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
@@ -79,7 +85,9 @@ class Transcript(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
     job_id: Mapped[str] = mapped_column(String(36), ForeignKey("ingestion_jobs.id"), unique=True)
     raw_text: Mapped[str] = mapped_column(Text, default="")
@@ -98,9 +106,13 @@ class Transmission(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
-    recording_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)
+    recording_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("recordings.id"), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(64), default="discovered", index=True)
     source_node: Mapped[int | None] = mapped_column(Integer, nullable=True)
     local_node: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -124,7 +136,9 @@ class Transmission(Base):
 
 class Favorite(Base):
     __tablename__ = "favorites"
-    __table_args__ = (UniqueConstraint("home_node", "target_identifier", name="uq_favorite_home_target"),)
+    __table_args__ = (
+        UniqueConstraint("home_node", "target_identifier", name="uq_favorite_home_target"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
@@ -138,9 +152,13 @@ class Favorite(Base):
     default_connection_mode: Mapped[str] = mapped_column(String(32), default="transceive")
     permanent: Mapped[bool] = mapped_column(Boolean, default=False)
     exclusive_connect: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -162,7 +180,9 @@ class RemoteNodeStat(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 
@@ -186,11 +206,88 @@ class FavoriteStatsSnapshot(Base):
     uptime_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     link_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     topology_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
-    source_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_reported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
+
+
+class TopologyNodeSnapshot(Base):
+    __tablename__ = "topology_node_snapshots"
+    __table_args__ = (
+        UniqueConstraint("home_node", "identifier", name="uq_topology_node_home_identifier"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    identifier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    neighbors_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    keyed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    total_keyups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_tx_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_kerchunks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    uptime_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    source_reported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TopologyEdgeSnapshot(Base):
+    __tablename__ = "topology_edge_snapshots"
+    __table_args__ = (
+        UniqueConstraint("home_node", "node_a", "node_b", name="uq_topology_edge_home_pair"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    node_a: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    node_b: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reporters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    modes_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    stale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TopologyCrawl(Base):
+    __tablename__ = "topology_crawls"
+    __table_args__ = (
+        UniqueConstraint("home_node", "root_identifier", name="uq_topology_crawl_home_root"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    root_identifier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    queue_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    seen_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    processed_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    queried_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_nodes: Mapped[int] = mapped_column(Integer, default=200, nullable=False)
+    max_depth: Mapped[int] = mapped_column(Integer, default=12, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    limit_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class LinkSession(Base):
@@ -201,7 +298,9 @@ class LinkSession(Base):
     remote_identifier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     link_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     direction: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
     disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disconnect_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -216,7 +315,9 @@ class ControlAudit(Base):
     operation: Mapped[str] = mapped_column(String(64), nullable=False)
     target: Mapped[str | None] = mapped_column(String(64), nullable=True)
     requested_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
     ami_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     confirmation_result: Mapped[str | None] = mapped_column(String(32), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

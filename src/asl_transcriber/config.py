@@ -63,8 +63,14 @@ class Settings(BaseSettings):
     )
     favorite_stats_request_interval_seconds: float = Field(default=3.0, ge=2.1)
     favorite_stats_timeout_seconds: float = Field(default=20.0, gt=0)
+    favorite_stats_refresh_seconds: int = Field(default=15, ge=3)
     favorite_stats_stale_seconds: int = Field(default=300, gt=0)
     favorite_stats_recent_activity_seconds: int = Field(default=120, gt=0)
+    topology_max_nodes: int = Field(default=200, ge=2, le=2_000)
+    topology_max_depth: int = Field(default=12, ge=1, le=50)
+    topology_refresh_seconds: int = Field(default=900, ge=60)
+    topology_node_cache_seconds: int = Field(default=300, ge=30)
+    topology_sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
 
     @property
     def archive_path_list(self) -> list[str]:
