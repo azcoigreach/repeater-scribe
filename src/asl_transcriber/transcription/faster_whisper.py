@@ -6,6 +6,7 @@ from time import perf_counter
 from typing import Any
 
 from asl_transcriber.transcription.base import TranscriptResult, TranscriptSegment
+from asl_transcriber.transcription.callsigns import CallsignResolver
 
 WhisperModel: Any | None = None
 try:
@@ -25,11 +26,15 @@ class FasterWhisperEngine:
     beam_size: int = 5
     vad_filter: bool = False
     initial_prompt: str | None = None
+    hotwords: str | None = None
     word_timestamps: bool = False
+    condition_on_previous_text: bool = True
     workers: int = 1
     model_dir: str | None = None
+    callsign_resolver: CallsignResolver | None = None
     _model: Any | None = field(default=None, init=False, repr=False)
     _model_lock: Lock = field(default_factory=Lock, init=False, repr=False)
+    _inference_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def _get_model(self) -> Any:
         if self._model is not None:
@@ -48,50 +53,80 @@ class FasterWhisperEngine:
                 )
         return self._model
 
-    def transcribe(self, path: str) -> TranscriptResult:
+    def transcribe(
+        self,
+        path: str,
+        *,
+        beam_size: int | None = None,
+        vad_filter: bool | None = None,
+        condition_on_previous_text: bool | None = None,
+    ) -> TranscriptResult:
         if WhisperModel is None:
             raise RuntimeError("faster-whisper is not installed")
 
         start = perf_counter()
         model = self._get_model()
-        raw_result = model.transcribe(
-            path,
-            language=self.language,
-            beam_size=self.beam_size,
-            vad_filter=self.vad_filter,
-            initial_prompt=self.initial_prompt,
-            word_timestamps=self.word_timestamps,
+        selected_beam_size = self.beam_size if beam_size is None else beam_size
+        selected_vad_filter = self.vad_filter if vad_filter is None else vad_filter
+        selected_conditioning = (
+            self.condition_on_previous_text
+            if condition_on_previous_text is None
+            else condition_on_previous_text
         )
-
-        if isinstance(raw_result, tuple):
-            segments_result, info = raw_result
-        else:
-            info = raw_result if isinstance(raw_result, dict) else {}
-            segments_result = info.get("segments", [])
 
         def segment_value(segment: Any, key: str, default: Any = None) -> Any:
             if isinstance(segment, dict):
                 return segment.get(key, default)
             return getattr(segment, key, default)
 
-        segments = [
-            TranscriptSegment(
-                start=float(segment_value(segment, "start", 0.0)),
-                end=float(segment_value(segment, "end", 0.0)),
-                text=str(segment_value(segment, "text", "")).strip(),
-                language=segment_value(segment, "language") or self.language,
-                confidence=segment_value(segment, "avg_logprob"),
+        def decode(active_vad_filter: bool) -> tuple[list[TranscriptSegment], Any]:
+            raw_result = model.transcribe(
+                path,
+                language=self.language,
+                beam_size=selected_beam_size,
+                vad_filter=active_vad_filter,
+                initial_prompt=self.initial_prompt,
+                hotwords=self.hotwords,
+                word_timestamps=self.word_timestamps,
+                condition_on_previous_text=selected_conditioning,
             )
-            for segment in segments_result
-        ]
+
+            if isinstance(raw_result, tuple):
+                segments_result, info = raw_result
+            else:
+                info = raw_result if isinstance(raw_result, dict) else {}
+                segments_result = info.get("segments", [])
+            return [
+                TranscriptSegment(
+                    start=float(segment_value(segment, "start", 0.0)),
+                    end=float(segment_value(segment, "end", 0.0)),
+                    text=str(segment_value(segment, "text", "")).strip(),
+                    language=segment_value(segment, "language") or self.language,
+                    confidence=segment_value(segment, "avg_logprob"),
+                )
+                for segment in segments_result
+            ], info
+
+        with self._inference_lock:
+            segments, info = decode(selected_vad_filter)
         transcript_text = " ".join(segment.text for segment in segments).strip()
+        display_text = (
+            self.callsign_resolver.resolve(transcript_text)
+            if self.callsign_resolver is not None
+            else transcript_text
+        )
         duration = perf_counter() - start
+
+        def info_value(key: str) -> Any:
+            if isinstance(info, dict):
+                return info.get(key)
+            return getattr(info, key, None)
 
         return TranscriptResult(
             raw_text=transcript_text,
-            display_text=transcript_text,
-            language=info.get("language") if isinstance(info, dict) else self.language,
-            language_probability=info.get("language_probability") if isinstance(info, dict) else None,
+            display_text=display_text,
+            language=info_value("language") or self.language,
+            language_probability=info_value("language_probability"),
             confidence=None,
             segments=segments,
             engine_name="faster-whisper",
@@ -102,9 +137,11 @@ class FasterWhisperEngine:
                 "device": self.device,
                 "compute_type": self.compute_type,
                 "language": self.language,
-                "beam_size": self.beam_size,
-                "vad_filter": self.vad_filter,
+                "beam_size": selected_beam_size,
+                "vad_filter": selected_vad_filter,
                 "word_timestamps": self.word_timestamps,
+                "condition_on_previous_text": selected_conditioning,
+                "hotwords": self.hotwords,
                 "workers": self.workers,
             },
         )

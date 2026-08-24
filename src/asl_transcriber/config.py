@@ -22,14 +22,27 @@ class Settings(BaseSettings):
     source_timezone: str = Field(default="UTC")
     archive_paths: str = Field(default="./asl-monitor")
     correlation_tolerance_seconds: int = Field(default=30)
-    whisper_model: str = Field(default="small.en")
-    whisper_device: str = Field(default="cpu")
-    whisper_compute_type: str = Field(default="int8")
+    whisper_model: str = Field(default="large-v3")
+    whisper_device: str = Field(default="cuda")
+    whisper_compute_type: str = Field(default="float16")
     whisper_model_dir: str = Field(default="/data/models/whisper")
-    whisper_language: str | None = Field(default=None)
+    whisper_language: str | None = Field(default="en")
+    whisper_beam_size: int = Field(default=5, ge=1)
+    whisper_vad_filter: bool = Field(default=True)
+    whisper_initial_prompt: str | None = Field(
+        default="Amateur radio repeater traffic. Transcribe callsigns exactly."
+    )
+    whisper_hotwords: str = Field(default="AllStar, repeater, simplex, net control, Arizona")
+    known_callsigns: str = Field(default="KM7GHS,NY7S,W7JHQ")
     worker_concurrency: int = Field(default=1)
     archive_poll_seconds: float = Field(default=5.0)
     auto_process: bool = Field(default=False)
+    live_transcription: bool = Field(default=False)
+    live_poll_seconds: float = Field(default=1.5, gt=0)
+    live_window_seconds: float = Field(default=12.0, gt=2)
+    live_beam_size: int = Field(default=1, ge=1)
+    live_min_file_bytes: int = Field(default=4096, ge=44)
+    ffmpeg_binary: str = Field(default="ffmpeg")
     file_stabilization_seconds: int = Field(default=5)
     min_duration_seconds: float = Field(default=0.5)
     max_duration_seconds: float = Field(default=1800.0)
@@ -75,6 +88,10 @@ class Settings(BaseSettings):
     @property
     def archive_path_list(self) -> list[str]:
         return [item.strip() for item in self.archive_paths.split(",") if item.strip()]
+
+    @property
+    def known_callsign_list(self) -> list[str]:
+        return [item.strip() for item in self.known_callsigns.split(",") if item.strip()]
 
 
 settings = Settings()

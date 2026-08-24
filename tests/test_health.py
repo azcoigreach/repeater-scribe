@@ -12,3 +12,12 @@ def test_health_endpoint_returns_ok() -> None:
     assert payload["status"] == "ok"
     assert payload["service"] == "repeater-scribe"
     assert payload["version"] == "0.4.0"
+
+
+def test_system_info_reports_local_transcription_profile() -> None:
+    client = TestClient(app)
+    response = client.get("/api/v1/system/info")
+
+    assert response.status_code == 200
+    assert response.json()["transcription"]["backend"] == "local"
+    assert response.json()["transcription"]["model"]

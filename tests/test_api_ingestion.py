@@ -15,6 +15,7 @@ def test_ingestion_api_reports_configured_archive_and_scans(monkeypatch, tmp_pat
 
     monkeypatch.setattr("asl_transcriber.main.settings.archive_paths", str(tmp_path))
     monkeypatch.setattr("asl_transcriber.main.settings.auto_process", False)
+    monkeypatch.setattr("asl_transcriber.main.settings.file_stabilization_seconds", 0)
     with TestClient(app) as client:
         scan = client.post("/api/v1/ingestion/scan")
         jobs = client.get("/api/v1/ingestion/jobs")

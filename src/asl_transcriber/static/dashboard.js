@@ -13,7 +13,7 @@ function renderJobs(items, databaseTotals = {}) {
   }, {});
   document.querySelector('#total-count').textContent = databaseTotals.recordings ?? items.length;
   document.querySelector('#completed-count').textContent = databaseTotals.transcribed ?? counts.completed ?? 0;
-  document.querySelector('#processing-count').textContent = counts.processing || 0;
+  document.querySelector('#processing-count').textContent = (counts.processing || 0) + (counts.live || 0);
   document.querySelector('#pending-count').textContent = (counts.pending || 0) + (counts.waiting || 0);
   if (!items.length) {
     recordings.innerHTML = '<div class="empty">No recordings match this search.</div>';
@@ -23,7 +23,7 @@ function renderJobs(items, databaseTotals = {}) {
     <article class="recording">
       <div class="recording-meta"><span class="recording-path">${esc(item.source_path)}</span><span class="recording-date">${item.timestamp ? esc(new Date(item.timestamp).toLocaleString()) : 'Timestamp unavailable'}</span><span class="status ${item.status}">${esc(item.status)}</span></div>
       <button class="play-button" type="button" data-audio-url="${esc(item.audio_url)}" aria-label="Play ${esc(item.source_path)}">▶ Play audio</button>
-      <p class="transcript">${item.transcript ? esc(item.transcript.display_text) : '<span style="color:var(--muted)">Awaiting local transcription</span>'}</p>
+      <p class="transcript">${item.transcript ? `${esc(item.transcript.display_text)}${item.transcript.provisional ? ' <span style="color:var(--muted)">(provisional)</span>' : ''}` : '<span style="color:var(--muted)">Awaiting local transcription</span>'}</p>
     </article>`).join('');
   recordings.querySelectorAll('.play-button').forEach(button => button.addEventListener('click', () => playAudio(button)));
 }

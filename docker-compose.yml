@@ -11,6 +11,7 @@ services:
       - asl3
     environment:
       ASLT_AUTO_PROCESS: "true"
+    gpus: all
     volumes:
       - ./data:/data
       - ./tmp:/tmp

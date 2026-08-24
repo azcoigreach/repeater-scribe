@@ -13,6 +13,7 @@ def test_recordings_endpoint_filters_transcript_text(monkeypatch, tmp_path) -> N
 
     monkeypatch.setattr("asl_transcriber.main.settings.archive_paths", str(tmp_path))
     monkeypatch.setattr("asl_transcriber.main.settings.auto_process", False)
+    monkeypatch.setattr("asl_transcriber.main.settings.file_stabilization_seconds", 0)
     with TestClient(app) as client:
         client.post("/api/v1/ingestion/scan")
         active_runtime = __import__("asl_transcriber.main", fromlist=["runtime"]).runtime
@@ -36,6 +37,7 @@ def test_recordings_total_is_not_truncated_by_limit(monkeypatch, tmp_path) -> No
 
     monkeypatch.setattr("asl_transcriber.main.settings.archive_paths", str(tmp_path))
     monkeypatch.setattr("asl_transcriber.main.settings.auto_process", False)
+    monkeypatch.setattr("asl_transcriber.main.settings.file_stabilization_seconds", 0)
     with TestClient(app) as client:
         client.post("/api/v1/ingestion/scan")
         client.post("/api/v1/ingestion/scan")

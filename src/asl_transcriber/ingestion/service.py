@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
+from time import monotonic
 
 from asl_transcriber.ingestion.jobs import IngestionJob, JobState, JobStore
 from asl_transcriber.ingestion.scanner import ArchiveScanner
@@ -13,12 +15,16 @@ class ArchiveIngestionService:
         root: str | Path,
         job_store: JobStore | None = None,
         require_stable: bool = False,
+        stable_seconds: float = 0.0,
+        clock: Callable[[], float] = monotonic,
     ) -> None:
         self.root = Path(root)
         self.job_store = job_store or JobStore()
         self.require_stable = require_stable
+        self.stable_seconds = stable_seconds
+        self.clock = clock
         self._seen_paths: set[str] = set()
-        self._snapshots: dict[str, tuple[int, int]] = {}
+        self._snapshots: dict[str, tuple[tuple[int, int], float]] = {}
 
     def _hash_file(self, path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -26,13 +32,17 @@ class ArchiveIngestionService:
     def scan_once(self) -> list[IngestionJob]:
         discovered = ArchiveScanner(self.root).discover()
         jobs: list[IngestionJob] = []
+        now = self.clock()
 
         for entry in discovered:
             rel_path = entry.source_path
             snapshot = (entry.size_bytes, entry.modified_ns)
-            previous_snapshot = self._snapshots.get(rel_path)
-            self._snapshots[rel_path] = snapshot
-            if self.require_stable and previous_snapshot != snapshot:
+            previous = self._snapshots.get(rel_path)
+            if previous is None or previous[0] != snapshot:
+                self._snapshots[rel_path] = (snapshot, now)
+                if self.require_stable:
+                    continue
+            elif self.require_stable and now - previous[1] < self.stable_seconds:
                 continue
             if rel_path in self._seen_paths:
                 continue
