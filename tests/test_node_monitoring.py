@@ -28,7 +28,7 @@ def test_parse_alinks_zero_is_a_successful_empty_list() -> None:
 
 def test_blank_alinks_event_does_not_clear_existing_links() -> None:
     existing = parse_alinks("1,41522TU")[0]
-    state = NodeState(home_node="668390", links={existing.identifier: existing})
+    state = NodeState(home_node="100000", links={existing.identifier: existing})
 
     updated = normalize_app_rpt_event(state, AmiFrame({"event": ["RPT_ALINKS"]}))
 
@@ -37,7 +37,7 @@ def test_blank_alinks_event_does_not_clear_existing_links() -> None:
 
 def test_explicit_zero_alinks_event_clears_existing_links() -> None:
     existing = parse_alinks("1,41522TU")[0]
-    state = NodeState(home_node="668390", links={existing.identifier: existing})
+    state = NodeState(home_node="100000", links={existing.identifier: existing})
 
     updated = normalize_app_rpt_event(
         state, AmiFrame({"event": ["RPT_ALINKS"], "eventvalue": ["0"]})
@@ -57,7 +57,7 @@ def test_parse_alinks_keeps_multiple_entries_and_parses_from_the_right() -> None
 
 
 def test_native_keying_does_not_assign_home_callsign_to_local_rf() -> None:
-    state = NodeState(home_node="668390")
+    state = NodeState(home_node="100000")
     state = normalize_app_rpt_event(
         state, AmiFrame({"event": ["RPT_RXKEYED"], "eventvalue": ["1"]})
     )

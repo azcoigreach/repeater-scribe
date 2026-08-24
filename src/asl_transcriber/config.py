@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     ami_port: int = Field(default=5038)
     ami_username: str = Field(default="admin")
     ami_secret: str = Field(default="")
-    ami_node_id: str = Field(default="668390")
+    ami_node_id: str = Field(default="")
     ami_timeout_seconds: float = Field(default=5.0)
     ami_reconnect_max_seconds: float = Field(default=60.0)
     ami_reconcile_seconds: float = Field(default=5.0)

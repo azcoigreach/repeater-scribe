@@ -180,7 +180,7 @@ Benchmark one or more real recordings with the effective local configuration:
 
 ```bash
 docker compose run --rm repeater-scribe \
-  asl-transcriber benchmark /audio/668390/example.wav
+  asl-transcriber benchmark /audio/YOUR_NODE_ID/example.wav
 ```
 
 The command reports audio duration, processing duration, real-time factor,

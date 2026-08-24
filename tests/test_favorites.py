@@ -30,19 +30,19 @@ def test_key_totals_are_retained_when_node_is_favorited_later(tmp_path) -> None:
 
     record_remote_key_transition(
         sessions,
-        RemoteKeyTransition("remote_keyed_started", "668390", "674982", started_at),
+        RemoteKeyTransition("remote_keyed_started", "100000", "674982", started_at),
     )
     record_remote_key_transition(
         sessions,
         RemoteKeyTransition(
-            "remote_keyed_started", "668390", "674982", started_at + timedelta(seconds=1)
+            "remote_keyed_started", "100000", "674982", started_at + timedelta(seconds=1)
         ),
     )
     record_remote_key_transition(
         sessions,
         RemoteKeyTransition(
             "remote_keyed_ended",
-            "668390",
+            "100000",
             "674982",
             started_at + timedelta(seconds=7),
             duration_seconds=7,
@@ -52,7 +52,7 @@ def test_key_totals_are_retained_when_node_is_favorited_later(tmp_path) -> None:
     with sessions() as session:
         favorite = create_favorite(
             session,
-            home_node="668390",
+            home_node="100000",
             target_identifier="674982",
             label="Netoholics HUB",
             callsign="KN4EWT",
@@ -61,11 +61,11 @@ def test_key_totals_are_retained_when_node_is_favorited_later(tmp_path) -> None:
         )
         duplicate = create_favorite(
             session,
-            home_node="668390",
+            home_node="100000",
             target_identifier="674982",
             label="Ignored duplicate",
         )
-        items = list_favorite_items(session, "668390", {})
+        items = list_favorite_items(session, "100000", {})
 
         assert duplicate.id == favorite.id
         assert items[0]["keyup_count"] == 1
@@ -74,11 +74,11 @@ def test_key_totals_are_retained_when_node_is_favorited_later(tmp_path) -> None:
         assert items[0]["description"] == "Evening net"
         assert items[0]["location"] == "Carthage, TN"
 
-        update_favorite(session, "668390", favorite.id, {"description": "Weekly net"})
-        assert list_favorite_items(session, "668390", {})[0]["description"] == "Weekly net"
+        update_favorite(session, "100000", favorite.id, {"description": "Weekly net"})
+        assert list_favorite_items(session, "100000", {})[0]["description"] == "Weekly net"
 
-        delete_favorite(session, "668390", favorite.id)
-        assert list_favorite_items(session, "668390", {}) == []
+        delete_favorite(session, "100000", favorite.id)
+        assert list_favorite_items(session, "100000", {}) == []
         assert session.scalar(select(RemoteNodeStat)).keyup_count == 1  # type: ignore[union-attr]
 
 
@@ -106,7 +106,7 @@ def test_favorites_api_persists_metadata_and_protects_machine_writes(
     try:
         with TestClient(app) as client:
             created = client.post(
-                "/ui/nodes/668390/favorites",
+                "/ui/nodes/100000/favorites",
                 json={
                     "target_identifier": "KM7GHS",
                     "label": "KM7GHS",
@@ -119,15 +119,15 @@ def test_favorites_api_persists_metadata_and_protects_machine_writes(
             favorite_id = created.json()["id"]
 
             updated = client.patch(
-                f"/ui/nodes/668390/favorites/{favorite_id}",
+                f"/ui/nodes/100000/favorites/{favorite_id}",
                 json={"description": "Drive-time hub", "location": "Phoenix, AZ"},
             )
-            listed = client.get("/api/v1/nodes/668390/favorites")
+            listed = client.get("/api/v1/nodes/100000/favorites")
             unauthorized = client.post(
-                "/api/v1/nodes/668390/favorites",
+                "/api/v1/nodes/100000/favorites",
                 json={"target_identifier": "674982"},
             )
-            removed = client.delete(f"/ui/nodes/668390/favorites/{favorite_id}")
+            removed = client.delete(f"/ui/nodes/100000/favorites/{favorite_id}")
 
         assert updated.status_code == 200
         assert updated.json()["description"] == "Drive-time hub"

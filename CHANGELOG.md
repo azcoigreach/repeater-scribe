@@ -26,6 +26,8 @@ All notable changes to this project will be documented in this file.
   obsolete single-pass and unimplemented persistence guidance was removed.
 - Unused duration and silence-threshold settings were removed from the example
   transcription environment.
+- The deployment example and application default no longer contain a site-specific
+  AllStar node ID; operators must configure `ASLT_AMI_NODE_ID` explicitly.
 
 ## [0.4.0] - 2026-08-23
 

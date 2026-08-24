@@ -18,7 +18,7 @@ def test_database_callsign_provider_ranks_configured_and_active_local_context(tm
     with sessions() as session:
         session.add(
             Favorite(
-                home_node="668390",
+                home_node="100000",
                 target_identifier="63916",
                 label="Club",
                 callsign_override="NY7S",
@@ -26,7 +26,7 @@ def test_database_callsign_provider_ranks_configured_and_active_local_context(tm
         )
         session.add(
             FavoriteStatsSnapshot(
-                home_node="668390",
+                home_node="100000",
                 remote_identifier="641890",
                 callsign="KE7WIL",
                 active=True,
@@ -35,7 +35,7 @@ def test_database_callsign_provider_ranks_configured_and_active_local_context(tm
         )
         session.add(
             TopologyNodeSnapshot(
-                home_node="668390",
+                home_node="100000",
                 identifier="63916",
                 metadata_json=json.dumps({"callsign": "NY7S"}),
                 neighbors_json=json.dumps(

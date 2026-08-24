@@ -14,7 +14,7 @@ from asl_transcriber.transcription.base import TranscriptResult
 
 
 def test_runtime_restores_jobs_and_transcripts_from_sqlite(tmp_path: Path) -> None:
-    archive = tmp_path / "archive" / "668390"
+    archive = tmp_path / "archive" / "100000"
     archive.mkdir(parents=True)
     (archive / "call.wav").write_bytes(b"audio")
     engine = create_engine(f"sqlite:///{tmp_path / 'state.db'}")
@@ -35,7 +35,7 @@ def test_runtime_restores_jobs_and_transcripts_from_sqlite(tmp_path: Path) -> No
 
 
 def test_runtime_requeues_recording_that_grew_after_transcription(tmp_path: Path) -> None:
-    archive = tmp_path / "archive" / "668390"
+    archive = tmp_path / "archive" / "100000"
     archive.mkdir(parents=True)
     recording = archive / "call.wav"
     recording.write_bytes(b"partial audio")
@@ -77,7 +77,7 @@ def test_database_totals_are_not_limited_to_dashboard_page_size(tmp_path: Path) 
     with sessions() as session:
         for index in range(503):
             job = IngestionJob(
-                source_path=f"668390/call-{index}.wav",
+                source_path=f"100000/call-{index}.wav",
                 archive_root=archive_root,
                 status="completed",
             )

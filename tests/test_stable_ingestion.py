@@ -7,7 +7,7 @@ from asl_transcriber.ingestion.service import ArchiveIngestionService
 
 
 def test_runtime_style_scan_waits_for_recording_to_stop_growing(tmp_path: Path) -> None:
-    recording = tmp_path / "668390" / "long-call.wav"
+    recording = tmp_path / "100000" / "long-call.wav"
     recording.parent.mkdir()
     recording.write_bytes(b"partial")
     service = ArchiveIngestionService(tmp_path, JobStore(), require_stable=True)
@@ -19,7 +19,7 @@ def test_runtime_style_scan_waits_for_recording_to_stop_growing(tmp_path: Path) 
 
 
 def test_stable_scan_requires_elapsed_quiet_period(tmp_path: Path) -> None:
-    recording = tmp_path / "668390" / "buffered-call.wav"
+    recording = tmp_path / "100000" / "buffered-call.wav"
     recording.parent.mkdir()
     recording.write_bytes(b"partial")
     current_time = [100.0]

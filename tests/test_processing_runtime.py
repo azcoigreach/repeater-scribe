@@ -7,7 +7,7 @@ from asl_transcriber.transcription.base import TranscriptResult
 
 
 def test_runtime_processes_pending_archive_job_with_injected_engine(tmp_path: Path) -> None:
-    recording = tmp_path / "668390" / "recording.wav"
+    recording = tmp_path / "100000" / "recording.wav"
     recording.parent.mkdir()
     recording.write_bytes(b"audio")
     runtime = ArchiveRuntime([tmp_path])

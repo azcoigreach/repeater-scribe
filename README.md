@@ -61,7 +61,7 @@ Benchmark the configured local final-pass model against real archive audio:
 
 ```bash
 docker compose run --rm repeater-scribe \
-  asl-transcriber benchmark /audio/668390/example.wav
+  asl-transcriber benchmark /audio/YOUR_NODE_ID/example.wav
 ```
 
 The JSON output includes audio duration, processing duration, real-time factor,
@@ -127,7 +127,8 @@ the external Docker network named by `ASL3_NETWORK_NAME` (default:
 
 AMI is disabled by default. Set the AMI connection values in `.env`, then set
 `ASLT_AMI_ENABLED=true`, `ASLT_AMI_CONTROL_ENABLED=true`, and a private
-`ASLT_API_KEY` to enable node control. Send the key in the `X-API-Key` header.
+`ASLT_API_KEY` to enable node control. `ASLT_AMI_NODE_ID` has no default and must
+be set to the operator's own node ID. Send the key in the `X-API-Key` header.
 Control requests are limited to AllStar DTMF function codes; arbitrary AMI
 actions are not exposed by the HTTP API.
 The container owns one persistent AMI connection per configured home node. It

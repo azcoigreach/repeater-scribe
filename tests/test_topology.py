@@ -52,7 +52,7 @@ def test_persistent_breadth_first_topology_confirms_reciprocal_edges(tmp_path) -
     timestamp = datetime(2026, 8, 24, 3, tzinfo=UTC)
 
     with sessions() as session:
-        ensure_topology_crawl(session, "668390", "674982", now=timestamp)
+        ensure_topology_crawl(session, "100000", "674982", now=timestamp)
         root_work = next_crawl_work(session, refresh_seconds=900, now=timestamp)
         assert root_work is not None
         apply_topology_snapshot(
@@ -62,7 +62,7 @@ def test_persistent_breadth_first_topology_confirms_reciprocal_edges(tmp_path) -
             refresh_seconds=900,
             now=timestamp,
         )
-        first = serialize_topology(session, "668390", "674982", now=timestamp)
+        first = serialize_topology(session, "100000", "674982", now=timestamp)
 
         assert first["progress"] == {
             "discovered": 3,
@@ -87,7 +87,7 @@ def test_persistent_breadth_first_topology_confirms_reciprocal_edges(tmp_path) -
 
     # A new session proves that graph and crawl state survive a Docker/process restart.
     with sessions() as session:
-        graph = serialize_topology(session, "668390", "674982", now=timestamp)
+        graph = serialize_topology(session, "100000", "674982", now=timestamp)
         reciprocal = next(
             edge
             for edge in graph["edges"]
@@ -108,7 +108,7 @@ def test_recent_node_cache_prevents_duplicate_api_query_between_roots(tmp_path) 
     timestamp = datetime(2026, 8, 24, 3, tzinfo=UTC)
 
     with sessions() as session:
-        ensure_topology_crawl(session, "668390", "674982", now=timestamp)
+        ensure_topology_crawl(session, "100000", "674982", now=timestamp)
         work = next_crawl_work(session, refresh_seconds=900, now=timestamp)
         assert work is not None
         apply_topology_snapshot(
@@ -119,7 +119,7 @@ def test_recent_node_cache_prevents_duplicate_api_query_between_roots(tmp_path) 
             now=timestamp,
         )
 
-        ensure_topology_crawl(session, "668390", "674982", restart=True, now=timestamp)
+        ensure_topology_crawl(session, "100000", "674982", restart=True, now=timestamp)
         repeated = next_crawl_work(session, refresh_seconds=900, now=timestamp)
         assert repeated is not None
         cached = cached_topology_values(session, repeated, cache_seconds=300, now=timestamp)
@@ -132,7 +132,7 @@ def test_recent_node_cache_prevents_duplicate_api_query_between_roots(tmp_path) 
             queried=False,
             now=timestamp,
         )
-        graph = serialize_topology(session, "668390", "674982", now=timestamp)
+        graph = serialize_topology(session, "100000", "674982", now=timestamp)
 
     assert graph["progress"]["queried"] == 0
     assert graph["progress"]["queued"] == 1
@@ -146,7 +146,7 @@ def test_topology_reports_configured_safety_limit(tmp_path) -> None:
 
     with sessions() as session:
         ensure_topology_crawl(
-            session, "668390", "674982", max_nodes=2, max_depth=12, now=timestamp
+            session, "100000", "674982", max_nodes=2, max_depth=12, now=timestamp
         )
         root = next_crawl_work(session, refresh_seconds=900, now=timestamp)
         assert root is not None
@@ -166,7 +166,7 @@ def test_topology_reports_configured_safety_limit(tmp_path) -> None:
             refresh_seconds=900,
             now=timestamp,
         )
-        graph = serialize_topology(session, "668390", "674982", now=timestamp)
+        graph = serialize_topology(session, "100000", "674982", now=timestamp)
 
     assert graph["status"] == "limited"
     assert graph["limited"] is True
@@ -182,11 +182,11 @@ def test_favorite_priority_refresh_does_not_reset_or_advance_crawl(tmp_path) -> 
     with sessions() as session:
         create_favorite(
             session,
-            home_node="668390",
+            home_node="100000",
             target_identifier="674982",
             label="Favorite hub",
         )
-        ensure_topology_crawl(session, "668390", "674982", now=old_fetch)
+        ensure_topology_crawl(session, "100000", "674982", now=old_fetch)
         crawl_work = next_crawl_work(session, refresh_seconds=900, now=old_fetch)
         assert crawl_work is not None
         apply_topology_snapshot(
@@ -217,7 +217,7 @@ def test_favorite_priority_refresh_does_not_reset_or_advance_crawl(tmp_path) -> 
     service._store(favorite_work, refreshed, queried=True)
 
     with sessions() as session:
-        graph = serialize_topology(session, "668390", "674982")
+        graph = serialize_topology(session, "100000", "674982")
 
     assert graph["progress"]["queried"] == 1
     assert graph["progress"]["queued"] == 1

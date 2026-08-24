@@ -10,14 +10,14 @@ from asl_transcriber.main import app
 def test_dashboard_page_is_available(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("asl_transcriber.main.settings.archive_paths", str(tmp_path))
     monkeypatch.setattr("asl_transcriber.main.settings.auto_process", False)
-    monkeypatch.setattr("asl_transcriber.main.settings.ami_node_id", "668390")
+    monkeypatch.setattr("asl_transcriber.main.settings.ami_node_id", "100000")
 
     with TestClient(app) as client:
         response = client.get("/")
 
     assert response.status_code == 200
     assert "Connected nodes" in response.text
-    assert 'data-controlled-node="668390"' in response.text
+    assert 'data-controlled-node="100000"' in response.text
     assert "Operating node" not in response.text
     assert "/static/dashboard.css" in response.text
 

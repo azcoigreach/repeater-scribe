@@ -14,7 +14,7 @@ def test_rolling_transcript_merges_window_overlap() -> None:
 
 
 def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Path) -> None:
-    recording = tmp_path / "archive" / "668390" / "active.wav"
+    recording = tmp_path / "archive" / "100000" / "active.wav"
     recording.parent.mkdir(parents=True)
     recording.write_bytes(b"audio" * 1000)
     runtime = ArchiveRuntime([recording.parents[1]])
@@ -37,7 +37,7 @@ def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Pa
     )
 
     assert service.process_once(runtime) == 1
-    assert runtime.live_results["668390/active.wav"].display_text == "KM7GHS"
+    assert runtime.live_results["100000/active.wav"].display_text == "KM7GHS"
     event = runtime.subscribe().get_nowait()
     assert event["status"] == "live"
     assert event["provisional"] is True

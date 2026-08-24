@@ -6,7 +6,7 @@ from asl_transcriber.main import app
 
 
 def test_recordings_endpoint_filters_transcript_text(monkeypatch, tmp_path) -> None:
-    node_dir = tmp_path / "668390"
+    node_dir = tmp_path / "100000"
     node_dir.mkdir()
     (node_dir / "one.wav").write_bytes(b"one")
     (node_dir / "two.wav").write_bytes(b"two")
@@ -30,7 +30,7 @@ def test_recordings_endpoint_filters_transcript_text(monkeypatch, tmp_path) -> N
 
 
 def test_recordings_total_is_not_truncated_by_limit(monkeypatch, tmp_path) -> None:
-    node_dir = tmp_path / "668390"
+    node_dir = tmp_path / "100000"
     node_dir.mkdir()
     for index in range(3):
         (node_dir / f"call-{index}.wav").write_bytes(str(index).encode())
