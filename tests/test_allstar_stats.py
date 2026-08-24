@@ -157,9 +157,11 @@ def test_dashboard_has_dockable_draggable_live_network_map() -> None:
     assert "pointercancel" in script
     assert "event.preventDefault()" in script
     assert "topologyInteractionActive" in script
-    assert "forceTopologyLayout" in script
+    assert "rootedTopologyLayout" in script
     assert "topologyAdjacency" in script
     assert "TOPOLOGY_BUBBLE_CLEARANCE" in script
+    assert "TOPOLOGY_BRANCH_SPREAD" in script
+    assert "subtreeSize" in script
     assert "graphChanged" in script
     assert "bubble.dataset.nodeId === rootId" in script
     assert "x: root.x - halfWidth" in script
