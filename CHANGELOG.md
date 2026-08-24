@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-24
+
 ### Added
 
 - Fully local, provisional transcription of growing WAV recordings with rolling FFmpeg

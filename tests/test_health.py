@@ -11,7 +11,7 @@ def test_health_endpoint_returns_ok() -> None:
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["service"] == "repeater-scribe"
-    assert payload["version"] == "0.4.0"
+    assert payload["version"] == "0.5.0"
 
 
 def test_system_info_reports_local_transcription_profile() -> None:
