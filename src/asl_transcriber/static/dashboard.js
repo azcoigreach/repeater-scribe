@@ -76,10 +76,15 @@ async function loadNodeStatus() {
 }
 
 let pendingControl = null;
+let favoriteItems = [];
+let currentConnections = [];
 function renderNodeSnapshot(data) {
   const state = document.querySelector('#node-state');
   const dot = document.querySelector('#node-status-dot');
-  const connections = data.connections || data.links || [];
+  const connections = Array.isArray(data.connections)
+    ? data.connections
+    : Array.isArray(data.links) ? data.links : currentConnections;
+  currentConnections = connections;
   const talkers = connections.filter(connection => connection.keyed === true).map(connection => connection.identifier);
   state.textContent = data.stale ? 'AMI state stale' : data.ami_connected ? 'AMI connected' : 'Node unavailable';
   state.className = data.ami_connected && !data.stale ? 'status' : 'status processing';
@@ -89,17 +94,85 @@ function renderNodeSnapshot(data) {
     : 'None';
   document.querySelector('#talkers').textContent = talkers.length ? talkers.join(', ') : 'None detected';
   document.querySelector('#active-channels').textContent = connections.length;
+  renderConnectedStations(connections);
+  renderFavorites();
+  confirmPendingControl(connections);
+}
+
+function renderConnectedStations(connections) {
+  const favoriteTargets = new Set(favoriteItems.map(item => String(item.target_identifier)));
   document.querySelector('#stations-count').textContent = connections.length;
   document.querySelector('#stations').innerHTML = connections.length
     ? connections.map(connection => {
         const talking = connection.keyed === true;
         const status = [connection.connection_state, connection.direction, connection.peer].filter(Boolean).join(' · ');
         const stale = connection.stale ? ' · stale' : '';
-        return `<tr class="station-row${talking ? ' talking' : ''}"><td><span class="status-dot ${talking ? 'talking' : 'idle'}"></span></td><td><strong>${esc(connection.identifier)}</strong></td><td>${esc(connection.display_name || connection.callsign || connection.node_number || connection.identifier)}</td><td>${esc(status)}${esc(stale)}</td><td><button class="station-action" data-target="${esc(connection.identifier)}" type="button">Disconnect</button></td></tr>`;
+        const identifier = String(connection.identifier);
+        const isFavorite = favoriteTargets.has(identifier);
+        return `<tr class="station-row${talking ? ' talking' : ''}"><td><span class="status-dot ${talking ? 'talking' : 'idle'}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(connection.display_name || connection.callsign || connection.node_number || identifier)}</td><td>${esc(status)}${esc(stale)}</td><td><div class="station-actions"><button class="favorite-add${isFavorite ? ' active' : ''}" data-target="${esc(identifier)}" type="button"${isFavorite ? ' disabled' : ''} aria-label="${isFavorite ? 'Favorite node' : 'Add node to favorites'}">${isFavorite ? '&#9733; Favorite' : '&#9734; Favorite'}</button><button class="station-action" data-target="${esc(identifier)}" type="button">Disconnect</button></div></td></tr>`;
       }).join('')
     : '<tr><td colspan="5" class="empty">No connected nodes.</td></tr>';
   document.querySelectorAll('.station-action').forEach(button => button.addEventListener('click', () => runCommand('Disconnect node', button.dataset.target)));
-  confirmPendingControl(connections);
+  document.querySelectorAll('.favorite-add:not(:disabled)').forEach(button => button.addEventListener('click', () => addConnectedFavorite(button.dataset.target)));
+}
+
+function formatDuration(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function renderFavorites() {
+  const connections = new Map(currentConnections.map(connection => [String(connection.identifier), connection]));
+  document.querySelector('#favorites-count').textContent = favoriteItems.length;
+  const table = document.querySelector('#favorites');
+  if (!favoriteItems.length) {
+    table.innerHTML = '<tr><td colspan="8" class="empty">No favorite nodes yet. Add one from Connected nodes.</td></tr>';
+    return;
+  }
+  table.innerHTML = favoriteItems.map(item => {
+    const identifier = String(item.target_identifier);
+    const connection = connections.get(identifier);
+    const connected = Boolean(connection || item.connected);
+    const keyed = connection ? connection.keyed === true : item.keyed === true;
+    const callsign = item.callsign || (connection && connection.callsign) || (/^\d+$/.test(identifier) ? '—' : identifier);
+    return `<tr class="favorite-row${keyed ? ' talking' : ''}"><td><span class="status-dot ${keyed ? 'talking' : connected ? 'idle' : 'offline'}" title="${keyed ? 'Transmitting' : connected ? 'Connected' : 'Disconnected'}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(callsign)}</td><td>${esc(item.description || item.label || '—')}</td><td>${esc(item.location || '—')}</td><td>${esc(item.keyup_count || 0)}</td><td class="favorite-duration">${esc(formatDuration(item.total_tx_milliseconds))}</td><td><div class="favorite-actions"><button class="favorite-connect" data-target="${esc(identifier)}" data-connected="${connected}" type="button">${connected ? 'Disconnect' : 'Connect'}</button><button class="favorite-edit" data-favorite-id="${esc(item.id)}" type="button">Edit</button></div></td></tr>`;
+  }).join('');
+  table.querySelectorAll('.favorite-connect').forEach(button => button.addEventListener('click', () => {
+    const connected = button.dataset.connected === 'true';
+    runCommand(connected ? 'Disconnect node' : 'Connect node', button.dataset.target);
+  }));
+  table.querySelectorAll('.favorite-edit').forEach(button => button.addEventListener('click', () => openFavoriteEditor(button.dataset.favoriteId)));
+}
+
+async function loadFavorites() {
+  const response = await fetch(`/api/v1/nodes/${encodeURIComponent(controlledNodeId())}/favorites`, { cache: 'no-store' });
+  if (!response.ok) {
+    setControlResult(`Favorites could not be loaded (${response.status}).`, true);
+    return;
+  }
+  favoriteItems = (await response.json()).items || [];
+  renderConnectedStations(currentConnections);
+  renderFavorites();
+}
+
+async function addConnectedFavorite(identifier) {
+  const connection = currentConnections.find(item => String(item.identifier) === String(identifier));
+  const label = connection?.display_name || connection?.callsign || String(identifier);
+  const response = await fetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_identifier: String(identifier), label, callsign: connection?.callsign || null }),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    setControlResult(detail.detail || `Favorite could not be saved (${response.status}).`, true);
+    return;
+  }
+  await loadFavorites();
+  setControlResult(`Node ${identifier} added to favorites.`);
 }
 
 function confirmPendingControl(connections) {
@@ -238,8 +311,10 @@ nodeStream.addEventListener('node-state', event => {
   const payload = JSON.parse(event.data);
   renderNodeSnapshot(payload.state);
 });
+nodeStream.addEventListener('node-transition', loadFavorites);
 nodeStream.addEventListener('error', enableNodeRestFallback);
 enableNodeRestFallback();
+loadFavorites();
 const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
 stream.addEventListener('job', () => { loadJobs(); });
@@ -293,6 +368,60 @@ document.querySelector('#open-settings').addEventListener('click', () => {
 document.querySelector('#close-settings').addEventListener('click', () => settingsModal.setAttribute('hidden', ''));
 settingsModal.addEventListener('click', event => { if (event.target === settingsModal) settingsModal.setAttribute('hidden', ''); });
 
+/* Favorite metadata editor */
+const favoriteModal = document.querySelector('#favorite-modal');
+function closeFavoriteEditor() {
+  favoriteModal.setAttribute('hidden', '');
+}
+function openFavoriteEditor(favoriteId) {
+  const favorite = favoriteItems.find(item => String(item.id) === String(favoriteId));
+  if (!favorite) return;
+  document.querySelector('#favorite-id').value = favorite.id;
+  document.querySelector('#favorite-target').value = favorite.target_identifier;
+  document.querySelector('#favorite-label').value = favorite.label || favorite.target_identifier;
+  document.querySelector('#favorite-callsign').value = favorite.callsign || '';
+  document.querySelector('#favorite-description').value = favorite.description || '';
+  document.querySelector('#favorite-location').value = favorite.location || '';
+  favoriteModal.removeAttribute('hidden');
+}
+document.querySelector('#close-favorite').addEventListener('click', closeFavoriteEditor);
+favoriteModal.addEventListener('click', event => { if (event.target === favoriteModal) closeFavoriteEditor(); });
+document.querySelector('#favorite-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const favoriteId = document.querySelector('#favorite-id').value;
+  const response = await fetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites/${encodeURIComponent(favoriteId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      label: document.querySelector('#favorite-label').value.trim(),
+      callsign: document.querySelector('#favorite-callsign').value.trim() || null,
+      description: document.querySelector('#favorite-description').value.trim() || null,
+      location: document.querySelector('#favorite-location').value.trim() || null,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    setControlResult(detail.detail || `Favorite could not be updated (${response.status}).`, true);
+    return;
+  }
+  closeFavoriteEditor();
+  await loadFavorites();
+  setControlResult('Favorite metadata saved.');
+});
+document.querySelector('#delete-favorite').addEventListener('click', async () => {
+  const favoriteId = document.querySelector('#favorite-id').value;
+  const target = document.querySelector('#favorite-target').value;
+  const response = await fetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites/${encodeURIComponent(favoriteId)}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    setControlResult(detail.detail || `Favorite could not be removed (${response.status}).`, true);
+    return;
+  }
+  closeFavoriteEditor();
+  await loadFavorites();
+  setControlResult(`Node ${target} removed from favorites.`);
+});
+
 /* VS Code / AvalonDock-style window manager:
    - Docked panels live in a tree of splits (row/column) and tab groups; the tree structure
      guarantees they never overlap and never leave the dock area, no per-window math needed.
@@ -312,6 +441,7 @@ const PANEL_TITLES = {
   queue: 'Queue summary',
   node: 'Node status',
   stations: 'Connected nodes',
+  favorites: 'Favorites',
   controls: 'Node controls',
   transcripts: 'Transcripts',
   activity: 'Activity log',
@@ -334,7 +464,7 @@ function defaultTree() {
       ] },
       { type: 'split', direction: 'row', sizes: [0.6, 0.4], children: [
         makeGroup('transcripts'),
-        { type: 'split', direction: 'column', sizes: [0.4, 0.3, 0.3], children: [makeGroup('stations'), makeGroup('activity'), makeGroup('functions')] },
+        { type: 'split', direction: 'column', sizes: [0.4, 0.3, 0.3], children: [makeGroup('stations', 'favorites'), makeGroup('activity'), makeGroup('functions')] },
       ] },
     ],
   };
@@ -362,6 +492,8 @@ function savePresets(presets) {
 }
 
 let state = loadState();
+state.floating ||= {};
+state.hidden ||= [];
 if (state.hidden.includes('properties')) {
   state.hidden = state.hidden.map(panelId => panelId === 'properties' ? 'functions' : panelId);
 }
@@ -369,6 +501,12 @@ if (!state.hidden.includes('status')) state.hidden.push('status');
 if (!findGroupWithPanel(state.tree, 'functions') && !state.floating.functions) {
   dockPanelDefault('functions');
   state.hidden = state.hidden.filter(panelId => panelId !== 'functions');
+}
+if (!findGroupWithPanel(state.tree, 'favorites') && !state.floating.favorites) {
+  const stationsGroup = findGroupWithPanel(state.tree, 'stations');
+  if (stationsGroup) stationsGroup.panels.push('favorites');
+  else dockPanelDefault('favorites');
+  state.hidden = state.hidden.filter(panelId => panelId !== 'favorites');
 }
 
 /* Tree helpers */

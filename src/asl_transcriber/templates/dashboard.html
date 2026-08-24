@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>REPEATER SCRIBE dashboard</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260823-2">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260823-4">
 </head>
 <body>
   <header class="topbar">
@@ -25,6 +25,7 @@
               <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
               <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
               <label><input type="checkbox" data-toggle-win="stations" checked> Connected nodes</label>
+              <label><input type="checkbox" data-toggle-win="favorites" checked> Favorites</label>
               <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
               <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
               <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
@@ -91,11 +92,32 @@
       <div class="win-body">
         <details class="collapsible-table" open>
           <summary>Connected nodes <span id="stations-count" class="count">0</span></summary>
-          <table class="stations-table">
+          <table class="stations-table connected-stations-table">
+            <colgroup>
+              <col class="station-col-indicator">
+              <col class="station-col-node">
+              <col class="station-col-name">
+              <col class="station-col-state">
+              <col class="station-col-actions">
+            </colgroup>
             <thead><tr><th></th><th>Node</th><th>Name</th><th>State</th><th></th></tr></thead>
             <tbody id="stations"><tr><td colspan="5" class="empty">Loading station list...</td></tr></tbody>
           </table>
         </details>
+      </div>
+    </section>
+
+    <section class="win" data-win="favorites" data-title="Favorites">
+      <header class="win-titlebar">
+        <span class="win-title">&#9734; Favorites</span>
+        <span id="favorites-count" class="count">0</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body">
+        <table class="stations-table favorites-table">
+          <thead><tr><th></th><th>Node</th><th>Callsign</th><th>Description</th><th>Location</th><th>Keys</th><th>TX</th><th>Actions</th></tr></thead>
+          <tbody id="favorites"><tr><td colspan="8" class="empty">No favorite nodes yet.</td></tr></tbody>
+        </table>
       </div>
     </section>
 
@@ -211,6 +233,24 @@
       </div>
     </div>
   </div>
-  <script src="/static/dashboard.js?v=20260823-2"></script>
+
+  <div id="favorite-modal" class="modal" hidden>
+    <form id="favorite-form" class="modal-content favorite-form">
+      <div class="modal-head"><h2>Edit favorite</h2><button id="close-favorite" class="icon-button" type="button" aria-label="Close favorite editor">&#10005;</button></div>
+      <input id="favorite-id" type="hidden">
+      <div class="favorite-fields">
+        <label>Node or client ID<input id="favorite-target" readonly></label>
+        <label>Label<input id="favorite-label" maxlength="255" required></label>
+        <label>Callsign<input id="favorite-callsign" maxlength="32"></label>
+        <label>Description<input id="favorite-description" maxlength="255"></label>
+        <label>Location<input id="favorite-location" maxlength="255"></label>
+      </div>
+      <div class="favorite-form-actions">
+        <button id="delete-favorite" class="control-button danger" type="button">Remove favorite</button>
+        <button class="control-button primary" type="submit">Save favorite</button>
+      </div>
+    </form>
+  </div>
+  <script src="/static/dashboard.js?v=20260823-5"></script>
 </body>
 </html>

@@ -126,9 +126,26 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .stations-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
 .stations-table th { text-align: left; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .stations-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; color: var(--ink); }
+.connected-stations-table { min-width: 900px; table-layout: fixed; }
+.connected-stations-table .station-col-indicator { width: 5%; }
+.connected-stations-table .station-col-node { width: 12%; }
+.connected-stations-table .station-col-name { width: 12%; }
+.connected-stations-table .station-col-state { width: 51%; }
+.connected-stations-table .station-col-actions { width: 20%; }
+.connected-stations-table td:nth-child(2),
+.connected-stations-table td:nth-child(3),
+.connected-stations-table td:nth-child(4) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .station-row.talking td { background: rgba(255,92,92,.08); }
-.station-action { border: 1px solid var(--green); border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
-.station-action:hover { background: var(--green); color: var(--panel); }
+.station-actions, .favorite-actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.station-action, .favorite-add, .favorite-connect, .favorite-edit { border: 1px solid var(--green); border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
+.station-action:hover, .favorite-add:hover, .favorite-connect:hover, .favorite-edit:hover { background: var(--green); color: var(--panel); }
+.favorite-add { border-color: var(--amber); color: var(--amber); }
+.favorite-add:hover { background: var(--amber); }
+.favorite-add.active, .favorite-add:disabled { border-color: var(--line); color: var(--muted); cursor: default; opacity: .75; }
+.favorite-add:disabled:hover { background: transparent; color: var(--muted); }
+.favorites-table { min-width: 840px; }
+.favorite-row.talking td { background: rgba(255,92,92,.08); }
+.favorite-duration { font-family: "IBM Plex Mono", monospace; white-space: nowrap; }
 
 /* Controls */
 .controls { display: grid; gap: 14px; }
@@ -148,6 +165,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .confirm-label { display: flex !important; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .control-button { width: fit-content; border: 1px solid var(--green); border-radius: 6px; padding: 8px 12px; background: transparent; color: var(--green); cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .control-button:hover, .control-button.primary { background: var(--green); color: var(--panel); }
+.control-button.danger { border-color: #ff7a63; color: #ff7a63; }
+.control-button.danger:hover { background: #ff7a63; color: var(--panel); }
 .control-result { display: block; min-height: 18px; color: var(--green); font-size: 12px; }
 .control-result.error { color: #ff7a63; }
 
@@ -179,6 +198,12 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .settings-grid > div { padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
 .settings-grid h3 { margin: 0 0 8px; font-size: 15px; }
 .settings-grid p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.favorite-form { width: min(720px, calc(100% - 40px)); }
+.favorite-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.favorite-fields label { display: grid; gap: 6px; color: var(--muted); font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .08em; }
+.favorite-fields input { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 9px; color: var(--ink); background: var(--paper); font: 13px "IBM Plex Mono", monospace; }
+.favorite-fields input[readonly] { color: var(--muted); }
+.favorite-form-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; }
 
 @media (max-width: 900px) {
   .topbar { height: auto; min-height: 56px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
@@ -200,6 +225,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
   .node-selector, .command-select, .node-selector input { min-width: 0; width: 100%; }
   .controls-row { align-items: stretch; }
   .control-button { width: 100%; }
+  .favorite-fields { grid-template-columns: 1fr; }
+  .favorite-form-actions { display: grid; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .search { width: 100%; }
   .search input { width: 100%; }

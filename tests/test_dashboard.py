@@ -31,6 +31,17 @@ def test_dashboard_renders_normalized_callsign_rows_from_sse() -> None:
     assert "setInterval(loadNodeStatus, 5000)" not in script
     assert "enableNodeRestFallback" in script
     assert "No connected nodes." in script
+    assert "Array.isArray(data.connections)" in script
+    assert "Array.isArray(data.links) ? data.links : currentConnections" in script
+
+
+def test_connected_node_columns_have_stable_layout() -> None:
+    template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
+    styles = Path("src/asl_transcriber/static/dashboard.css").read_text()
+
+    assert 'class="stations-table connected-stations-table"' in template
+    assert '<col class="station-col-state">' in template
+    assert ".connected-stations-table { min-width: 900px; table-layout: fixed; }" in styles
 
 
 def test_dashboard_waits_for_snapshot_confirmation_after_control() -> None:
