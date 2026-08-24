@@ -65,6 +65,9 @@ the external Docker network named by `ASL3_NETWORK_NAME` (default:
 - `POST /api/v1/node/{node_id}/function` sends an AllStar function code when AMI control and API-key protection are enabled.
 - `GET /api/v1/node/{node_id}/commands` lists the named Functions menu.
 - `POST /api/v1/node/{node_id}/command` executes a named command for API clients.
+- `GET /api/v1/nodes` and `GET /api/v1/nodes/{home}/state` expose normalized app_rpt state.
+- `GET /api/v1/nodes/{home}/links` and `GET /api/v1/nodes/{home}/events` expose live links and SSE updates.
+- `POST`/`DELETE /api/v1/nodes/{home}/links` provide protected, named link controls.
 
 ## AMI control
 
@@ -73,6 +76,11 @@ AMI is disabled by default. Set the AMI connection values in `.env`, then set
 `ASLT_API_KEY` to enable node control. Send the key in the `X-API-Key` header.
 Control requests are limited to AllStar DTMF function codes; arbitrary AMI
 actions are not exposed by the HTTP API.
+The persistent AMI monitor logs in with events enabled, preserves repeated
+headers, routes actions by unique `ActionID`, and refreshes app_rpt baseline
+state after authentication and reconnect. `RPT_ALINKS` is authoritative for
+adjacent links; local `RPT_RXKEYED` activity is displayed as `Local RF - operator
+unknown` unless a separate received identifier supplies attribution.
 The dashboard uses the server-configured AMI credentials and does not ask the
 operator to enter the API key. Its command drawer is available only when web
 authentication is explicitly off; enable authentication before exposing the
@@ -80,3 +88,7 @@ dashboard beyond a trusted local network.
 
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.
+
+Node-control milestones after this foundation are favorites CRUD and ordering,
+durable transmission aggregation and recording correlation, AllStar/EchoLink
+station enrichment, and persisted statistics with time-zone-aware presentation.

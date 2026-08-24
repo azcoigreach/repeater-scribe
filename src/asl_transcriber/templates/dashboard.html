@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>REPEATER SCRIBE dashboard</title>
-  <link rel="stylesheet" href="/static/dashboard.css">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260823-2">
 </head>
 <body>
   <header class="topbar">
@@ -24,11 +24,12 @@
             <div class="submenu" id="windows-submenu" hidden>
               <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
               <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
-              <label><input type="checkbox" data-toggle-win="stations" checked> Connected stations</label>
+              <label><input type="checkbox" data-toggle-win="stations" checked> Connected nodes</label>
               <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
               <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
               <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
-              <label><input type="checkbox" id="toggle-properties" data-toggle-win="properties"> Properties</label>
+              <label><input type="checkbox" id="toggle-functions" data-toggle-win="functions" checked> Functions</label>
+              <label><input type="checkbox" id="toggle-status" data-toggle-win="status"> Status</label>
             </div>
             <div class="menu-item has-submenu" data-submenu="layout-submenu" role="button" tabindex="0">
               <span>LAYOUTS</span><span class="submenu-caret">&#9666;</span>
@@ -45,7 +46,7 @@
     </div>
   </header>
 
-  <main id="desktop" class="desktop">
+  <main id="desktop" class="desktop" data-controlled-node="{{ ami_node_id }}">
     <div id="dock-root" class="dock-root"></div>
     <div id="float-layer" class="float-layer"></div>
 
@@ -68,7 +69,7 @@
     <section class="win" data-win="node" data-title="Node status">
       <header class="win-titlebar">
         <span class="status-dot offline" id="node-status-dot" aria-hidden="true"></span>
-        <span class="win-title">Node 668390</span>
+        <span class="win-title">Node {{ ami_node_id }}</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
@@ -82,14 +83,14 @@
       </div>
     </section>
 
-    <section class="win" data-win="stations" data-title="Connected stations">
+    <section class="win" data-win="stations" data-title="Connected nodes">
       <header class="win-titlebar">
-        <span class="win-title">Connected stations</span>
+        <span class="win-title">Connected nodes</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <details class="collapsible-table" open>
-          <summary>Stations <span id="stations-count" class="count">0</span></summary>
+          <summary>Connected nodes <span id="stations-count" class="count">0</span></summary>
           <table class="stations-table">
             <thead><tr><th></th><th>Node</th><th>Name</th><th>State</th><th></th></tr></thead>
             <tbody id="stations"><tr><td colspan="5" class="empty">Loading station list...</td></tr></tbody>
@@ -106,17 +107,31 @@
       <div class="win-body">
         <div class="controls">
           <div class="controls-row">
-            <label class="node-selector">Operating node<input id="control-node-id" inputmode="numeric" value="668390" required></label>
-            <label class="node-selector">Command<select id="command-buttons" class="command-select"></select></label>
+            <label class="node-selector">Node number<input id="control-target-id" inputmode="numeric" placeholder="e.g. 41522"></label>
           </div>
-          <div class="controls-row">
-            <button id="run-command" class="control-button primary" type="button">Run command</button>
-            <button id="ping-node" class="control-button" type="button">Ping node</button>
-            <label class="confirm-label"><input id="command-confirm" type="checkbox"> Confirm node command</label>
+          <div class="control-groups">
+            <fieldset class="control-group">
+              <legend>Transceive</legend>
+              <button class="control-button node-action" data-command="Connect node" type="button">Transceive</button>
+              <button class="control-button node-action" data-command="Connect permanent transceive" type="button">Permanent</button>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Monitor</legend>
+              <button class="control-button node-action" data-command="Connect monitor" type="button">Monitor</button>
+              <button class="control-button node-action" data-command="Connect permanent monitor" type="button">Permanent</button>
+              <button class="control-button node-action" data-command="Connect local monitor" type="button">Monitor local</button>
+              <button class="control-button node-action" data-command="Connect permanent local monitor" type="button">Local permanent</button>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Disconnect</legend>
+              <button class="control-button node-action" data-command="Disconnect node" type="button">Disconnect</button>
+              <button class="control-button node-action" data-command="Disconnect all links" type="button">Disconnect all</button>
+            </fieldset>
           </div>
           <div class="controls-row">
             <label class="node-selector">Function code<input id="function-code" placeholder="e.g. *3" maxlength="12"></label>
             <button id="run-function" class="control-button" type="button">Send function</button>
+            <button id="ping-node" class="control-button" type="button">Ping node</button>
           </div>
           <output id="control-result" class="control-result" aria-live="polite"></output>
         </div>
@@ -141,12 +156,48 @@
       <div class="win-body"><div id="activity" class="activity"><div class="empty">No activity log found.</div></div></div>
     </section>
 
-    <section class="win" data-win="properties" data-title="Properties">
+    <section class="win" data-win="functions" data-title="Functions">
       <header class="win-titlebar">
-        <span class="win-title">Properties</span>
+        <span class="win-title">Functions</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
-      <div class="win-body"><p class="empty">No item selected.</p></div>
+      <div class="win-body">
+        <div class="function-groups">
+          <fieldset class="function-group">
+            <legend>Announce</legend>
+            <button class="control-button function-action" data-command="Announce" type="button">Announce</button>
+            <button class="control-button function-action" data-command="Say Time of Day" type="button">Say time of day</button>
+            <button class="control-button function-action" data-command="Force ID" type="button">Force ID</button>
+          </fieldset>
+          <fieldset class="function-group">
+            <legend>Link</legend>
+            <button class="control-button function-action" data-command="Reconnect" type="button">Reconnect</button>
+          </fieldset>
+          <fieldset class="function-group">
+            <legend>Status</legend>
+            <button class="control-button function-action" data-command="Show node status" type="button">Show node status</button>
+            <button class="control-button function-action" data-command="Show link status" type="button">Show link status</button>
+            <button class="control-button function-action" data-command="Show IAX registry" type="button">Show IAX registry</button>
+            <button class="control-button function-action" data-command="Show IAX channels" type="button">Show IAX channels</button>
+            <button class="control-button function-action" data-command="Show Network Status" type="button">Show network status</button>
+            <button class="control-button function-action" data-command="Show uptime" type="button">Show uptime</button>
+          </fieldset>
+        </div>
+      </div>
+    </section>
+
+    <section class="win" data-win="status" data-title="Status">
+      <header class="win-titlebar">
+        <span class="win-title">Status</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body status-body">
+        <div class="status-toolbar">
+          <button id="save-status" class="control-button" type="button" disabled>Save .txt</button>
+          <span id="status-source" class="status-source">No status requested</span>
+        </div>
+        <pre id="status-output" class="status-output" tabindex="0">No status requested.</pre>
+      </div>
     </section>
   </main>
 
@@ -160,6 +211,6 @@
       </div>
     </div>
   </div>
-  <script src="/static/dashboard.js"></script>
+  <script src="/static/dashboard.js?v=20260823-2"></script>
 </body>
 </html>

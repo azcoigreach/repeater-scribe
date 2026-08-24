@@ -133,6 +133,16 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 /* Controls */
 .controls { display: grid; gap: 14px; }
 .controls-row { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.control-groups { display: flex; flex-wrap: wrap; gap: 12px; }
+.control-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.control-group legend { padding: 0 5px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.function-groups { display: flex; flex-wrap: wrap; gap: 12px; }
+.function-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.function-group legend { padding: 0 5px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.status-body { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; min-height: 0; }
+.status-toolbar { display: flex; align-items: center; gap: 12px; }
+.status-source { color: var(--muted); font-size: 11px; }
+.status-output { min-height: 120px; margin: 0; padding: 12px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); background: var(--paper); font: 12px/1.5 "IBM Plex Mono", monospace; white-space: pre-wrap; user-select: text; }
 .node-selector { display: grid; gap: 6px; color: var(--muted); font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .08em; }
 .node-selector input, .command-select { min-width: 200px; border: 1px solid var(--line); border-radius: 6px; padding: 9px; color: var(--ink); background: var(--paper); font: 13px "IBM Plex Mono", monospace; }
 .confirm-label { display: flex !important; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
@@ -185,6 +195,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
   .menu-panel, .submenu { left: auto; right: 0; width: min(280px, calc(100vw - 32px)); }
   .submenu { top: calc(100% + 8px); }
   .node-grid, .controls-row { grid-template-columns: 1fr; }
+  .control-groups, .control-group { display: grid; grid-template-columns: 1fr; }
+  .function-groups, .function-group { display: grid; grid-template-columns: 1fr; }
   .node-selector, .command-select, .node-selector input { min-width: 0; width: 100%; }
   .controls-row { align-items: stretch; }
   .control-button { width: 100%; }

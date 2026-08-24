@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from asl_transcriber.database import Base
@@ -107,6 +107,67 @@ class Transmission(Base):
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    home_node: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    source_identifier: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    associated_node_callsign: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    operator_callsign: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    attribution_level: Mapped[str] = mapped_column(String(32), default="unknown")
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_milliseconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    close_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    collision: Mapped[bool] = mapped_column(Boolean, default=False)
+    raw_event_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     recording: Mapped[Recording | None] = relationship(back_populates="transmissions")
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+    __table_args__ = (UniqueConstraint("home_node", "target_identifier", name="uq_favorite_home_target"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    target_identifier: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    callsign_override: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    description_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    location_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    group_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    default_connection_mode: Mapped[str] = mapped_column(String(32), default="transceive")
+    permanent: Mapped[bool] = mapped_column(Boolean, default=False)
+    exclusive_connect: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+
+class LinkSession(Base):
+    __tablename__ = "link_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    remote_identifier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    link_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    direction: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disconnect_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ControlAudit(Base):
+    __tablename__ = "control_audits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    identity: Mapped[str] = mapped_column(String(255), nullable=False)
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    target: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    requested_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    ami_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confirmation_result: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -79,13 +79,20 @@ async function loadNodeStatus() {
   document.querySelector('#connected-nodes').textContent = data.connected_nodes.length ? data.connected_nodes.join(', ') : 'None';
   document.querySelector('#talkers').textContent = data.talkers.length ? data.talkers.join(', ') : 'None detected';
   document.querySelector('#active-channels').textContent = data.active_channels.length;
-  document.querySelector('#stations-count').textContent = data.connected_stations.length;
-  document.querySelector('#stations').innerHTML = data.connected_stations.length
-    ? data.connected_stations.map(station => {
+  const stations = [...data.connected_stations];
+  const knownStationIds = new Set(stations.map(station => String(station.id)));
+  data.connected_nodes.forEach(node => {
+    if (!knownStationIds.has(String(node))) {
+      stations.push({ id: String(node), name: 'ASL3 remote node', channel: '', state: 'Connected' });
+    }
+  });
+  document.querySelector('#stations-count').textContent = stations.length;
+  document.querySelector('#stations').innerHTML = stations.length
+    ? stations.map(station => {
         const talking = data.talkers.includes(station.id);
         return `<tr class="station-row${talking ? ' talking' : ''}"><td><span class="status-dot ${talking ? 'talking' : 'idle'}"></span></td><td><strong>${esc(station.id)}</strong></td><td>${esc(station.name)}</td><td>${esc(station.state)} · ${esc(station.channel)}</td><td><button class="station-action" data-target="${esc(station.id)}" type="button">Disconnect</button></td></tr>`;
       }).join('')
-    : '<tr><td colspan="5" class="empty">No connected stations.</td></tr>';
+    : '<tr><td colspan="5" class="empty">No connected nodes.</td></tr>';
   document.querySelectorAll('.station-action').forEach(button => button.addEventListener('click', () => runCommand('Disconnect node', button.dataset.target)));
 }
 
@@ -95,51 +102,77 @@ function setControlResult(message, error = false) {
   result.className = `control-result${error ? ' error' : ''}`;
 }
 
+function controlledNodeId() {
+  return document.querySelector('#desktop').dataset.controlledNode;
+}
+
+function showStatusWindow(name, text) {
+  const output = document.querySelector('#status-output');
+  const saveButton = document.querySelector('#save-status');
+  output.textContent = text || 'The node returned no text.';
+  saveButton.disabled = !text;
+  document.querySelector('#status-source').textContent = name;
+  const functionsGroup = findGroupWithPanel(state.tree, 'functions');
+  const statusGroup = findGroupWithPanel(state.tree, 'status');
+  state.hidden = state.hidden.filter(panelId => panelId !== 'status');
+  if (functionsGroup && !statusGroup) {
+    const replacement = {
+      type: 'split', direction: 'column', sizes: [0.5, 0.5],
+      children: [functionsGroup, makeGroup('status')],
+    };
+    state.tree = replaceInTree(state.tree, functionsGroup.id, replacement);
+  }
+  renderAll();
+  persist();
+}
+
 document.querySelector('#refresh-node').addEventListener('click', loadNodeStatus);
 document.querySelector('#ping-node').addEventListener('click', async () => {
   const response = await fetch('/api/v1/node/ping', { method: 'POST' });
   setControlResult(response.ok ? 'Node responded to AMI ping.' : `Ping failed (${response.status}).`, !response.ok);
 });
-async function loadCommands() {
-  const nodeId = document.querySelector('#control-node-id').value.trim();
-  const response = await fetch(`/api/v1/node/${encodeURIComponent(nodeId)}/commands`);
-  if (!response.ok) return;
-  const data = await response.json();
-  document.querySelector('#command-buttons').innerHTML = data.commands.map(command => `<option value="${esc(command.name)}" data-requires-target="${command.requires_target}">${esc(command.name)}</option>`).join('');
-}
-document.querySelector('#control-node-id').addEventListener('change', loadCommands);
-document.querySelector('#run-command').addEventListener('click', () => {
-  const select = document.querySelector('#command-buttons');
-  const option = select.selectedOptions[0];
-  if (!option) return;
-  const requiresTarget = option.dataset.requiresTarget === 'true';
-  const target = requiresTarget ? window.prompt('Target node number') : null;
-  if (requiresTarget && !target) return;
-  runCommand(option.value, target);
-});
+document.querySelectorAll('.node-action').forEach(button => button.addEventListener('click', () => {
+  const command = button.dataset.command;
+  const target = document.querySelector('#control-target-id').value.trim();
+  if (command !== 'Disconnect all links' && !target) {
+    setControlResult('Enter a node number first.', true);
+    return;
+  }
+  runCommand(command, target || null);
+}));
 async function runCommand(name, target = null) {
-  const nodeId = document.querySelector('#control-node-id').value.trim();
-  if (!window.confirm(`${name}${target ? ` ${target}` : ''}?`)) return;
+  const nodeId = controlledNodeId();
   const response = await fetch(`/ui/node/${encodeURIComponent(nodeId)}/command`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, target, confirmed: document.querySelector('#command-confirm').checked }),
+    body: JSON.stringify({ name, target, confirmed: true }),
   });
   if (response.ok) {
+    const data = await response.json();
+    if (name.startsWith('Show ')) showStatusWindow(name, data.response_text);
     setControlResult(`Command ${name} sent to node ${nodeId}.`);
-    document.querySelector('#command-confirm').checked = false;
   } else {
     const detail = await response.json().catch(() => ({}));
     setControlResult(detail.detail || `Command failed (${response.status}).`, true);
   }
 }
-loadCommands();
+document.querySelectorAll('.function-action').forEach(button => button.addEventListener('click', () => {
+  runCommand(button.dataset.command);
+}));
 
+document.querySelector('#save-status').addEventListener('click', () => {
+  const text = document.querySelector('#status-output').textContent;
+  const source = document.querySelector('#status-source').textContent || 'node-status';
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  link.download = `${source.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.txt`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+});
 document.querySelector('#run-function').addEventListener('click', async () => {
-  const nodeId = document.querySelector('#control-node-id').value.trim();
+  const nodeId = controlledNodeId();
   const functionInput = document.querySelector('#function-code');
   const code = functionInput.value.trim();
   if (!code) return;
-  if (!window.confirm(`Send function ${code} to node ${nodeId}?`)) return;
   const response = await fetch(`/ui/node/${encodeURIComponent(nodeId)}/function`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ function: code }),
@@ -230,11 +263,12 @@ let groupSeq = 0;
 const PANEL_TITLES = {
   queue: 'Queue summary',
   node: 'Node status',
-  stations: 'Connected stations',
+  stations: 'Connected nodes',
   controls: 'Node controls',
   transcripts: 'Transcripts',
   activity: 'Activity log',
-  properties: 'Properties',
+  functions: 'Functions',
+  status: 'Status',
 };
 const ALL_PANELS = Object.keys(PANEL_TITLES);
 
@@ -252,7 +286,7 @@ function defaultTree() {
       ] },
       { type: 'split', direction: 'row', sizes: [0.6, 0.4], children: [
         makeGroup('transcripts'),
-        { type: 'split', direction: 'column', sizes: [0.5, 0.5], children: [makeGroup('stations'), makeGroup('activity')] },
+        { type: 'split', direction: 'column', sizes: [0.4, 0.3, 0.3], children: [makeGroup('stations'), makeGroup('activity'), makeGroup('functions')] },
       ] },
     ],
   };
@@ -267,7 +301,7 @@ function loadState() {
       return raw;
     }
   } catch { /* fall through to default */ }
-  return { tree: defaultTree(), floating: {}, hidden: ['properties'] };
+  return { tree: defaultTree(), floating: {}, hidden: ['status'] };
 }
 function persist() {
   localStorage.setItem(STATE_KEY, JSON.stringify(state));
@@ -280,6 +314,14 @@ function savePresets(presets) {
 }
 
 let state = loadState();
+if (state.hidden.includes('properties')) {
+  state.hidden = state.hidden.map(panelId => panelId === 'properties' ? 'functions' : panelId);
+}
+if (!state.hidden.includes('status')) state.hidden.push('status');
+if (!findGroupWithPanel(state.tree, 'functions') && !state.floating.functions) {
+  dockPanelDefault('functions');
+  state.hidden = state.hidden.filter(panelId => panelId !== 'functions');
+}
 
 /* Tree helpers */
 function findGroupWithPanel(node, panelId) {
@@ -774,7 +816,7 @@ document.querySelector('#layout-save').addEventListener('click', () => {
   renderPresetList();
 });
 document.querySelector('#reset-layout').addEventListener('click', () => {
-  state = { tree: defaultTree(), floating: {}, hidden: ['properties'] };
+  state = { tree: defaultTree(), floating: {}, hidden: ['status'] };
   renderAll();
   persist();
 });
