@@ -127,15 +127,25 @@ class NodeStateService:
         if event in {"RPT_ALINKS", "RPT_RXKEYED", "RPT_TXKEYED"}:
             next_state = normalize_app_rpt_event(current, frame)
             next_state.ami_state = current.ami_state
+            transitions: list[RemoteKeyTransition] = []
             if event == "RPT_ALINKS":
                 next_state.links = self._preserve_link_times(current.links, next_state.links)
                 next_state.links = {
                     identifier: replace(link, stale=current.stale)
                     for identifier, link in next_state.links.items()
                 }
+                transitions = self._key_transitions(
+                    connection_home,
+                    current.links,
+                    next_state.links,
+                    next_state.updated_at,
+                )
             if self._visible(next_state) != self._visible(current):
                 self.states[connection_home] = next_state
                 await self._publish_state(event.casefold(), next_state)
+            for transition in transitions:
+                self.transitions.append(transition)
+                await self._publish_transition(transition)
         if event in REFRESH_EVENTS:
             self.request_reconcile(connection_home)
 
@@ -259,14 +269,21 @@ class NodeStateService:
             old = previous.get(identifier)
             new = current.get(identifier)
             key = (home, identifier)
-            if old is not None and old.keyed is False and new is not None and new.keyed is True:
-                self._keyed_started[key] = timestamp
+            if new is not None and new.keyed is True and (old is None or old.keyed is not True):
+                started = timestamp - timedelta(seconds=new.seconds_since_keyed or 0)
+                self._keyed_started[key] = started
                 transitions.append(
-                    RemoteKeyTransition("remote_keyed_started", home, identifier, timestamp)
+                    RemoteKeyTransition("remote_keyed_started", home, identifier, started)
                 )
             elif old is not None and old.keyed is True and (new is None or new.keyed is False):
-                started = self._keyed_started.pop(key, None)
-                duration = int((timestamp - started).total_seconds()) if started else None
+                ended_started = (
+                    self._keyed_started.pop(key) if key in self._keyed_started else None
+                )
+                duration = (
+                    int((timestamp - ended_started).total_seconds())
+                    if ended_started
+                    else None
+                )
                 transitions.append(
                     RemoteKeyTransition("remote_keyed_ended", home, identifier, timestamp, duration)
                 )

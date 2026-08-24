@@ -159,6 +159,54 @@ def test_keyed_transition_callback_runs_before_the_event_is_published() -> None:
     asyncio.run(scenario())
 
 
+def test_initial_keyed_snapshot_counts_as_an_observed_keyup() -> None:
+    async def scenario() -> None:
+        service, _ = service_with()
+        keyed, _ = parse_xstat_snapshot(
+            response(Conn=["674982 192.0.2.4 0 OUT 00:00:11 ESTABLISHED"]),
+            response(Conn=["674982 1 3 0"]),
+        )
+
+        await service._apply_snapshot("668390", keyed, [])
+
+        assert [event.event for event in service.transitions] == ["remote_keyed_started"]
+        assert service.transitions[0].remote_identifier == "674982"
+
+    asyncio.run(scenario())
+
+
+def test_rpt_alinks_fast_path_publishes_key_transitions() -> None:
+    async def scenario() -> None:
+        persisted: list[RemoteKeyTransition] = []
+
+        def persist(transition: RemoteKeyTransition) -> None:
+            persisted.append(transition)
+
+        service = NodeStateService(
+            Settings(ami_node_id="668390", ami_secret="secret"),
+            transition_callback=persist,
+        )
+        service.state("668390").links = {
+            link.identifier: link for link in parse_alinks("1,674982TU")
+        }
+
+        await service._on_event(
+            "668390",
+            AmiFrame({"event": ["RPT_ALINKS"], "node": ["668390"], "eventvalue": ["1,674982TK"]}),
+        )
+        await service._on_event(
+            "668390",
+            AmiFrame({"event": ["RPT_ALINKS"], "node": ["668390"], "eventvalue": ["1,674982TU"]}),
+        )
+
+        assert [event.event for event in persisted] == [
+            "remote_keyed_started",
+            "remote_keyed_ended",
+        ]
+
+    asyncio.run(scenario())
+
+
 def test_event_storm_is_coalesced_into_one_reconciliation() -> None:
     async def scenario() -> None:
         replies = (item for _ in range(10) for item in (response(), response()))
