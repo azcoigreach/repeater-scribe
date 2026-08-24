@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ## [0.5.1] - 2026-08-24
 
+### Added
+
+- Favorites now provide a split connect control for transceive, permanent,
+  monitor, and local-monitor connection modes.
+
 ### Changed
 
 - The README now documents Repeater Scribe as an AllStar node-operations,

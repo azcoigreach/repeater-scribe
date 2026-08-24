@@ -172,6 +172,31 @@ function formatAge(seconds) {
   return `${Math.floor(value / 3600)}h ago`;
 }
 
+const FAVORITE_CONNECTION_GROUPS = [
+  ['Connect', [
+    ['Connect node', 'Transceive'],
+    ['Connect permanent transceive', 'Permanent'],
+  ]],
+  ['Monitor', [
+    ['Connect monitor', 'Monitor'],
+    ['Connect permanent monitor', 'Permanent'],
+    ['Connect local monitor', 'Monitor local'],
+    ['Connect permanent local monitor', 'Local permanent'],
+  ]],
+];
+
+function favoriteConnectionAction(identifier, connected) {
+  if (connected) {
+    return `<button class="favorite-connect" data-target="${esc(identifier)}" data-connected="true" type="button">Disconnect</button>`;
+  }
+  const options = FAVORITE_CONNECTION_GROUPS.map(([groupLabel, modes]) =>
+    `<div class="favorite-connect-group" role="group" aria-label="${esc(groupLabel)}"><span class="favorite-connect-group-label">${esc(groupLabel)}</span>${modes.map(([command, label]) =>
+      `<button class="favorite-connect-option" data-command="${esc(command)}" data-target="${esc(identifier)}" type="button" role="menuitem">${esc(label)}</button>`
+    ).join('')}</div>`
+  ).join('');
+  return `<div class="favorite-connect-split"><button class="favorite-connect favorite-connect-primary" data-target="${esc(identifier)}" data-connected="false" type="button" title="Connect in transceive mode">Connect</button><button class="favorite-connect-toggle" type="button" aria-label="Choose connection mode for node ${esc(identifier)}" aria-expanded="false">&#9662;</button><div class="favorite-connect-options" role="menu" hidden>${options}</div></div>`;
+}
+
 function renderFavorites() {
   const connections = new Map(currentConnections.map(connection => [String(connection.identifier), connection]));
   document.querySelector('#favorites-count').textContent = favoriteItems.length;
@@ -193,15 +218,39 @@ function renderFavorites() {
     const busy = item.reported_busy_percent === null || item.reported_busy_percent === undefined ? '—' : `${item.reported_busy_percent}%`;
     const links = item.reported_link_count === null || item.reported_link_count === undefined ? '—' : item.reported_link_count;
     const age = item.stats_stale ? `${formatAge(item.stats_age_seconds)} · stale` : formatAge(item.stats_age_seconds);
-    return `<tr class="favorite-row${keyed ? ' talking' : ''}"><td><span class="status-dot ${dotState}" title="${esc(dotTitle)}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(callsign)}</td><td>${esc(item.description || item.label || '—')}</td><td>${esc(item.location || '—')}</td><td>${esc(item.keyup_count || 0)}</td><td class="favorite-duration">${esc(formatDuration(item.total_tx_milliseconds))}</td><td>${esc(busy)}</td><td>${esc(links)}</td><td class="favorite-age">${esc(age)}</td><td><div class="favorite-actions"><button class="favorite-connect" data-target="${esc(identifier)}" data-connected="${connected}" type="button">${connected ? 'Disconnect' : 'Connect'}</button><button class="favorite-topology" data-favorite-id="${esc(item.id)}" type="button">Chart</button><button class="favorite-edit" data-favorite-id="${esc(item.id)}" type="button">Edit</button></div></td></tr>`;
+    return `<tr class="favorite-row${keyed ? ' talking' : ''}"><td><span class="status-dot ${dotState}" title="${esc(dotTitle)}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(callsign)}</td><td>${esc(item.description || item.label || '—')}</td><td>${esc(item.location || '—')}</td><td>${esc(item.keyup_count || 0)}</td><td class="favorite-duration">${esc(formatDuration(item.total_tx_milliseconds))}</td><td>${esc(busy)}</td><td>${esc(links)}</td><td class="favorite-age">${esc(age)}</td><td><div class="favorite-actions">${favoriteConnectionAction(identifier, connected)}<button class="favorite-topology" data-favorite-id="${esc(item.id)}" type="button">Chart</button><button class="favorite-edit" data-favorite-id="${esc(item.id)}" type="button">Edit</button></div></td></tr>`;
   }).join('');
   table.querySelectorAll('.favorite-connect').forEach(button => button.addEventListener('click', () => {
     const connected = button.dataset.connected === 'true';
     runCommand(connected ? 'Disconnect node' : 'Connect node', button.dataset.target);
   }));
+  table.querySelectorAll('.favorite-connect-toggle').forEach(button => button.addEventListener('click', event => {
+    event.stopPropagation();
+    const options = button.nextElementSibling;
+    const opening = options.hidden;
+    closeFavoriteConnectionMenus();
+    options.hidden = !opening;
+    button.setAttribute('aria-expanded', String(opening));
+  }));
+  table.querySelectorAll('.favorite-connect-option').forEach(button => button.addEventListener('click', () => {
+    closeFavoriteConnectionMenus();
+    runCommand(button.dataset.command, button.dataset.target);
+  }));
   table.querySelectorAll('.favorite-topology').forEach(button => button.addEventListener('click', () => openTopology(button.dataset.favoriteId)));
   table.querySelectorAll('.favorite-edit').forEach(button => button.addEventListener('click', () => openFavoriteEditor(button.dataset.favoriteId)));
 }
+
+function closeFavoriteConnectionMenus() {
+  document.querySelectorAll('.favorite-connect-options:not([hidden])').forEach(options => {
+    options.hidden = true;
+    options.previousElementSibling?.setAttribute('aria-expanded', 'false');
+  });
+}
+
+document.addEventListener('click', closeFavoriteConnectionMenus);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeFavoriteConnectionMenus();
+});
 
 const TOPOLOGY_POSITIONS_KEY = 'dashboard-topology-positions-v6';
 const TOPOLOGY_ROOT_KEY = 'dashboard-topology-root';
