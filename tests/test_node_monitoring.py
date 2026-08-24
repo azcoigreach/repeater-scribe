@@ -22,6 +22,20 @@ def test_parse_alinks_preserves_unknown_mode() -> None:
     assert not link.keyed
 
 
+def test_parse_alinks_zero_is_a_successful_empty_list() -> None:
+    assert parse_alinks("0") == []
+
+
+def test_parse_alinks_keeps_multiple_entries_and_parses_from_the_right() -> None:
+    links = parse_alinks("3,12345RU,KM7GHSTK,CLIENT-7XU")
+
+    assert [(link.identifier, link.mode, link.keyed) for link in links] == [
+        ("12345", "R", False),
+        ("KM7GHS", "T", True),
+        ("CLIENT-7", "X", False),
+    ]
+
+
 def test_native_keying_does_not_assign_home_callsign_to_local_rf() -> None:
     state = NodeState(home_node="668390")
     state = normalize_app_rpt_event(

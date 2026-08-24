@@ -5,7 +5,6 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -16,18 +15,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from asl_transcriber.ami import AmiClient, AmiError, AmiResponse
+from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.config import settings
-from asl_transcriber.ingestion.activity import ActivityLogEvent
-from asl_transcriber.node_service import NodeMonitor
+from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.transcription.faster_whisper import FasterWhisperEngine
 
 logger = logging.getLogger(__name__)
 runtime = ArchiveRuntime(settings.archive_path_list)
-last_connected_summary: dict[str, object] | None = None
-last_connected_at = 0.0
-node_monitor: NodeMonitor | None = None
+node_monitor: NodeStateService | None = None
 
 NODE_COMMANDS = [
     {"name": "Announce", "template": "rpt cmd {node} status 11", "target": False},
@@ -43,10 +39,26 @@ NODE_COMMANDS = [
     {"name": "Reconnect", "template": "rpt cmd {node} ilink 16", "target": False},
     {"name": "Connect node", "template": "rpt cmd {node} ilink 3 {target}", "target": True},
     {"name": "Connect monitor", "template": "rpt cmd {node} ilink 2 {target}", "target": True},
-    {"name": "Connect local monitor", "template": "rpt cmd {node} ilink 8 {target}", "target": True},
-    {"name": "Connect permanent monitor", "template": "rpt cmd {node} ilink 12 {target}", "target": True},
-    {"name": "Connect permanent transceive", "template": "rpt cmd {node} ilink 13 {target}", "target": True},
-    {"name": "Connect permanent local monitor", "template": "rpt cmd {node} ilink 18 {target}", "target": True},
+    {
+        "name": "Connect local monitor",
+        "template": "rpt cmd {node} ilink 8 {target}",
+        "target": True,
+    },
+    {
+        "name": "Connect permanent monitor",
+        "template": "rpt cmd {node} ilink 12 {target}",
+        "target": True,
+    },
+    {
+        "name": "Connect permanent transceive",
+        "template": "rpt cmd {node} ilink 13 {target}",
+        "target": True,
+    },
+    {
+        "name": "Connect permanent local monitor",
+        "template": "rpt cmd {node} ilink 18 {target}",
+        "target": True,
+    },
     {"name": "Disconnect node", "template": "rpt cmd {node} ilink 1 {target}", "target": True},
     {"name": "Disconnect all links", "template": "rpt cmd {node} ilink 6", "target": False},
 ]
@@ -56,8 +68,10 @@ def render_node_command(name: str, node_id: int, target: str | None = None) -> s
     command = next((item for item in NODE_COMMANDS if item["name"] == name), None)
     if command is None:
         raise ValueError("Unknown node command")
-    if command["target"] and (target is None or re.fullmatch(r"\d{3,7}", target) is None):
-        raise ValueError("A numeric target node is required")
+    if command["target"] and (
+        target is None or re.fullmatch(r"[A-Za-z0-9_-]{1,32}", target) is None
+    ):
+        raise ValueError("A valid target identifier is required")
     return str(command["template"]).format(node=node_id, target=target or "")
 
 
@@ -105,7 +119,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await asyncio.sleep(settings.archive_poll_seconds)
 
     watcher = asyncio.create_task(poll_archive())
-    node_monitor = NodeMonitor(settings) if settings.ami_enabled and settings.ami_secret else None
+    node_monitor = (
+        NodeStateService(settings) if settings.ami_enabled and settings.ami_secret else None
+    )
     if node_monitor is not None:
         await node_monitor.start()
     try:
@@ -163,111 +179,13 @@ def system_info() -> dict[str, str | list[str] | bool]:
     }
 
 
-def ami_client() -> AmiClient:
-    if not settings.ami_enabled or not settings.ami_secret:
-        raise HTTPException(status_code=503, detail="AMI integration is disabled")
-    return AmiClient(
-        settings.ami_host,
-        settings.ami_port,
-        settings.ami_username,
-        settings.ami_secret,
-        settings.ami_timeout_seconds,
-    )
-
-
-def summarize_node(response: AmiResponse, activity: list[ActivityLogEvent]) -> dict[str, object]:
-    stations: list[dict[str, str]] = []
-    connected_nodes: set[int] = set()
-    for message in response.messages:
-        channel = message.get("Channel", "")
-        is_remote_channel = channel.startswith(("IAX2/", "DAHDI/", "PJSIP/"))
-        caller_id = message.get("CallerIDNum", "")
-        data_node = re.match(r"(\d{3,7})(?:,|$)", message.get("Data", ""))
-        remote_id = (
-            data_node.group(1) if data_node else message.get("Exten", "")
-        ) if is_remote_channel else caller_id
-        if is_remote_channel and remote_id.isdigit() and int(remote_id) > 0:
-            caller_id = remote_id
-            connected_nodes.add(int(caller_id))
-            stations.append(
-                {
-                    "id": caller_id,
-                    "name": message.get("CallerIDName", "<unknown>"),
-                    "channel": channel,
-                    "state": message.get("ChannelStateDesc", "unknown"),
-                }
-            )
-    link_state: dict[int, str] = {}
-    for event in sorted(activity, key=lambda item: item.timestamp):
-        if event.event_type == "LINKCONN" and event.details:
-            match = re.search(r"\b(\d{3,7})\b", event.details)
-            if match:
-                link_state[int(match.group(1))] = "connected"
-        elif event.event_type in {"LINKDISC", "REMDISC"} and event.details:
-            match = re.search(r"\b(\d{3,7})\b", event.details)
-            if match:
-                link_state[int(match.group(1))] = "disconnected"
-    connected_nodes.update(node for node, state in link_state.items() if state == "connected")
-    known_station_ids = {station["id"] for station in stations}
-    for node, state in link_state.items():
-        if state == "connected" and str(node) not in known_station_ids:
-            stations.append(
-                {"id": str(node), "name": "ASL3 remote node", "channel": "", "state": "Connected"}
-            )
-    recent_talkers = sorted(
-        {
-            event.details.split(",", 1)[0].strip()
-            for event in activity
-            if event.event_type == "RXKEY"
-            and event.details
-            and event.details.split(",", 1)[0].strip().isdigit()
-            and (datetime.now(UTC) - event.timestamp).total_seconds() <= 15
-        }
-    )
-    return {
-        "ami_connected": response.success,
-        "connected_nodes": sorted(connected_nodes),
-        "connected_stations": stations,
-        "active_channels": [
-            message.get("Channel", "")
-            for message in response.messages
-            if message.get("Event") in {"Status", "StatusComplete"} and message.get("Channel")
-        ],
-        "talkers": recent_talkers,
-    }
-
-
-def stable_node_summary(
-    current: dict[str, object],
-    previous: dict[str, object] | None,
-    now: float,
-    last_seen: float,
-) -> dict[str, object]:
-    if (
-        previous is not None
-        and current["ami_connected"]
-        and not current["connected_nodes"]
-        and now - last_seen <= settings.ami_connection_grace_seconds
-    ):
-        return {**current, "connected_nodes": previous["connected_nodes"], "connected_stations": previous["connected_stations"]}
-    return current
-
-
 @app.get("/api/v1/node/status")
 def node_status() -> dict[str, object]:
-    try:
-        response = ami_client().status()
-    except AmiError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    current = summarize_node(response, current_runtime().activity_events())
-    return {
-        **current,
-        "response": response.headers,
-        "messages": response.messages,
-    }
+    monitor = active_node_monitor()
+    return monitor.serialize(monitor.state(monitor.home_nodes[0]))
 
 
-def active_node_monitor() -> NodeMonitor:
+def active_node_monitor() -> NodeStateService:
     if node_monitor is None:
         raise HTTPException(status_code=503, detail="AMI integration is disabled")
     return node_monitor
@@ -296,7 +214,7 @@ def node_state(home: str) -> dict[str, object]:
 def node_links(home: str) -> dict[str, object]:
     monitor = active_node_monitor()
     state = monitor.state(validate_node_identifier(home, label="home node"))
-    return {"items": [asdict(link) for link in state.links.values()]}
+    return {"items": [monitor.serialize_link(link) for link in state.links.values()]}
 
 
 class LinkControlRequest(BaseModel):
@@ -328,26 +246,68 @@ def require_control(x_api_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="A valid API key is required")
 
 
+def ami_action_accepted(response: AmiResponse) -> bool:
+    value = next(
+        (value for key, value in response.headers.items() if key.casefold() == "response"), ""
+    )
+    return value.casefold() in {"success", "follows"}
+
+
+async def execute_control_command(home: str, command: str) -> AmiResponse:
+    monitor = active_node_monitor()
+    try:
+        response = await monitor.client_for(home).execute("Command", Command=command)
+    except AmiError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if not ami_action_accepted(response):
+        raise HTTPException(status_code=502, detail="AMI did not accept the command")
+    monitor.request_reconcile(home)
+    return response
+
+
+def pending_control_response(
+    home: str,
+    response: AmiResponse,
+    *,
+    target: str | None = None,
+    desired_connected: bool | None = None,
+) -> dict[str, object]:
+    return {
+        "home_node": home,
+        "target": target,
+        "desired_connected": desired_connected,
+        "pending_confirmation": True,
+        "confirmation_timeout_seconds": settings.ami_confirmation_timeout_seconds,
+        "response": response.headers,
+    }
+
+
 @app.post("/api/v1/nodes/{home}/links")
 async def connect_link(
     home: str, request: LinkControlRequest, x_api_key: str | None = Header(default=None)
 ) -> dict[str, object]:
     require_control(x_api_key)
-    monitor = active_node_monitor()
+    active_node_monitor()
     home = validate_node_identifier(home, label="home node")
     target = validate_node_identifier(request.target, label="target")
     mode = request.mode.strip().casefold()
     if request.permanent:
         mode = f"permanent_{mode}"
     function = LINK_FUNCTIONS.get(mode)
-    if function is None or mode in {"disconnect", "disconnect_all", "permanent_disconnect", "reconnect"}:
+    if function is None or mode in {
+        "disconnect",
+        "disconnect_all",
+        "permanent_disconnect",
+        "reconnect",
+    }:
         raise HTTPException(status_code=422, detail="Invalid connection mode")
     if not request.confirmed:
         raise HTTPException(status_code=400, detail="Command confirmation is required")
-    response = await monitor.client.execute(
-        "Command", Command=f"rpt cmd {home} ilink {function} {target}"
-    )
-    return {"home_node": home, "target": target, "mode": mode, "pending_confirmation": True, "response": response.headers}
+    response = await execute_control_command(home, f"rpt cmd {home} ilink {function} {target}")
+    return {
+        **pending_control_response(home, response, target=target, desired_connected=True),
+        "mode": mode,
+    }
 
 
 @app.delete("/api/v1/nodes/{home}/links/{target}")
@@ -355,42 +315,51 @@ async def disconnect_link(
     home: str, target: str, x_api_key: str | None = Header(default=None)
 ) -> dict[str, object]:
     require_control(x_api_key)
-    monitor = active_node_monitor()
+    active_node_monitor()
     home = validate_node_identifier(home, label="home node")
     target = validate_node_identifier(target, label="target")
-    response = await monitor.client.execute("Command", Command=f"rpt cmd {home} ilink 1 {target}")
-    return {"home_node": home, "target": target, "pending_confirmation": True, "response": response.headers}
+    response = await execute_control_command(home, f"rpt cmd {home} ilink 1 {target}")
+    return pending_control_response(home, response, target=target, desired_connected=False)
 
 
 @app.delete("/api/v1/nodes/{home}/links")
-async def disconnect_all_links(home: str, x_api_key: str | None = Header(default=None)) -> dict[str, object]:
+async def disconnect_all_links(
+    home: str, x_api_key: str | None = Header(default=None)
+) -> dict[str, object]:
     require_control(x_api_key)
-    monitor = active_node_monitor()
+    active_node_monitor()
     home = validate_node_identifier(home, label="home node")
-    response = await monitor.client.execute("Command", Command=f"rpt cmd {home} ilink 6")
-    return {"home_node": home, "pending_confirmation": True, "response": response.headers}
+    response = await execute_control_command(home, f"rpt cmd {home} ilink 6")
+    return pending_control_response(home, response, desired_connected=False)
 
 
 @app.post("/api/v1/nodes/{home}/reconnect")
-async def reconnect_node(home: str, x_api_key: str | None = Header(default=None)) -> dict[str, object]:
+async def reconnect_node(
+    home: str, x_api_key: str | None = Header(default=None)
+) -> dict[str, object]:
     require_control(x_api_key)
-    monitor = active_node_monitor()
+    active_node_monitor()
     home = validate_node_identifier(home, label="home node")
-    response = await monitor.client.execute("Command", Command=f"rpt cmd {home} ilink 16")
-    return {"home_node": home, "pending_confirmation": True, "response": response.headers}
+    response = await execute_control_command(home, f"rpt cmd {home} ilink 16")
+    return pending_control_response(home, response)
 
 
 @app.get("/api/v1/nodes/{home}/events")
 async def node_events(home: str) -> StreamingResponse:
     monitor = active_node_monitor()
-    validate_node_identifier(home, label="home node")
-    return StreamingResponse(monitor.events(monitor.subscribe()), media_type="text/event-stream")
+    home = validate_node_identifier(home, label="home node")
+    return StreamingResponse(
+        monitor.events(home, monitor.subscribe(home)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/v1/node/ping")
-def node_ping() -> dict[str, object]:
+async def node_ping() -> dict[str, object]:
+    monitor = active_node_monitor()
     try:
-        response = ami_client().ping()
+        response = await monitor.client.execute("Ping")
     except AmiError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return {"response": response.headers}
@@ -400,7 +369,9 @@ def node_ping() -> dict[str, object]:
 def node_commands(node_id: int) -> dict[str, object]:
     return {
         "node_id": node_id,
-        "commands": [{"name": item["name"], "requires_target": item["target"]} for item in NODE_COMMANDS],
+        "commands": [
+            {"name": item["name"], "requires_target": item["target"]} for item in NODE_COMMANDS
+        ],
     }
 
 
@@ -410,83 +381,95 @@ class NodeCommandRequest(BaseModel):
     confirmed: bool = False
 
 
-def execute_named_command(node_id: int, request: NodeCommandRequest) -> dict[str, object]:
+async def execute_named_command(node_id: int, request: NodeCommandRequest) -> dict[str, object]:
     if not settings.ami_control_enabled:
         raise HTTPException(status_code=503, detail="AMI node control is disabled")
     if not request.confirmed:
         raise HTTPException(status_code=400, detail="Command confirmation is required")
     try:
         command = render_node_command(request.name, node_id, request.target)
-        response = ami_client().command(command)
+        response = (
+            await active_node_monitor().client_for(str(node_id)).execute("Command", Command=command)
+        )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except AmiError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
-    response_lines = [f"{key}: {value}" for key, value in response.headers.items()]
-    response_lines.extend(
-        f"{key}: {value}"
-        for message in response.messages
-        for key, value in message.items()
-    )
+    if not ami_action_accepted(response):
+        raise HTTPException(status_code=502, detail="AMI did not accept the command")
+    response_lines = [line for line in response.values("Output") if line != "--END COMMAND--"]
+    active_node_monitor().request_reconcile(str(node_id))
     return {
         "node_id": node_id,
         "name": request.name,
         "response": response.headers,
         "messages": response.messages,
         "response_text": "\n".join(response_lines),
+        "pending_confirmation": request.name.startswith(("Connect", "Disconnect")),
+        "confirmation_timeout_seconds": settings.ami_confirmation_timeout_seconds,
     }
 
 
 @app.post("/api/v1/node/{node_id}/command")
-def node_command(
+async def node_command(
     node_id: int,
     request: NodeCommandRequest,
     x_api_key: str | None = Header(default=None),
 ) -> dict[str, object]:
     if not settings.api_key or x_api_key != settings.api_key:
         raise HTTPException(status_code=401, detail="A valid API key is required")
-    return execute_named_command(node_id, request)
+    return await execute_named_command(node_id, request)
 
 
 @app.post("/ui/node/{node_id}/command")
-def ui_node_command(node_id: int, request: NodeCommandRequest) -> dict[str, object]:
+async def ui_node_command(node_id: int, request: NodeCommandRequest) -> dict[str, object]:
     if settings.auth_mode != "off":
         raise HTTPException(status_code=401, detail="Web authentication is required")
-    return execute_named_command(node_id, request.model_copy(update={"confirmed": True}))
+    return await execute_named_command(node_id, request.model_copy(update={"confirmed": True}))
 
 
 class NodeFunctionRequest(BaseModel):
     function: str
 
 
-def execute_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
+async def execute_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
     if not settings.ami_control_enabled:
         raise HTTPException(status_code=503, detail="AMI node control is disabled")
     if re.fullmatch(r"[0-9*#A-D]+", request.function.strip().upper()) is None:
         raise HTTPException(status_code=422, detail="Invalid AllStar function code")
     try:
-        response = ami_client().command(f"rpt fun {node_id} {request.function.strip().upper()}")
+        response = (
+            await active_node_monitor()
+            .client_for(str(node_id))
+            .execute("Command", Command=f"rpt fun {node_id} {request.function.strip().upper()}")
+        )
     except AmiError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
-    return {"node_id": node_id, "function": request.function.strip().upper(), "response": response.headers}
+    if not ami_action_accepted(response):
+        raise HTTPException(status_code=502, detail="AMI did not accept the function")
+    return {
+        "node_id": node_id,
+        "function": request.function.strip().upper(),
+        "response": response.headers,
+    }
 
 
 @app.post("/api/v1/node/{node_id}/function")
-def node_function(
+async def node_function(
     node_id: int,
     request: NodeFunctionRequest,
     x_api_key: str | None = Header(default=None),
 ) -> dict[str, object]:
     if not settings.api_key or x_api_key != settings.api_key:
         raise HTTPException(status_code=401, detail="A valid API key is required")
-    return execute_node_function(node_id, request)
+    return await execute_node_function(node_id, request)
 
 
 @app.post("/ui/node/{node_id}/function")
-def ui_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
+async def ui_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
     if settings.auth_mode != "off":
         raise HTTPException(status_code=401, detail="Web authentication is required")
-    return execute_node_function(node_id, request)
+    return await execute_node_function(node_id, request)
 
 
 @app.post("/api/v1/ingestion/scan")
@@ -552,7 +535,9 @@ def activity_events() -> dict[str, object]:
 
 
 @app.get("/api/v1/recordings")
-def recordings(q: str | None = None, status: str | None = None, limit: int = 100) -> dict[str, object]:
+def recordings(
+    q: str | None = None, status: str | None = None, limit: int = 100
+) -> dict[str, object]:
     active_runtime = current_runtime()
     normalized_query = q.casefold() if q else None
     items: list[dict[str, object]] = []

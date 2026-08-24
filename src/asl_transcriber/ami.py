@@ -25,7 +25,23 @@ class AmiResponse:
 
     @property
     def success(self) -> bool:
-        return self.headers.get("Response", "").lower() == "success"
+        return (
+            next(
+                (value for name, value in self.headers.items() if name.casefold() == "response"),
+                "",
+            ).lower()
+            == "success"
+        )
+
+    def values(self, name: str) -> list[str]:
+        """Return every value for a header, regardless of AMI header casing."""
+        key = name.casefold()
+        if self.raw_headers is not None:
+            return list(self.raw_headers.get(key, []))
+        values = [value for header, value in self.headers.items() if header.casefold() == key]
+        for message in self.messages:
+            values.extend(value for header, value in message.items() if header.casefold() == key)
+        return values
 
 
 class AmiClient:
@@ -52,7 +68,9 @@ class AmiClient:
             banner = self._read_message(connection)
             if banner.get("Asterisk") is None:
                 raise AmiError("AMI server did not provide an Asterisk banner")
-            self._write_action(connection, "Login", Username=self.username, Secret=self.secret, Events="off")
+            self._write_action(
+                connection, "Login", Username=self.username, Secret=self.secret, Events="off"
+            )
             login = self._read_response(connection)
             if not login.success:
                 raise AmiError(login.headers.get("Message", "AMI login failed"))
@@ -190,6 +208,7 @@ class _PendingAction:
     action_id: str
     future: asyncio.Future[AmiResponse]
     frames: list[AmiFrame]
+    event_list: bool = False
 
 
 StateCallback = Callable[[AmiConnectionState], Awaitable[None] | None]
@@ -266,11 +285,13 @@ class PersistentAmiClient:
         try:
             async with self._write_lock:
                 self._writer.write(
-                    ("\r\n".join(f"{key}: {value}" for key, value in fields.items()) + "\r\n\r\n").encode()
+                    (
+                        "\r\n".join(f"{key}: {value}" for key, value in fields.items()) + "\r\n\r\n"
+                    ).encode()
                 )
                 await self._writer.drain()
             return await asyncio.wait_for(pending.future, self.timeout)
-        except (TimeoutError, ConnectionError) as error:
+        except (TimeoutError, ConnectionError, OSError) as error:
             self._pending.pop(action_id, None)
             raise AmiError(f"AMI action {action} failed: {error}") from error
 
@@ -289,11 +310,15 @@ class PersistentAmiClient:
             if self._stopping or not self.reconnect:
                 break
             await self._set_state(AmiConnectionState.DISCONNECTED)
-            await asyncio.sleep(min(delay, self.reconnect_max_seconds) * (0.8 + self.random_source() * 0.4))
+            await asyncio.sleep(
+                min(delay, self.reconnect_max_seconds) * (0.8 + self.random_source() * 0.4)
+            )
             delay = min(delay * 2, self.reconnect_max_seconds)
 
     async def _connect(self) -> None:
         await self._set_state(AmiConnectionState.CONNECTING)
+        self._parser = AmiFrameParser()
+        self._frames.clear()
         self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
         banner = await self._reader.readline()
         if not banner.startswith(b"Asterisk "):
@@ -331,7 +356,11 @@ class PersistentAmiClient:
                     return frame
                 await self._publish(frame)
                 continue
-            frames = self._parser.feed(await self._reader.read(4096))
+            data = await self._reader.read(4096)
+            if not data:
+                self._parser.finish()
+                raise AmiError("AMI connection closed during login")
+            frames = self._parser.feed(data)
             self._frames.extend(frames)
             if not frames:
                 continue
@@ -350,18 +379,28 @@ class PersistentAmiClient:
 
     async def _handle_frame(self, frame: AmiFrame) -> None:
         action_id = frame.get("ActionID")
-        if frame.event:
-            await self._publish(frame)
-            if frame.get("EventList").casefold() != "complete":
-                return
         pending = self._pending.get(action_id)
+        if frame.event and pending is None:
+            await self._publish(frame)
+            return
         if pending is None:
             return
         pending.frames.append(frame)
         response = frame.get("Response")
-        if response.casefold() == "follows" and frame.get("Output") != "--END COMMAND--":
+        event_list = frame.get("EventList").casefold()
+        if event_list == "start":
+            pending.event_list = True
             return
-        if frame.get("Output") == "--END COMMAND--" or response and response.casefold() != "follows":
+        if pending.event_list and event_list != "complete":
+            return
+        if response.casefold() == "follows" and "--END COMMAND--" not in frame.values("Output"):
+            return
+        if (
+            event_list == "complete"
+            or "--END COMMAND--" in frame.values("Output")
+            or response
+            and response.casefold() != "follows"
+        ):
             self._finish_pending(pending)
 
     def _finish_pending(self, pending: _PendingAction) -> None:
@@ -371,8 +410,12 @@ class PersistentAmiClient:
         first = pending.frames[0]
         headers = {key.title(): values[0] for key, values in first.headers.items() if values}
         messages = [frame.as_dict() for frame in pending.frames[1:]]
+        raw_headers: dict[str, list[str]] = {}
+        for frame in pending.frames:
+            for key, values in frame.headers.items():
+                raw_headers.setdefault(key, []).extend(values)
         pending.future.set_result(
-            AmiResponse(headers=headers, messages=messages, raw_headers=first.headers)
+            AmiResponse(headers=headers, messages=messages, raw_headers=raw_headers)
         )
 
     async def _publish(self, frame: AmiFrame) -> None:
@@ -397,3 +440,5 @@ class PersistentAmiClient:
             self._writer.close()
         self._reader = None
         self._writer = None
+        self._parser = AmiFrameParser()
+        self._frames.clear()
