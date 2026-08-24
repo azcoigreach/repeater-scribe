@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-24
+
+### Added
+
+- A hard per-minute ceiling on outbound AllStar statistics requests through
+  `ASLT_ALLSTAR_MAX_REQUESTS_PER_MINUTE`.
+- Viewer tracking for network maps through `ASLT_TOPOLOGY_VIEWER_TTL_SECONDS`,
+  registered by the topology graph, crawl, and event-stream routes.
+
+### Changed
+
+- Node lookups are now prioritized: favorite roots refresh first, then the maps
+  a dashboard viewer currently has open.
+- Maps without a live viewer no longer walk their connections, so discovery on a
+  focused map is no longer starved by background crawls.
+- The dashboard opens the topology event stream only while the map panel is the
+  active tab or an expanded floating window, and closes it when the panel is
+  hidden, collapsed, or tabbed away.
+
 ## [0.5.1] - 2026-08-24
 
 ### Added

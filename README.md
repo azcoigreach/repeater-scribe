@@ -267,9 +267,16 @@ The full transcription setting reference is in
 | `ASLT_FAVORITE_STATS_ENABLED` | Enable public favorite refresh and topology crawling. |
 | `ASLT_FAVORITE_STATS_REQUEST_INTERVAL_SECONDS` | Minimum delay between outbound AllStar statistics requests. |
 | `ASLT_FAVORITE_STATS_REFRESH_SECONDS` | Priority refresh interval for favorite roots. |
+| `ASLT_ALLSTAR_MAX_REQUESTS_PER_MINUTE` | Hard ceiling on outbound AllStar statistics requests per minute. |
 | `ASLT_TOPOLOGY_MAX_NODES` | Maximum nodes in one connected-component crawl. |
 | `ASLT_TOPOLOGY_MAX_DEPTH` | Maximum traversal depth from the favorite root. |
 | `ASLT_TOPOLOGY_REFRESH_SECONDS` | Delay before a completed component is revisited. |
+| `ASLT_TOPOLOGY_VIEWER_TTL_SECONDS` | How long a map stays "viewed" after its dashboard panel closes. |
+
+Lookups are prioritized so the limited AllStar request budget is spent where it
+matters: favorite roots refresh first, then the maps a dashboard viewer
+currently has open. Maps that nobody is watching stop walking their connections
+until their panel is focused again.
 
 ## Data, network, and privacy boundaries
 

@@ -269,6 +269,7 @@ let topologyPositions = loadTopologyPositions();
 let topologyViews = loadTopologyViews();
 let topologyGraph = null;
 let topologyStream = null;
+let topologyStreamKey = '';
 let topologyReloadTimer = null;
 let topologyInteractionActive = false;
 let topologyRenderPending = false;
@@ -921,13 +922,40 @@ async function startTopologyCrawl(restart = false) {
   }
 }
 
-function connectTopologyStream() {
+function topologyPanelVisible() {
+  if (state.hidden.includes('topology')) return false;
+  const floating = state.floating.topology;
+  if (floating) return !floating.collapsed;
+  const group = findGroupWithPanel(state.tree, 'topology');
+  return !!group && group.active === 'topology';
+}
+
+function disconnectTopologyStream() {
   topologyStream?.close();
   topologyStream = null;
+  topologyStreamKey = '';
+  clearTimeout(topologyReloadTimer);
+}
+
+// The server only walks maps that have a live viewer, so the stream tracks panel visibility.
+function syncTopologyStream() {
+  const item = topologyFavorite();
+  if (!item || !topologyPanelVisible()) {
+    disconnectTopologyStream();
+    return;
+  }
+  connectTopologyStream();
+}
+
+function connectTopologyStream() {
   const item = topologyFavorite();
   if (!item || typeof EventSource === 'undefined') return;
+  const key = `${controlledNodeId()}:${item.target_identifier}`;
+  if (topologyStream && topologyStreamKey === key) return;
+  disconnectTopologyStream();
   const home = encodeURIComponent(controlledNodeId());
   const root = encodeURIComponent(item.target_identifier);
+  topologyStreamKey = key;
   topologyStream = new EventSource(`/api/v1/nodes/${home}/topology/events?root=${root}`);
   topologyStream.addEventListener('topology-update', () => {
     clearTimeout(topologyReloadTimer);
@@ -955,7 +983,7 @@ function openTopology(favoriteId) {
   persist();
   renderTopology();
   startTopologyCrawl(false);
-  connectTopologyStream();
+  syncTopologyStream();
 }
 
 document.querySelector('#topology-root').addEventListener('change', event => {
@@ -965,7 +993,7 @@ document.querySelector('#topology-root').addEventListener('change', event => {
   localStorage.setItem(TOPOLOGY_ROOT_KEY, topologyRootFavoriteId);
   renderTopology();
   startTopologyCrawl(false);
-  connectTopologyStream();
+  syncTopologyStream();
 });
 document.querySelector('#topology-refresh').addEventListener('click', () => startTopologyCrawl(true));
 document.querySelector('#topology-zoom-in').addEventListener('click', () => zoomTopology(0.75));
@@ -993,9 +1021,9 @@ async function loadFavorites() {
   renderConnectedStations(currentConnections);
   renderFavorites();
   renderTopology();
-  if (topologyFavorite() && !topologyStream) {
+  if (topologyFavorite() && topologyPanelVisible() && !topologyStream) {
     startTopologyCrawl(false);
-    connectTopologyStream();
+    syncTopologyStream();
   }
 }
 
@@ -1574,6 +1602,7 @@ function renderAll() {
     }
   });
   syncWindowMenuCheckboxes();
+  syncTopologyStream();
 }
 
 function renderNode(node) {
