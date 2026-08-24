@@ -151,11 +151,19 @@ def serialize_favorite(
         source_age_seconds = max(0, int((timestamp - _utc(freshness_time)).total_seconds()))
         public_stale = source_age_seconds > public_stale_seconds
     topology: list[dict[str, object]] = []
+    directory_metadata: dict[str, object] = {}
     if public_stat is not None:
         try:
             parsed_topology = json.loads(public_stat.topology_json)
             if isinstance(parsed_topology, list):
                 topology = [item for item in parsed_topology if isinstance(item, dict)]
+            elif isinstance(parsed_topology, dict):
+                parsed_links = parsed_topology.get("links")
+                parsed_root = parsed_topology.get("root")
+                if isinstance(parsed_links, list):
+                    topology = [item for item in parsed_links if isinstance(item, dict)]
+                if isinstance(parsed_root, dict):
+                    directory_metadata = parsed_root
         except json.JSONDecodeError:
             pass
     callsign = favorite.callsign_override
@@ -217,6 +225,7 @@ def serialize_favorite(
         ),
         "last_activity_at": _utc(last_activity).isoformat() if last_activity else None,
         "topology": topology,
+        "directory_metadata": directory_metadata,
         "last_keyed_at": stat.last_keyed_at.isoformat() if stat and stat.last_keyed_at else None,
         "last_unkeyed_at": (
             stat.last_unkeyed_at.isoformat() if stat and stat.last_unkeyed_at else None

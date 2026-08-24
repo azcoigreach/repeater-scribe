@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>REPEATER SCRIBE dashboard</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260823-4">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260824-1">
 </head>
 <body>
   <header class="topbar">
@@ -26,6 +26,7 @@
               <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
               <label><input type="checkbox" data-toggle-win="stations" checked> Connected nodes</label>
               <label><input type="checkbox" data-toggle-win="favorites" checked> Favorites</label>
+              <label><input type="checkbox" data-toggle-win="topology"> Network map</label>
               <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
               <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
               <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
@@ -118,6 +119,29 @@
           <thead><tr><th></th><th>Node</th><th>Callsign</th><th>Description</th><th>Location</th><th>Keys</th><th>TX</th><th>Rx%</th><th>Links</th><th>Updated</th><th>Actions</th></tr></thead>
           <tbody id="favorites"><tr><td colspan="11" class="empty">No favorite nodes yet.</td></tr></tbody>
         </table>
+      </div>
+    </section>
+
+    <section class="win" data-win="topology" data-title="Network map">
+      <header class="win-titlebar">
+        <span class="win-title">Network map</span>
+        <span id="topology-live-state" class="topology-live-state">Waiting for a favorite</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body topology-window-body">
+        <div class="topology-toolbar">
+          <label>Chart root<select id="topology-root"><option value="">Choose a favorite</option></select></label>
+          <button id="topology-refresh" class="control-button" type="button">Refresh</button>
+          <button id="topology-reset-positions" class="control-button" type="button">Reset bubbles</button>
+          <span id="topology-summary" class="topology-summary">Select Chart from a favorite row.</span>
+        </div>
+        <div class="topology-workspace">
+          <div id="topology-chart" class="topology-chart" role="application" aria-label="Interactive live node connection bubble chart"><div class="empty">Select Chart from a favorite row.</div></div>
+          <aside id="topology-details" class="topology-details" aria-live="polite">
+            <p class="empty">Click a bubble for current node details and controls.</p>
+          </aside>
+        </div>
+        <div class="topology-legend"><span><i class="bubble-swatch home"></i> Chart root</span><span><i class="bubble-swatch keyed"></i> Keyed</span><span><i class="bubble-swatch connected"></i> AMI connected</span><span><i class="bubble-swatch active"></i> AllStar active</span><span><i class="bubble-swatch missing"></i> Not in directory</span><span><i class="bubble-swatch unknown"></i> Unknown or stale</span></div>
       </div>
     </section>
 
@@ -252,14 +276,6 @@
     </form>
   </div>
 
-  <div id="topology-modal" class="modal" hidden>
-    <div class="modal-content topology-modal-content">
-      <div class="modal-head"><h2 id="topology-title">Favorite connections</h2><button id="close-topology" class="icon-button" type="button" aria-label="Close connection chart">&#10005;</button></div>
-      <p id="topology-summary" class="topology-summary"></p>
-      <div id="topology-chart" class="topology-chart" role="img" aria-label="Favorite node connection bubble chart"></div>
-      <div class="topology-legend"><span><i class="bubble-swatch keyed"></i> Keyed</span><span><i class="bubble-swatch active"></i> Active</span><span><i class="bubble-swatch unknown"></i> Unknown or stale</span></div>
-    </div>
-  </div>
-  <script src="/static/dashboard.js?v=20260823-6"></script>
+  <script src="/static/dashboard.js?v=20260824-1"></script>
 </body>
 </html>

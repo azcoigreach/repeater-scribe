@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -29,7 +30,14 @@ def stats_payload(*, keyups: int = 116, tx_seconds: int = 5369, keyed: bool = Fa
                         "callsign": "KI5KUD",
                         "Status": "Active",
                         "node_frequency": "South Coast Hub",
-                        "server": {"Location": "Vancleave, MS"},
+                        "node_tone": "100.0",
+                        "server": {
+                            "Location": "Vancleave, MS",
+                            "SiteName": "South Coast",
+                            "Affiliation": "Coastal Amateur Radio",
+                            "Latitude": "30.527616",
+                            "Logitude": "-88.695099",
+                        },
                     },
                     {"name": "KI5KUD"},
                 ],
@@ -40,7 +48,14 @@ def stats_payload(*, keyups: int = 116, tx_seconds: int = 5369, keyed: bool = Fa
             "callsign": "KN4EWT",
             "Status": "Active",
             "node_frequency": "Netoholics HUB",
-            "server": {"Location": "Carthage, TN"},
+            "node_tone": "123.0",
+            "server": {
+                "Location": "Carthage, TN",
+                "SiteName": "Netoholics Network",
+                "Affiliation": "netoholicsnetwork.net",
+                "Latitude": "36.362671",
+                "Logitude": "-85.870291",
+            },
         },
     }
 
@@ -75,11 +90,20 @@ def test_allstar_stats_populate_disconnected_favorite_and_topology(tmp_path) -> 
     assert item["topology"][0] == {
         "identifier": "63573",
         "callsign": "KI5KUD",
-        "description": "South Coast Hub",
+        "frequency": "South Coast Hub",
+        "tone": "100.0",
         "location": "Vancleave, MS",
+        "site_name": "South Coast",
+        "affiliation": "Coastal Amateur Radio",
+        "latitude": 30.527616,
+        "longitude": -88.695099,
+        "directory_status": "found",
         "active": True,
         "mode": "transceive",
     }
+    assert item["directory_metadata"]["tone"] == "123.0"
+    assert item["directory_metadata"]["site_name"] == "Netoholics Network"
+    assert item["topology"][1]["directory_status"] == "not_found"
 
 
 def test_stats_deltas_mark_recent_activity_without_requiring_keyed_flag(tmp_path) -> None:
@@ -113,3 +137,15 @@ def test_stats_deltas_mark_recent_activity_without_requiring_keyed_flag(tmp_path
     assert item["keyup_count"] == 117
     assert item["recently_active"] is True
     assert item["last_activity_at"] == (first_fetch + timedelta(seconds=3)).isoformat()
+
+
+def test_dashboard_has_dockable_draggable_live_network_map() -> None:
+    template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
+    script = Path("src/asl_transcriber/static/dashboard.js").read_text()
+
+    assert 'data-win="topology"' in template
+    assert 'data-toggle-win="topology"' in template
+    assert "attachTopologyInteraction" in script
+    assert "setPointerCapture" in script
+    assert "renderTopology();" in script
+    assert "topology-node-control" in script

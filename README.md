@@ -104,8 +104,10 @@ For public numeric favorites, the backend also polls the AllStarLink statistics
 API while the favorite is disconnected. It caches reported keyups, transmit
 time, uptime, kerchunks, activity state, and downstream link metadata in the
 Docker-mounted database. The dashboard uses that cache for its Favorites table
-and connection bubble charts, and marks old reports stale instead of erasing
-them during an upstream outage. Requests are paced at one every three seconds
+and interactive Network map window, and marks old reports stale instead of erasing
+them during an upstream outage. The map is dockable, merges live AMI state into
+the cached AllStar topology, keeps manually dragged bubble positions, and opens
+current metadata and connection controls when a bubble is selected. Requests are paced at one every three seconds
 to remain below the service's 30-request-per-minute limit. Set
 `ASLT_FAVORITE_STATS_ENABLED=false` to opt out; private nodes and nonnumeric
 client identifiers continue to use locally observed AMI history only.

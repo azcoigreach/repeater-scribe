@@ -60,6 +60,35 @@ def _mode_map(nodes: object) -> dict[str, str]:
     return result
 
 
+def _number(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _directory_metadata(item: dict[str, Any], identifier: str) -> dict[str, object]:
+    raw_server = item.get("server")
+    server: dict[str, Any] = raw_server if isinstance(raw_server, dict) else {}
+    found = bool(item.get("Node_ID") or item.get("callsign") or server)
+    callsign = _text(item.get("callsign"))
+    if callsign is None and not identifier.isdigit():
+        callsign = identifier
+    return {
+        "identifier": identifier,
+        "callsign": callsign,
+        "frequency": _text(item.get("node_frequency")),
+        "tone": _text(item.get("node_tone")),
+        "location": _text(server.get("Location")),
+        "site_name": _text(server.get("SiteName")),
+        "affiliation": _text(server.get("Affiliation")),
+        "latitude": _number(server.get("Latitude")),
+        "longitude": _number(server.get("Logitude")),
+        "directory_status": "found" if found else "not_found",
+        "active": item.get("Status") == "Active",
+    }
+
+
 def _topology(data: dict[str, Any]) -> list[dict[str, object]]:
     raw_links = data.get("links")
     links: list[Any] = raw_links if isinstance(raw_links, list) else []
@@ -79,20 +108,8 @@ def _topology(data: dict[str, Any]) -> list[dict[str, object]]:
             continue
         seen.add(identifier)
         item = metadata.get(identifier, {})
-        raw_server = item.get("server")
-        server: dict[str, Any] = raw_server if isinstance(raw_server, dict) else {}
-        callsign = _text(item.get("callsign"))
-        if callsign is None and not identifier.isdigit():
-            callsign = identifier
         result.append(
-            {
-                "identifier": identifier,
-                "callsign": callsign,
-                "description": _text(item.get("node_frequency")),
-                "location": _text(server.get("Location")),
-                "active": item.get("Status") == "Active",
-                "mode": modes.get(identifier, "linked"),
-            }
+            {**_directory_metadata(item, identifier), "mode": modes.get(identifier, "linked")}
         )
     return result
 
@@ -107,17 +124,17 @@ def parse_allstar_stats(payload: dict[str, Any], *, fetched_at: datetime | None 
     if not isinstance(node, dict):
         user_node = stats.get("user_node")
         node = user_node if isinstance(user_node, dict) else {}
-    raw_server = node.get("server")
-    server: dict[str, Any] = raw_server if isinstance(raw_server, dict) else {}
     identifier = str(stats.get("node") or node.get("name") or "").strip()
     if not is_public_node(identifier):
         raise AllStarStatsError("AllStar response does not identify a public node")
     topology = _topology(data)
+    root_metadata = _directory_metadata(node, identifier)
+    root_metadata["app_rpt_version"] = _text(data.get("apprptvers"))
     return {
         "remote_identifier": identifier,
         "callsign": _text(node.get("callsign")),
         "description": _text(node.get("node_frequency")),
-        "location": _text(server.get("Location")),
+        "location": root_metadata["location"],
         "active": node.get("Status") == "Active",
         "keyed": bool(data.get("keyed")),
         "total_keyups": max(0, _integer(data.get("totalkeyups"))),
@@ -125,7 +142,9 @@ def parse_allstar_stats(payload: dict[str, Any], *, fetched_at: datetime | None 
         "total_kerchunks": max(0, _integer(data.get("totalkerchunks"))),
         "uptime_seconds": max(0, _integer(data.get("apprptuptime"))),
         "link_count": len(topology),
-        "topology_json": json.dumps(topology, separators=(",", ":")),
+        "topology_json": json.dumps(
+            {"root": root_metadata, "links": topology}, separators=(",", ":")
+        ),
         "source_reported_at": _timestamp(data.get("time")),
         "fetched_at": fetched,
     }

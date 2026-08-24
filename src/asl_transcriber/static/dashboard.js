@@ -96,6 +96,7 @@ function renderNodeSnapshot(data) {
   document.querySelector('#active-channels').textContent = connections.length;
   renderConnectedStations(connections);
   renderFavorites();
+  renderTopology();
   confirmPendingControl(connections);
 }
 
@@ -163,54 +164,284 @@ function renderFavorites() {
   table.querySelectorAll('.favorite-edit').forEach(button => button.addEventListener('click', () => openFavoriteEditor(button.dataset.favoriteId)));
 }
 
+const TOPOLOGY_POSITIONS_KEY = 'dashboard-topology-positions';
+const TOPOLOGY_ROOT_KEY = 'dashboard-topology-root';
+let topologyRootFavoriteId = localStorage.getItem(TOPOLOGY_ROOT_KEY) || '';
+let topologySelectedNodeId = '';
+let topologyPositions = loadTopologyPositions();
+
+function loadTopologyPositions() {
+  try { return JSON.parse(localStorage.getItem(TOPOLOGY_POSITIONS_KEY) || '{}'); } catch { return {}; }
+}
+
+function saveTopologyPositions() {
+  localStorage.setItem(TOPOLOGY_POSITIONS_KEY, JSON.stringify(topologyPositions));
+}
+
+function topologyFavorite() {
+  return favoriteItems.find(item => String(item.id) === String(topologyRootFavoriteId)) || null;
+}
+
+function updateTopologyRootOptions() {
+  const select = document.querySelector('#topology-root');
+  select.innerHTML = '<option value="">Choose a favorite</option>' + favoriteItems.map(item =>
+    `<option value="${esc(item.id)}">${esc(item.target_identifier)} · ${esc(item.callsign || item.label || 'Favorite')}</option>`
+  ).join('');
+  if (topologyFavorite()) select.value = topologyRootFavoriteId;
+}
+
+function mergedTopology(item) {
+  const rootId = String(item.target_identifier);
+  const liveById = new Map(currentConnections.map(connection => [String(connection.identifier), connection]));
+  const favoritesById = new Map(favoriteItems.map(favorite => [String(favorite.target_identifier), favorite]));
+  const rootDirectory = item.directory_metadata || {};
+  const rootLive = liveById.get(rootId);
+  const root = {
+    ...rootDirectory,
+    identifier: rootId,
+    callsign: item.callsign || rootDirectory.callsign,
+    frequency: rootDirectory.frequency || item.description,
+    location: item.location || rootDirectory.location,
+    root: true,
+    favorite: true,
+    connected: Boolean(rootLive || item.connected),
+    keyed: rootLive ? rootLive.keyed === true : item.keyed === true,
+    active: item.public_active === true,
+    stale: item.stats_stale === true,
+    connection_state: rootLive?.connection_state || item.connection_state,
+    direction: rootLive?.direction,
+    mode: rootLive?.link_mode || item.default_connection_mode,
+    connected_at: rootLive?.connected_at,
+    keyup_count: item.keyup_count,
+    total_tx_milliseconds: item.total_tx_milliseconds,
+    kerchunk_count: item.reported_kerchunk_count,
+    uptime_seconds: item.reported_uptime_seconds,
+    last_activity_at: item.last_activity_at,
+  };
+  const nodes = [root];
+  const homeNode = controlledNodeId();
+  (Array.isArray(item.topology) ? item.topology : []).forEach(link => {
+    const identifier = String(link.identifier);
+    if (!identifier || identifier === rootId) return;
+    const live = liveById.get(identifier);
+    const favorite = favoritesById.get(identifier);
+    const isLocalEnd = identifier === homeNode && root.connected;
+    nodes.push({
+      ...link,
+      identifier,
+      callsign: favorite?.callsign || live?.callsign || link.callsign,
+      frequency: link.frequency || link.description || favorite?.description,
+      location: favorite?.location || link.location,
+      favorite: Boolean(favorite),
+      connected: Boolean(live || isLocalEnd),
+      keyed: live ? live.keyed === true : favorite?.keyed === true,
+      active: favorite?.public_active === true || link.active === true,
+      stale: favorite?.stats_stale === true || live?.stale === true,
+      connection_state: live?.connection_state || (isLocalEnd ? 'local node' : null),
+      direction: live?.direction,
+      mode: live?.link_mode || link.mode,
+      connected_at: live?.connected_at,
+      keyup_count: favorite?.keyup_count,
+      total_tx_milliseconds: favorite?.total_tx_milliseconds,
+      kerchunk_count: favorite?.reported_kerchunk_count,
+      uptime_seconds: favorite?.reported_uptime_seconds,
+      last_activity_at: favorite?.last_activity_at,
+    });
+  });
+  return { root, nodes };
+}
+
+function initialTopologyPosition(rootId, identifier, index, count) {
+  topologyPositions[rootId] ||= {};
+  if (topologyPositions[rootId][identifier]) return topologyPositions[rootId][identifier];
+  const position = identifier === rootId
+    ? { x: 450, y: 300 }
+    : {
+        x: 450 + Math.cos(-Math.PI / 2 + Math.PI * 2 * index / Math.max(1, count)) * (count > 12 ? 330 : 285),
+        y: 300 + Math.sin(-Math.PI / 2 + Math.PI * 2 * index / Math.max(1, count)) * (count > 12 ? 225 : 190),
+      };
+  topologyPositions[rootId][identifier] = position;
+  return position;
+}
+
+function topologyNodeClass(node) {
+  if (node.keyed) return 'keyed';
+  if (node.connection_state === 'connecting') return 'connecting';
+  if (node.root) return 'root';
+  if (node.connected) return 'connected';
+  if (node.directory_status === 'not_found') return 'missing';
+  if (node.active) return 'active';
+  return 'unknown';
+}
+
+function renderTopology() {
+  updateTopologyRootOptions();
+  const item = topologyFavorite();
+  const chart = document.querySelector('#topology-chart');
+  if (!item) {
+    chart.innerHTML = '<div class="empty">Select Chart from a favorite row.</div>';
+    document.querySelector('#topology-summary').textContent = 'Select Chart from a favorite row.';
+    document.querySelector('#topology-live-state').textContent = 'Waiting for a favorite';
+    return;
+  }
+  const { root, nodes } = mergedTopology(item);
+  const rootId = root.identifier;
+  const linked = nodes.filter(node => node.identifier !== rootId);
+  const positions = new Map(nodes.map((node, index) => [
+    node.identifier,
+    initialTopologyPosition(rootId, node.identifier, index, linked.length),
+  ]));
+  const rootPosition = positions.get(rootId);
+  const edges = linked.map(node => {
+    const position = positions.get(node.identifier);
+    const live = root.connected && (node.identifier === controlledNodeId() || node.connected);
+    return `<line class="topology-edge${live ? ' live' : ''}" data-edge-target="${esc(node.identifier)}" x1="${rootPosition.x}" y1="${rootPosition.y}" x2="${position.x}" y2="${position.y}"></line>`;
+  }).join('');
+  const bubbles = nodes.map(node => {
+    const position = positions.get(node.identifier);
+    const stateClass = topologyNodeClass(node);
+    const selected = node.identifier === topologySelectedNodeId ? ' selected' : '';
+    const stale = node.stale ? ' stale' : '';
+    const detail = node.callsign || node.mode || (node.directory_status === 'not_found' ? 'Not in directory' : 'AllStar node');
+    return `<g class="topology-node ${stateClass}${selected}${stale}" data-node-id="${esc(node.identifier)}" tabindex="0" role="button" aria-label="Node ${esc(node.identifier)} ${esc(detail)}" transform="translate(${position.x} ${position.y})"><ellipse class="topology-bubble" rx="70" ry="36"></ellipse><text class="topology-label" y="-5">${esc(node.identifier)}</text><text class="topology-detail" y="14">${esc(detail)}</text></g>`;
+  }).join('');
+  chart.innerHTML = `<svg viewBox="0 0 900 600" preserveAspectRatio="xMidYMid meet">${edges}${bubbles}</svg>`;
+  const reportAge = formatAge(item.stats_age_seconds);
+  document.querySelector('#topology-summary').textContent = `${linked.length} reported link${linked.length === 1 ? '' : 's'} · AllStar ${reportAge}${item.stats_stale ? ' · stale cache' : ''}`;
+  document.querySelector('#topology-live-state').textContent = root.connected ? 'AMI live · AllStar cached' : 'AllStar live cache · AMI disconnected';
+  attachTopologyInteraction(nodes, rootId);
+  if (topologySelectedNodeId) renderTopologyDetails(nodes.find(node => node.identifier === topologySelectedNodeId));
+}
+
+function svgPoint(svg, event) {
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  return point.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function updateTopologyEdges(svg, rootId, identifier, position) {
+  if (identifier === rootId) {
+    svg.querySelectorAll('.topology-edge').forEach(edge => {
+      edge.setAttribute('x1', position.x);
+      edge.setAttribute('y1', position.y);
+    });
+    return;
+  }
+  const edge = Array.from(svg.querySelectorAll('.topology-edge')).find(candidate => candidate.dataset.edgeTarget === identifier);
+  if (edge) {
+    edge.setAttribute('x2', position.x);
+    edge.setAttribute('y2', position.y);
+  }
+}
+
+function attachTopologyInteraction(nodes, rootId) {
+  const svg = document.querySelector('#topology-chart svg');
+  if (!svg) return;
+  const byId = new Map(nodes.map(node => [node.identifier, node]));
+  svg.querySelectorAll('.topology-node').forEach(bubble => {
+    let drag = null;
+    bubble.addEventListener('pointerdown', event => {
+      const start = svgPoint(svg, event);
+      const position = topologyPositions[rootId][bubble.dataset.nodeId];
+      drag = { start, origin: { ...position }, moved: false };
+      bubble.setPointerCapture(event.pointerId);
+    });
+    bubble.addEventListener('pointermove', event => {
+      if (!drag) return;
+      const point = svgPoint(svg, event);
+      const dx = point.x - drag.start.x;
+      const dy = point.y - drag.start.y;
+      drag.moved ||= Math.abs(dx) + Math.abs(dy) > 3;
+      const position = {
+        x: Math.min(825, Math.max(75, drag.origin.x + dx)),
+        y: Math.min(550, Math.max(50, drag.origin.y + dy)),
+      };
+      topologyPositions[rootId][bubble.dataset.nodeId] = position;
+      bubble.setAttribute('transform', `translate(${position.x} ${position.y})`);
+      updateTopologyEdges(svg, rootId, bubble.dataset.nodeId, position);
+    });
+    bubble.addEventListener('pointerup', event => {
+      if (!drag) return;
+      bubble.releasePointerCapture(event.pointerId);
+      if (drag.moved) saveTopologyPositions();
+      else selectTopologyNode(byId.get(bubble.dataset.nodeId));
+      drag = null;
+    });
+    bubble.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectTopologyNode(byId.get(bubble.dataset.nodeId));
+      }
+    });
+  });
+}
+
+function detailValue(value, fallback = '—') {
+  return value === null || value === undefined || value === '' ? fallback : value;
+}
+
+function renderTopologyDetails(node) {
+  const details = document.querySelector('#topology-details');
+  if (!node) {
+    details.innerHTML = '<p class="empty">That node is no longer present in the latest topology.</p>';
+    return;
+  }
+  const connectedFor = node.connected_at ? formatAge((Date.now() - new Date(node.connected_at).getTime()) / 1000).replace(' ago', '') : '—';
+  const coordinates = node.latitude !== null && node.latitude !== undefined && node.longitude !== null && node.longitude !== undefined
+    ? `${node.latitude}, ${node.longitude}` : '—';
+  const favorite = favoriteItems.find(item => String(item.target_identifier) === String(node.identifier));
+  const canControl = String(node.identifier) !== controlledNodeId();
+  details.innerHTML = `<h3>Node ${esc(node.identifier)}</h3><p class="node-detail-callsign">${esc(detailValue(node.callsign, node.directory_status === 'not_found' ? 'Not in AllStar directory' : 'Unknown callsign'))}</p><dl class="topology-detail-grid"><dt>Status</dt><dd>${esc(node.keyed ? 'Keyed now' : node.connected ? `Connected · ${node.connection_state || 'established'}` : node.active ? 'Reporting active' : 'Inactive or unknown')}</dd><dt>Frequency</dt><dd>${esc(detailValue(node.frequency))}</dd><dt>Tone</dt><dd>${esc(detailValue(node.tone))}</dd><dt>Location</dt><dd>${esc(detailValue(node.location))}</dd><dt>Site</dt><dd>${esc(detailValue(node.site_name))}</dd><dt>Affiliation</dt><dd>${esc(detailValue(node.affiliation))}</dd><dt>Coordinates</dt><dd>${esc(coordinates)}</dd><dt>Link mode</dt><dd>${esc(detailValue(node.mode))}</dd><dt>Direction</dt><dd>${esc(detailValue(node.direction))}</dd><dt>Connected for</dt><dd>${esc(connectedFor)}</dd><dt>Keyups</dt><dd>${esc(detailValue(node.keyup_count))}</dd><dt>TX time</dt><dd>${esc(node.total_tx_milliseconds === undefined ? '—' : formatDuration(node.total_tx_milliseconds))}</dd><dt>Kerchunks</dt><dd>${esc(detailValue(node.kerchunk_count))}</dd><dt>Last activity</dt><dd>${esc(node.last_activity_at ? new Date(node.last_activity_at).toLocaleString() : '—')}</dd><dt>app_rpt</dt><dd>${esc(detailValue(node.app_rpt_version))}</dd></dl><div class="topology-detail-actions">${canControl ? `<button class="control-button topology-node-control" data-command="${node.connected ? 'Disconnect node' : 'Connect node'}" data-target="${esc(node.identifier)}" type="button">${node.connected ? 'Disconnect' : 'Connect'}</button>` : ''}${favorite ? `<button class="control-button topology-edit-favorite" data-favorite-id="${esc(favorite.id)}" type="button">Edit favorite</button>` : `<button class="control-button topology-add-favorite" data-target="${esc(node.identifier)}" type="button">Add favorite</button>`}</div>`;
+  details.querySelector('.topology-node-control')?.addEventListener('click', buttonEvent => {
+    const button = buttonEvent.currentTarget;
+    runCommand(button.dataset.command, button.dataset.target);
+  });
+  details.querySelector('.topology-edit-favorite')?.addEventListener('click', buttonEvent => openFavoriteEditor(buttonEvent.currentTarget.dataset.favoriteId));
+  details.querySelector('.topology-add-favorite')?.addEventListener('click', buttonEvent => addConnectedFavorite(buttonEvent.currentTarget.dataset.target));
+}
+
+function selectTopologyNode(node) {
+  if (!node) return;
+  topologySelectedNodeId = node.identifier;
+  document.querySelectorAll('#topology-chart .topology-node').forEach(bubble => bubble.classList.toggle('selected', bubble.dataset.nodeId === node.identifier));
+  renderTopologyDetails(node);
+}
+
 function openTopology(favoriteId) {
   const item = favoriteItems.find(candidate => candidate.id === favoriteId);
   if (!item) return;
-  const links = Array.isArray(item.topology) ? item.topology : [];
-  const favoriteByTarget = new Map(favoriteItems.map(candidate => [String(candidate.target_identifier), candidate]));
-  const width = 800;
-  const height = Math.max(440, links.length > 14 ? 560 : 440);
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const rings = links.length > 10 ? 2 : 1;
-  const positions = links.map((link, index) => {
-    const ring = rings === 2 && index >= Math.ceil(links.length / 2) ? 1 : 0;
-    const ringStart = ring === 0 ? 0 : Math.ceil(links.length / 2);
-    const ringCount = ring === 0 ? Math.min(links.length, Math.ceil(links.length / 2)) : links.length - ringStart;
-    const ringIndex = index - ringStart;
-    const radiusX = ring === 0 ? 245 : 350;
-    const radiusY = ring === 0 ? 145 : 220;
-    const angle = -Math.PI / 2 + (Math.PI * 2 * ringIndex / Math.max(1, ringCount));
-    return { x: centerX + Math.cos(angle) * radiusX, y: centerY + Math.sin(angle) * radiusY };
-  });
-  const edges = positions.map(position => `<line class="topology-edge" x1="${centerX}" y1="${centerY}" x2="${position.x.toFixed(1)}" y2="${position.y.toFixed(1)}"></line>`).join('');
-  const bubbles = links.map((link, index) => {
-    const identifier = String(link.identifier || 'unknown');
-    const cached = favoriteByTarget.get(identifier);
-    const keyed = cached?.keyed === true;
-    const active = keyed || cached?.public_active === true || link.active === true;
-    const stateClass = keyed ? 'keyed' : active ? 'active' : 'unknown';
-    const detail = link.callsign && link.callsign !== identifier ? link.callsign : link.mode || 'linked';
-    const title = [link.description, link.location, link.mode].filter(Boolean).join(' · ');
-    const position = positions[index];
-    return `<g class="topology-node ${stateClass}" transform="translate(${position.x.toFixed(1)} ${position.y.toFixed(1)})"><title>${esc(title || identifier)}</title><ellipse class="topology-bubble" rx="57" ry="29"></ellipse><text class="topology-label" y="-3">${esc(identifier)}</text><text class="topology-detail" y="14">${esc(detail)}</text></g>`;
-  }).join('');
-  const centerState = item.keyed ? 'keyed' : item.public_active ? 'active' : 'unknown';
-  const centerDetail = item.callsign || item.label || 'favorite';
-  const center = `<g class="topology-node ${centerState}" transform="translate(${centerX} ${centerY})"><ellipse class="topology-bubble" rx="68" ry="35"></ellipse><text class="topology-label" y="-4">${esc(item.target_identifier)}</text><text class="topology-detail" y="14">${esc(centerDetail)}</text></g>`;
-  document.querySelector('#topology-title').textContent = `${item.target_identifier} connection bubbles`;
-  document.querySelector('#topology-summary').textContent = links.length
-    ? `${links.length} reported link${links.length === 1 ? '' : 's'} · AllStar stats ${formatAge(item.stats_age_seconds)}${item.stats_stale ? ' · cached/stale' : ''}`
-    : `No links reported · AllStar stats ${formatAge(item.stats_age_seconds)}${item.stats_stale ? ' · cached/stale' : ''}`;
-  document.querySelector('#topology-chart').innerHTML = links.length
-    ? `<svg viewBox="0 0 ${width} ${height}" aria-hidden="true">${edges}${bubbles}${center}</svg>`
-    : `<div class="empty">No downstream connections are present in the cached AllStar report.</div>`;
-  document.querySelector('#topology-modal').hidden = false;
+  topologyRootFavoriteId = String(item.id);
+  topologySelectedNodeId = String(item.target_identifier);
+  localStorage.setItem(TOPOLOGY_ROOT_KEY, topologyRootFavoriteId);
+  state.hidden = state.hidden.filter(panelId => panelId !== 'topology');
+  let group = findGroupWithPanel(state.tree, 'topology');
+  if (!group && !state.floating.topology) {
+    group = findGroupWithPanel(state.tree, 'favorites');
+    if (group) {
+      group.panels.push('topology');
+      group.active = 'topology';
+    } else dockPanelDefault('topology');
+  } else if (group) group.active = 'topology';
+  renderAll();
+  persist();
+  renderTopology();
 }
 
-const topologyModal = document.querySelector('#topology-modal');
-document.querySelector('#close-topology').addEventListener('click', () => { topologyModal.hidden = true; });
-topologyModal.addEventListener('click', event => { if (event.target === topologyModal) topologyModal.hidden = true; });
+document.querySelector('#topology-root').addEventListener('change', event => {
+  topologyRootFavoriteId = event.target.value;
+  topologySelectedNodeId = '';
+  localStorage.setItem(TOPOLOGY_ROOT_KEY, topologyRootFavoriteId);
+  renderTopology();
+});
+document.querySelector('#topology-refresh').addEventListener('click', loadFavorites);
+document.querySelector('#topology-reset-positions').addEventListener('click', () => {
+  const item = topologyFavorite();
+  if (!item) return;
+  delete topologyPositions[String(item.target_identifier)];
+  saveTopologyPositions();
+  renderTopology();
+});
 
 async function loadFavorites() {
   const response = await fetch(`/api/v1/nodes/${encodeURIComponent(controlledNodeId())}/favorites`, { cache: 'no-store' });
@@ -221,6 +452,7 @@ async function loadFavorites() {
   favoriteItems = (await response.json()).items || [];
   renderConnectedStations(currentConnections);
   renderFavorites();
+  renderTopology();
 }
 
 async function addConnectedFavorite(identifier) {
@@ -508,6 +740,7 @@ const PANEL_TITLES = {
   node: 'Node status',
   stations: 'Connected nodes',
   favorites: 'Favorites',
+  topology: 'Network map',
   controls: 'Node controls',
   transcripts: 'Transcripts',
   activity: 'Activity log',
@@ -564,6 +797,9 @@ if (state.hidden.includes('properties')) {
   state.hidden = state.hidden.map(panelId => panelId === 'properties' ? 'functions' : panelId);
 }
 if (!state.hidden.includes('status')) state.hidden.push('status');
+if (!findGroupWithPanel(state.tree, 'topology') && !state.floating.topology && !state.hidden.includes('topology')) {
+  state.hidden.push('topology');
+}
 if (!findGroupWithPanel(state.tree, 'functions') && !state.floating.functions) {
   dockPanelDefault('functions');
   state.hidden = state.hidden.filter(panelId => panelId !== 'functions');
@@ -1068,7 +1304,7 @@ document.querySelector('#layout-save').addEventListener('click', () => {
   renderPresetList();
 });
 document.querySelector('#reset-layout').addEventListener('click', () => {
-  state = { tree: defaultTree(), floating: {}, hidden: ['status'] };
+  state = { tree: defaultTree(), floating: {}, hidden: ['status', 'topology'] };
   renderAll();
   persist();
 });
