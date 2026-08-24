@@ -22,10 +22,66 @@ The application never renames, moves, deletes, or writes to files below the
 configured archive paths. It scans on startup and polls the archive every five
 seconds by default; adjust `ASLT_ARCHIVE_POLL_SECONDS` when needed.
 With `ASLT_AUTO_PROCESS=true`, stable recordings are also transcribed
-automatically in the background.
+automatically in the background. With `ASLT_LIVE_TRANSCRIPTION=true`, a second
+local loop snapshots a growing WAV through FFmpeg and publishes a provisional
+rolling transcript while the radio is still keyed. The archive mount remains
+read-only; snapshots are created below `ASLT_TMP_DIR` and deleted after each
+pass. The completed recording always receives a new full-file accuracy pass.
 Recordings are shown as `waiting` while their size or modification time is
-changing. They are queued only after an unchanged poll, so an active ASL3
-recording is never processed mid-write.
+changing, and as `live` after the first provisional result. They are queued for
+the final pass only after an unchanged archive poll.
+
+## Local Whisper profiles
+
+The supplied configuration targets a 12 GB NVIDIA card with the largest stock
+Whisper model:
+
+```dotenv
+ASLT_WHISPER_MODEL=large-v3
+ASLT_WHISPER_DEVICE=cuda
+ASLT_WHISPER_COMPUTE_TYPE=float16
+ASLT_WHISPER_BEAM_SIZE=5
+ASLT_LIVE_TRANSCRIPTION=true
+ASLT_LIVE_BEAM_SIZE=1
+ASLT_LIVE_WINDOW_SECONDS=12
+ASLT_LIVE_POLL_SECONDS=1.5
+```
+
+The same loaded `large-v3` model is shared by both paths. Live snapshots use a
+greedy beam of 1 and no cross-window conditioning for latency; the final pass
+uses beam 5, VAD, and the complete WAV. Inference calls are serialized so two
+copies of the model do not compete for VRAM. Docker Compose requests the NVIDIA
+GPU and the image contains the CUDA 12 cuBLAS/cuDNN runtime libraries. The host
+still needs an NVIDIA driver and NVIDIA Container Toolkit.
+
+For a CPU-only installation, use `ASLT_WHISPER_DEVICE=cpu` and
+`ASLT_WHISPER_COMPUTE_TYPE=int8`. `large-v3` is the largest CPU-capable model,
+but `medium.en` is generally the more practical near-live CPU profile. Model
+files are cached under `ASLT_WHISPER_MODEL_DIR`; after the one-time model
+download, transcription does not send audio or text to an external service.
+
+Benchmark the configured local final-pass model against real archive audio:
+
+```bash
+docker compose run --rm repeater-scribe \
+  asl-transcriber benchmark /audio/668390/example.wav
+```
+
+The JSON output includes audio duration, processing duration, real-time factor,
+raw text, and callsign-corrected display text. A real-time factor below `1.0`
+means inference completed faster than the recording duration.
+
+Callsign handling remains local. `ASLT_KNOWN_CALLSIGNS` is a comma-separated,
+short list of locally relevant calls. Each call is supplied to Whisper in both
+written and NATO-phonetic form, and the display transcript converts a spoken
+phonetic sequence only when it exactly matches that candidate list. The raw
+model transcript is retained unchanged. Add current club/operator calls here;
+do not add an entire callsign database to the hotword prompt.
+
+No OpenAI credentials or remote transcription API are used by this profile.
+The transcription engine protocol remains backend-neutral so an explicitly
+configured remote adapter can be added later without changing ingestion or the
+provisional/final transcript states.
 
 ## Development
 
@@ -123,6 +179,8 @@ client identifiers continue to use locally observed AMI history only.
 
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.
+Provisional transcript events are emitted on the existing `/api/v1/events` SSE
+stream and are marked with `"provisional": true`.
 
 Node-control milestones after this foundation are favorites ordering, durable
 transmission-to-recording correlation, AllStar/EchoLink station enrichment, and
