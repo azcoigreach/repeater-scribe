@@ -13,6 +13,41 @@ def test_rolling_transcript_merges_window_overlap() -> None:
     ) == "hello from kilo mike seven golf hotel sierra"
 
 
+def test_rolling_transcript_replaces_redecoded_window() -> None:
+    current = (
+        "Hopefully I have something by winter. I just have to figure out what it is "
+        "I absolutely want, you know what I mean?"
+    )
+
+    assert (
+        merge_overlapping_text(
+            "Hopefully I have something, by winter. I just have to figure out how to get it.",
+            current,
+        )
+        == current
+    )
+
+
+def test_rolling_transcript_keeps_stable_prefix_when_replacing_redecoded_window() -> None:
+    current = (
+        "Hopefully I have something by winter. I just have to figure out what it is "
+        "I absolutely want."
+    )
+
+    assert merge_overlapping_text(
+        "Earlier stable words stay here. Hopefully I have something, by winter. "
+        "I just have to figure out how to get it.",
+        current,
+    ) == f"Earlier stable words stay here. {current}"
+
+
+def test_rolling_transcript_appends_unrelated_window() -> None:
+    assert merge_overlapping_text(
+        "The first completed thought ends here.",
+        "A completely unrelated topic starts now.",
+    ) == "The first completed thought ends here. A completely unrelated topic starts now."
+
+
 def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Path) -> None:
     recording = tmp_path / "archive" / "100000" / "active.wav"
     recording.parent.mkdir(parents=True)

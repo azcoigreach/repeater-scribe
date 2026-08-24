@@ -18,6 +18,11 @@ All notable changes to this project will be documented in this file.
 - Shipped callsign, AMI-secret, and API-key examples now default empty so each
   installation must supply its own site-specific values.
 
+### Fixed
+
+- Provisional rolling transcripts now replace a re-decoded trailing window instead of
+  appending a near-duplicate copy of the same speech.
+
 ## [0.5.0] - 2026-08-24
 
 ### Added

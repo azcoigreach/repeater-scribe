@@ -14,6 +14,36 @@ from asl_transcriber.transcription.base import TranscriptResult
 logger = logging.getLogger(__name__)
 
 
+def _find_redecoded_tail_start(previous_keys: list[str], current_keys: list[str]) -> int | None:
+    """Find where a revised rolling window begins in accumulated text."""
+    lookback = max(80, len(current_keys) * 2)
+    first_start = max(0, len(previous_keys) - lookback)
+    best: tuple[int, float, int, int] | None = None
+
+    for previous_start in range(first_start, len(previous_keys) - 2):
+        previous_tail = previous_keys[previous_start:]
+        length_slack = max(6, len(previous_tail) // 3)
+        minimum_prefix = max(3, len(previous_tail) - length_slack)
+        maximum_prefix = min(len(current_keys), len(previous_tail) + length_slack)
+        for prefix_length in range(minimum_prefix, maximum_prefix + 1):
+            matcher = SequenceMatcher(
+                None,
+                previous_tail,
+                current_keys[:prefix_length],
+                autojunk=False,
+            )
+            matching_words = sum(block.size for block in matcher.get_matching_blocks())
+            similarity = matcher.ratio()
+            if matching_words < 3 or similarity < 0.58:
+                continue
+
+            candidate = (matching_words, similarity, prefix_length, -previous_start)
+            if best is None or candidate > best:
+                best = candidate
+
+    return -best[3] if best is not None else None
+
+
 def merge_overlapping_text(previous: str, current: str) -> str:
     """Merge a rolling-window transcript into the provisional transmission text."""
     previous_words = previous.split()
@@ -30,13 +60,13 @@ def merge_overlapping_text(previous: str, current: str) -> str:
         if previous_keys[-overlap:] == current_keys[:overlap]:
             return " ".join(previous_words + current_words[overlap:]).strip()
 
-    match = SequenceMatcher(None, previous_keys, current_keys, autojunk=False).find_longest_match()
-    near_previous_end = len(previous_keys) - (match.a + match.size) <= 2
-    near_current_start = match.b <= 2
-    if match.size >= 3 and near_previous_end and near_current_start:
-        return " ".join(previous_words + current_words[match.b + match.size :]).strip()
     if " ".join(current_keys) in " ".join(previous_keys):
         return previous.strip()
+
+    redecoded_tail_start = _find_redecoded_tail_start(previous_keys, current_keys)
+    if redecoded_tail_start is not None:
+        return " ".join(previous_words[:redecoded_tail_start] + current_words).strip()
+
     return " ".join(previous_words + current_words).strip()
 
 
