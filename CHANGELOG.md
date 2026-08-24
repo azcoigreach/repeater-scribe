@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-24
+
+### Changed
+
+- The README now documents Repeater Scribe as an AllStar node-operations,
+  transcription, favorites, and topology application, including deployment and
+  security boundaries.
+- Package metadata now describes the node-control, network-mapping, and local
+  transcription application rather than the original archive-only companion.
+- Removed the unused `ASLT_AUDIO_API_MODE` and `ASLT_READ_ONLY_MODE` settings;
+  they did not enforce authentication or disable AMI controls.
+- Shipped callsign, AMI-secret, and API-key examples now default empty so each
+  installation must supply its own site-specific values.
+
 ## [0.5.0] - 2026-08-24
 
 ### Added
@@ -30,13 +44,6 @@ All notable changes to this project will be documented in this file.
   transcription environment.
 - The deployment example and application default no longer contain a site-specific
   AllStar node ID; operators must configure `ASLT_AMI_NODE_ID` explicitly.
-- The README now documents Repeater Scribe as an AllStar node-operations,
-  transcription, favorites, and topology application, including deployment and
-  security boundaries.
-- Removed the unused `ASLT_AUDIO_API_MODE` and `ASLT_READ_ONLY_MODE` settings;
-  they did not enforce authentication or disable AMI controls.
-- Shipped callsign, AMI-secret, and API-key examples now default empty so each
-  installation must supply its own site-specific values.
 
 ## [0.4.0] - 2026-08-23
 
