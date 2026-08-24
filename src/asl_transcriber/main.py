@@ -7,16 +7,28 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.config import settings
+from asl_transcriber.database import SessionLocal, get_db
+from asl_transcriber.favorites import (
+    FavoriteNotFound,
+    create_favorite,
+    delete_favorite,
+    list_favorite_items,
+    record_remote_key_transition,
+    update_favorite,
+)
+from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.transcription.faster_whisper import FasterWhisperEngine
@@ -118,9 +130,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                     logger.exception("Background archive processing cycle failed")
             await asyncio.sleep(settings.archive_poll_seconds)
 
+    async def persist_key_transition(transition: RemoteKeyTransition) -> None:
+        await asyncio.to_thread(record_remote_key_transition, SessionLocal, transition)
+
     watcher = asyncio.create_task(poll_archive())
     node_monitor = (
-        NodeStateService(settings) if settings.ami_enabled and settings.ami_secret else None
+        NodeStateService(settings, transition_callback=persist_key_transition)
+        if settings.ami_enabled and settings.ami_secret
+        else None
     )
     if node_monitor is not None:
         await node_monitor.start()
@@ -215,6 +232,158 @@ def node_links(home: str) -> dict[str, object]:
     monitor = active_node_monitor()
     state = monitor.state(validate_node_identifier(home, label="home node"))
     return {"items": [monitor.serialize_link(link) for link in state.links.values()]}
+
+
+class FavoriteCreateRequest(BaseModel):
+    target_identifier: str
+    label: str | None = Field(default=None, max_length=255)
+    callsign: str | None = Field(default=None, max_length=32)
+    description: str | None = Field(default=None, max_length=255)
+    location: str | None = Field(default=None, max_length=255)
+
+
+class FavoriteUpdateRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=255)
+    callsign: str | None = Field(default=None, max_length=32)
+    description: str | None = Field(default=None, max_length=255)
+    location: str | None = Field(default=None, max_length=255)
+    group_name: str | None = Field(default=None, max_length=64)
+    sort_order: int | None = None
+    default_connection_mode: str | None = Field(default=None, max_length=32)
+    permanent: bool | None = None
+    exclusive_connect: bool | None = None
+
+
+def favorite_items(db: Session, home: str) -> list[dict[str, object]]:
+    links = node_monitor.state(home).links if node_monitor is not None else {}
+    return list_favorite_items(db, home, links)
+
+
+def require_ui_write() -> None:
+    if settings.auth_mode != "off":
+        raise HTTPException(status_code=401, detail="Web authentication is required")
+
+
+def require_api_key(x_api_key: str | None) -> None:
+    if not settings.api_key or x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="A valid API key is required")
+
+
+def create_favorite_record(
+    home: str, request: FavoriteCreateRequest, db: Session
+) -> dict[str, object]:
+    home = validate_node_identifier(home, label="home node")
+    target = validate_node_identifier(request.target_identifier, label="target")
+    create_favorite(
+        db,
+        home_node=home,
+        target_identifier=target,
+        label=(request.label or target).strip() or target,
+        callsign=request.callsign.strip() if request.callsign else None,
+        description=request.description.strip() if request.description else None,
+        location=request.location.strip() if request.location else None,
+    )
+    return next(
+        item for item in favorite_items(db, home) if item["target_identifier"] == target
+    )
+
+
+def update_favorite_record(
+    home: str, favorite_id: str, request: FavoriteUpdateRequest, db: Session
+) -> dict[str, object]:
+    home = validate_node_identifier(home, label="home node")
+    values = request.model_dump(exclude_unset=True)
+    for field in ("label", "callsign", "description", "location", "group_name"):
+        if isinstance(values.get(field), str):
+            values[field] = values[field].strip() or None
+    if "label" in values and not values["label"]:
+        raise HTTPException(status_code=422, detail="Favorite label cannot be empty")
+    try:
+        update_favorite(db, home, favorite_id, values)
+    except FavoriteNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return next(item for item in favorite_items(db, home) if item["id"] == favorite_id)
+
+
+def delete_favorite_record(home: str, favorite_id: str, db: Session) -> dict[str, bool]:
+    home = validate_node_identifier(home, label="home node")
+    try:
+        delete_favorite(db, home, favorite_id)
+    except FavoriteNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"deleted": True}
+
+
+@app.get("/api/v1/nodes/{home}/favorites")
+def favorites(home: str, db: Annotated[Session, Depends(get_db)]) -> dict[str, object]:
+    home = validate_node_identifier(home, label="home node")
+    items = favorite_items(db, home)
+    return {"total": len(items), "items": items}
+
+
+@app.post("/api/v1/nodes/{home}/favorites")
+def api_create_favorite(
+    home: str,
+    request: FavoriteCreateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    x_api_key: str | None = Header(default=None),
+) -> dict[str, object]:
+    require_api_key(x_api_key)
+    return create_favorite_record(home, request, db)
+
+
+@app.patch("/api/v1/nodes/{home}/favorites/{favorite_id}")
+def api_update_favorite(
+    home: str,
+    favorite_id: str,
+    request: FavoriteUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    x_api_key: str | None = Header(default=None),
+) -> dict[str, object]:
+    require_api_key(x_api_key)
+    return update_favorite_record(home, favorite_id, request, db)
+
+
+@app.delete("/api/v1/nodes/{home}/favorites/{favorite_id}")
+def api_delete_favorite(
+    home: str,
+    favorite_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    x_api_key: str | None = Header(default=None),
+) -> dict[str, bool]:
+    require_api_key(x_api_key)
+    return delete_favorite_record(home, favorite_id, db)
+
+
+@app.post("/ui/nodes/{home}/favorites")
+def ui_create_favorite(
+    home: str,
+    request: FavoriteCreateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, object]:
+    require_ui_write()
+    return create_favorite_record(home, request, db)
+
+
+@app.patch("/ui/nodes/{home}/favorites/{favorite_id}")
+def ui_update_favorite(
+    home: str,
+    favorite_id: str,
+    request: FavoriteUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, object]:
+    require_ui_write()
+    return update_favorite_record(home, favorite_id, request, db)
+
+
+@app.delete("/ui/nodes/{home}/favorites/{favorite_id}")
+def ui_delete_favorite(
+    home: str,
+    favorite_id: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, bool]:
+    require_ui_write()
+    return delete_favorite_record(home, favorite_id, db)
 
 
 class LinkControlRequest(BaseModel):

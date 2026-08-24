@@ -68,6 +68,8 @@ the external Docker network named by `ASL3_NETWORK_NAME` (default:
 - `GET /api/v1/nodes` and `GET /api/v1/nodes/{home}/state` expose normalized app_rpt state.
 - `GET /api/v1/nodes/{home}/links` and `GET /api/v1/nodes/{home}/events` expose live links and SSE updates.
 - `POST`/`DELETE /api/v1/nodes/{home}/links` provide protected, named link controls.
+- `GET /api/v1/nodes/{home}/favorites` lists durable favorites and their key-up totals.
+- `POST`/`PATCH`/`DELETE /api/v1/nodes/{home}/favorites` manage favorites with `X-API-Key` protection.
 
 ## AMI control
 
@@ -90,9 +92,16 @@ operator to enter the API key. Its command drawer is available only when web
 authentication is explicitly off; enable authentication before exposing the
 dashboard beyond a trusted local network.
 
+Favorite nodes are stored in the same Docker-mounted database configured by
+`ASLT_DATABASE_URL`, including their callsign, description, and location. The
+backend counts observed remote key-up transitions for every direct node link,
+so existing history is available if a node is favorited later. Counts and
+transmit time begin accumulating after this version is deployed; they are not
+reconstructed from historical recordings.
+
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.
 
-Node-control milestones after this foundation are favorites CRUD and ordering,
-durable transmission aggregation and recording correlation, AllStar/EchoLink
-station enrichment, and persisted statistics with time-zone-aware presentation.
+Node-control milestones after this foundation are favorites ordering, durable
+transmission-to-recording correlation, AllStar/EchoLink station enrichment, and
+time-zone-aware statistics presentation.

@@ -144,6 +144,28 @@ class Favorite(Base):
     )
 
 
+class RemoteNodeStat(Base):
+    __tablename__ = "remote_node_stats"
+    __table_args__ = (
+        UniqueConstraint("home_node", "remote_identifier", name="uq_remote_stat_home_target"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    remote_identifier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    keyup_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_tx_milliseconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    active_keyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_keyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_unkeyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+
 class LinkSession(Base):
     __tablename__ = "link_sessions"
 

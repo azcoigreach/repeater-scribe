@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -20,13 +20,17 @@ from asl_transcriber.node_control import (
 )
 
 REFRESH_EVENTS = {"RPT_ALINKS", "NODECONN", "NODEDISCONN", "HANGUP", "FULLYBOOTED"}
+TransitionCallback = Callable[[RemoteKeyTransition], Awaitable[None] | None]
 
 
 class NodeStateService:
     """Backend-owned authority for app_rpt direct-link state."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self, settings: Settings, *, transition_callback: TransitionCallback | None = None
+    ) -> None:
         self.settings = settings
+        self.transition_callback = transition_callback
         self.home_nodes = [item.strip() for item in settings.ami_node_id.split(",") if item.strip()]
         if not self.home_nodes:
             self.home_nodes = [settings.ami_node_id]
@@ -316,6 +320,10 @@ class NodeStateService:
         )
 
     async def _publish_transition(self, transition: RemoteKeyTransition) -> None:
+        if self.transition_callback is not None:
+            result = self.transition_callback(transition)
+            if asyncio.iscoroutine(result):
+                await result
         await self._publish(
             {
                 "event": transition.event,

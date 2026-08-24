@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from asl_transcriber.ami import AmiConnectionState, AmiResponse
 from asl_transcriber.config import Settings
-from asl_transcriber.node_control import parse_alinks, parse_xstat_snapshot
+from asl_transcriber.node_control import RemoteKeyTransition, parse_alinks, parse_xstat_snapshot
 from asl_transcriber.node_service import NodeStateService
 
 
@@ -101,6 +101,31 @@ def test_keyed_transitions_are_structured_with_duration() -> None:
         assert service.transitions[-1].home_node == "668390"
         assert service.transitions[-1].remote_identifier == "KM7GHS"
         assert service.transitions[-1].duration_seconds == 3
+
+    asyncio.run(scenario())
+
+
+def test_keyed_transition_callback_runs_before_the_event_is_published() -> None:
+    async def scenario() -> None:
+        calls: list[str] = []
+
+        async def persist(transition: RemoteKeyTransition) -> None:
+            calls.append(f"persist:{transition.event}")
+
+        service = NodeStateService(
+            Settings(ami_node_id="668390", ami_secret="secret"),
+            transition_callback=persist,
+        )
+        queue = service.subscribe("668390")
+        transition = RemoteKeyTransition(
+            "remote_keyed_started", "668390", "KM7GHS", datetime.now(UTC)
+        )
+
+        await service._publish_transition(transition)
+        payload = await queue.get()
+
+        assert calls == ["persist:remote_keyed_started"]
+        assert payload["event"] == "remote_keyed_started"
 
     asyncio.run(scenario())
 
