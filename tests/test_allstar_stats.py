@@ -159,15 +159,15 @@ def test_dashboard_has_dockable_draggable_live_network_map() -> None:
     assert "topologyInteractionActive" in script
     assert "rootedTopologyLayout" in script
     assert "topologyAdjacency" in script
-    assert "TOPOLOGY_BUBBLE_RADIUS" in script
-    assert "TOPOLOGY_BUBBLE_CLEARANCE" in script
+    assert "TOPOLOGY_BUBBLE_RADIUS_Y" in script
+    assert "TOPOLOGY_LAYOUT_UNIT" in script
     assert "TOPOLOGY_BRANCH_SPREAD" in script
     assert "subtreeSize" in script
     assert "graphChanged" in script
     assert "bubble.dataset.nodeId === rootId" in script
-    assert "topologyBubbleLine(['Node', node.identifier, node.frequency]" in script
-    assert "topologyBubbleLine([node.callsign, node.location])" in script
-    assert "topologyBubbleLine([node.affiliation])" in script
+    assert "topologyBubbleMetadata" in script
+    assert "longestLine" in script
+    assert 'font: 10px "IBM Plex Mono"' in stylesheet
     assert "x: root.x - halfWidth" in script
     assert "Auto layout" in template
     assert "user-select: none" in stylesheet
