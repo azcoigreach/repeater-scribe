@@ -73,8 +73,22 @@ def test_favicon_tracks_transcription_and_keyed_states() -> None:
     assert "nodeKeyed = talkers.length > 0" in script
 
 
+def test_queue_summary_shows_large_state_emblem() -> None:
+    template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
+    script = Path("src/asl_transcriber/static/dashboard.js").read_text()
+    styles = Path("src/asl_transcriber/static/dashboard.css").read_text()
+
+    assert '<img id="state-emblem-image" src="/static/repeater-scribe-state0.png"' in template
+    assert 'id="state-emblem-label"' in template
+    for state in range(4):
+        assert f"'/static/repeater-scribe-state{state}.png'" in script
+    assert "ACTIVITY_STATE_LABELS = ['IDLE', 'TRANSCRIBING', 'NODE KEYED', 'KEYED + TRANSCRIBING']" in script
+    assert ".state-emblem img" in styles
+
+
 def test_favicon_state_images_are_served() -> None:
     static_dir = Path("src/asl_transcriber/static")
 
     for state in range(4):
         assert (static_dir / f"repeater-scribe-state{state}-256px.png").is_file()
+        assert (static_dir / f"repeater-scribe-state{state}.png").is_file()

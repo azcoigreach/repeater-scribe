@@ -6,24 +6,38 @@ function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-// Favicon states: 0 idle, 1 transcribing, 2 node keyed, 3 both.
-const FAVICON_STATE_ICONS = [
+// Activity states: 0 idle, 1 transcribing, 2 node keyed, 3 both.
+const ACTIVITY_STATE_ICONS = [
   '/static/repeater-scribe-state0-256px.png',
   '/static/repeater-scribe-state1-256px.png',
   '/static/repeater-scribe-state2-256px.png',
   '/static/repeater-scribe-state3-256px.png',
 ];
+const ACTIVITY_STATE_EMBLEMS = [
+  '/static/repeater-scribe-state0.png',
+  '/static/repeater-scribe-state1.png',
+  '/static/repeater-scribe-state2.png',
+  '/static/repeater-scribe-state3.png',
+];
+const ACTIVITY_STATE_LABELS = ['IDLE', 'TRANSCRIBING', 'NODE KEYED', 'KEYED + TRANSCRIBING'];
 let transcriptionActive = false;
 let nodeKeyed = false;
-let faviconState = null;
+let activityState = null;
 
-function updateFavicon() {
+function updateActivityState() {
   const state = (transcriptionActive ? 1 : 0) + (nodeKeyed ? 2 : 0);
-  if (state === faviconState) return;
-  faviconState = state;
+  if (state === activityState) return;
+  activityState = state;
   document.querySelectorAll('#favicon, link[rel="apple-touch-icon"]').forEach(icon => {
-    icon.setAttribute('href', FAVICON_STATE_ICONS[state]);
+    icon.setAttribute('href', ACTIVITY_STATE_ICONS[state]);
   });
+  const emblem = document.querySelector('#state-emblem-image');
+  if (emblem) {
+    emblem.src = ACTIVITY_STATE_EMBLEMS[state];
+    emblem.alt = `Activity state: ${ACTIVITY_STATE_LABELS[state]}`;
+  }
+  const label = document.querySelector('#state-emblem-label');
+  if (label) label.textContent = ACTIVITY_STATE_LABELS[state];
 }
 
 function renderJobs(items, databaseTotals = {}) {
@@ -33,7 +47,7 @@ function renderJobs(items, databaseTotals = {}) {
   }, {});
   const processing = (counts.processing || 0) + (counts.live || 0);
   transcriptionActive = processing > 0;
-  updateFavicon();
+  updateActivityState();
   document.querySelector('#total-count').textContent = databaseTotals.recordings ?? items.length;
   document.querySelector('#completed-count').textContent = databaseTotals.transcribed ?? counts.completed ?? 0;
   document.querySelector('#processing-count').textContent = processing;
@@ -97,7 +111,7 @@ async function loadNodeStatus() {
     state.className = 'status processing';
     dot.className = 'status-dot offline';
     nodeKeyed = false;
-    updateFavicon();
+    updateActivityState();
     return;
   }
   renderNodeSnapshot(await response.json());
@@ -115,7 +129,7 @@ function renderNodeSnapshot(data) {
   currentConnections = connections;
   const talkers = connections.filter(connection => connection.keyed === true).map(connection => connection.identifier);
   nodeKeyed = talkers.length > 0 && data.ami_connected !== false;
-  updateFavicon();
+  updateActivityState();
   state.textContent = data.stale ? 'AMI state stale' : data.ami_connected ? 'AMI connected' : 'Node unavailable';
   state.className = data.ami_connected && !data.stale ? 'status' : 'status processing';
   dot.className = `status-dot ${talkers.length ? 'talking' : data.ami_connected ? 'idle' : 'offline'}`;
