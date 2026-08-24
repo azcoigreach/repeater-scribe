@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -221,3 +223,107 @@ def test_favorite_priority_refresh_does_not_reset_or_advance_crawl(tmp_path) -> 
 
     assert graph["progress"]["queried"] == 1
     assert graph["progress"]["queued"] == 1
+
+
+def test_unviewed_maps_stop_walking_until_a_viewer_opens_them(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'viewers.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, future=True)
+    timestamp = datetime(2026, 8, 24, 3, tzinfo=UTC)
+
+    with sessions() as session:
+        for root in ("674982", "63573"):
+            ensure_topology_crawl(session, "100000", root, now=timestamp)
+            work = next_crawl_work(
+                session,
+                refresh_seconds=900,
+                active_roots={("100000", root)},
+                now=timestamp,
+            )
+            assert work is not None and work.identifier == root
+            apply_topology_snapshot(
+                session,
+                work,
+                snapshot(root, [("55553", "W5XYZ")], timestamp),
+                refresh_seconds=900,
+                now=timestamp,
+            )
+
+        assert (
+            next_crawl_work(
+                session, refresh_seconds=900, active_roots=set(), now=timestamp
+            )
+            is None
+        )
+
+        service = TopologyService(
+            sessions,
+            base_url="http://example.invalid/api/stats",
+            request_interval_seconds=3,
+            timeout_seconds=1,
+            favorite_refresh_seconds=15,
+            max_nodes=200,
+            max_depth=12,
+            refresh_seconds=900,
+            cache_seconds=300,
+        )
+        service.mark_viewer("100000", "63573", now=timestamp)
+        viewed = next_crawl_work(
+            session,
+            refresh_seconds=900,
+            active_roots=service.active_roots(now=timestamp),
+            now=timestamp,
+        )
+
+    assert viewed is not None
+    assert viewed.root_identifier == "63573"
+    assert viewed.identifier == "55553"
+
+
+def test_viewer_registration_expires_after_the_ttl(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'viewer-ttl.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, future=True)
+    timestamp = datetime(2026, 8, 24, 3, tzinfo=UTC)
+
+    service = TopologyService(
+        sessions,
+        base_url="http://example.invalid/api/stats",
+        request_interval_seconds=3,
+        timeout_seconds=1,
+        favorite_refresh_seconds=15,
+        max_nodes=200,
+        max_depth=12,
+        refresh_seconds=900,
+        cache_seconds=300,
+        viewer_ttl_seconds=90,
+    )
+    service.mark_viewer("100000", "674982", now=timestamp)
+
+    assert service.active_roots(now=timestamp + timedelta(seconds=60)) == {("100000", "674982")}
+    assert service.active_roots(now=timestamp + timedelta(seconds=120)) == set()
+
+
+def test_lookup_budget_holds_requests_at_the_per_minute_limit() -> None:
+    engine = create_engine("sqlite://")
+    sessions = sessionmaker(bind=engine, future=True)
+    service = TopologyService(
+        sessions,
+        base_url="http://example.invalid/api/stats",
+        request_interval_seconds=0,
+        timeout_seconds=1,
+        favorite_refresh_seconds=15,
+        max_nodes=200,
+        max_depth=12,
+        refresh_seconds=900,
+        cache_seconds=300,
+        max_requests_per_minute=3,
+    )
+
+    async def reserve(count: int) -> None:
+        for _ in range(count):
+            await service._reserve_request_slot()
+
+    asyncio.run(asyncio.wait_for(reserve(3), timeout=1))
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(reserve(1), timeout=0.2))

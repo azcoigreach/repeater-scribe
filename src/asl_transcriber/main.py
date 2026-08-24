@@ -214,6 +214,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             max_depth=settings.topology_max_depth,
             refresh_seconds=settings.topology_refresh_seconds,
             cache_seconds=settings.topology_node_cache_seconds,
+            viewer_ttl_seconds=settings.topology_viewer_ttl_seconds,
+            max_requests_per_minute=settings.allstar_max_requests_per_minute,
         )
         if settings.favorite_stats_enabled
         else None
@@ -502,6 +504,8 @@ def topology_graph(
 ) -> dict[str, object]:
     home = validate_node_identifier(home, label="home node")
     root = validate_node_identifier(root, label="topology root")
+    if topology_service is not None:
+        topology_service.mark_viewer(home, root)
     return serialize_topology(
         db,
         home,
@@ -530,6 +534,7 @@ def ui_start_topology_crawl(
     )
     if favorite is None:
         raise HTTPException(status_code=404, detail="Topology root must be a favorite node")
+    topology_service.mark_viewer(home, root)
     try:
         ensure_topology_crawl(
             db,
@@ -556,13 +561,18 @@ async def topology_events(home: str, root: str) -> StreamingResponse:
         raise HTTPException(status_code=503, detail="AllStar topology crawling is disabled")
     home = validate_node_identifier(home, label="home node")
     root = validate_node_identifier(root, label="topology root")
+    service.mark_viewer(home, root)
 
     async def stream() -> AsyncIterator[str]:
         yield "retry: 3000\n\n"
-        async for event in service.events(settings.topology_sse_heartbeat_seconds):
+        async for event in service.events(
+            settings.topology_sse_heartbeat_seconds,
+            home_node=home,
+            root_identifier=root,
+        ):
             if event.get("heartbeat"):
                 yield ": keepalive\n\n"
-            elif event.get("home_node") == home and event.get("root") == root:
+            else:
                 yield f"event: topology-update\ndata: {json.dumps(event)}\n\n"
 
     return StreamingResponse(

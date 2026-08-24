@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections import deque
+import time
+from collections import Counter, deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -161,11 +162,15 @@ def next_crawl_work(
     session: Session,
     *,
     refresh_seconds: int,
+    active_roots: set[tuple[str, str]] | None = None,
     now: datetime | None = None,
 ) -> CrawlWork | None:
     timestamp = now or datetime.now(UTC)
     crawls = session.scalars(select(TopologyCrawl).order_by(TopologyCrawl.updated_at)).all()
     for crawl in crawls:
+        # Maps nobody is looking at stay parked so open maps keep the API budget.
+        if active_roots is not None and (crawl.home_node, crawl.root_identifier) not in active_roots:
+            continue
         if (
             crawl.status in {"complete", "limited"}
             and crawl.next_refresh_at is not None
@@ -566,6 +571,8 @@ class TopologyService:
         max_depth: int,
         refresh_seconds: int,
         cache_seconds: int,
+        viewer_ttl_seconds: float = 90.0,
+        max_requests_per_minute: int = 90,
         fetcher: Callable[..., dict[str, object]] = fetch_allstar_stats,
     ) -> None:
         self.session_factory = session_factory
@@ -577,9 +584,38 @@ class TopologyService:
         self.max_depth = max_depth
         self.refresh_seconds = refresh_seconds
         self.cache_seconds = cache_seconds
+        self.viewer_ttl_seconds = viewer_ttl_seconds
+        self.max_requests_per_minute = max_requests_per_minute
         self.fetcher = fetcher
         self._favorite_attempted_at: dict[tuple[str, str], datetime] = {}
-        self._subscribers: set[asyncio.Queue[dict[str, object]]] = set()
+        self._subscribers: set[tuple[asyncio.Queue[dict[str, object]], tuple[str, str] | None]] = (
+            set()
+        )
+        self._viewer_seen_at: dict[tuple[str, str], datetime] = {}
+        self._viewer_streams: Counter[tuple[str, str]] = Counter()
+        self._request_times: deque[float] = deque()
+
+    def mark_viewer(self, home_node: str, root_identifier: str, *, now: datetime | None = None) -> None:
+        self._viewer_seen_at[(home_node, root_identifier)] = now or datetime.now(UTC)
+
+    def active_roots(self, *, now: datetime | None = None) -> set[tuple[str, str]]:
+        cutoff = (now or datetime.now(UTC)) - timedelta(seconds=self.viewer_ttl_seconds)
+        for key, seen in tuple(self._viewer_seen_at.items()):
+            if seen < cutoff:
+                del self._viewer_seen_at[key]
+        return set(self._viewer_seen_at) | {key for key, count in self._viewer_streams.items() if count}
+
+    async def _reserve_request_slot(self) -> None:
+        if self.max_requests_per_minute <= 0:
+            return
+        while True:
+            elapsed = time.monotonic()
+            while self._request_times and elapsed - self._request_times[0] >= 60.0:
+                self._request_times.popleft()
+            if len(self._request_times) < self.max_requests_per_minute:
+                self._request_times.append(elapsed)
+                return
+            await asyncio.sleep(max(0.05, 60.0 - (elapsed - self._request_times[0])))
 
     def _favorite_work(self, session: Session) -> CrawlWork | None:
         timestamp = datetime.now(UTC)
@@ -624,7 +660,11 @@ class TopologyService:
             favorite_work = self._favorite_work(session)
             if favorite_work is not None:
                 return favorite_work
-            return next_crawl_work(session, refresh_seconds=self.refresh_seconds)
+            return next_crawl_work(
+                session,
+                refresh_seconds=self.refresh_seconds,
+                active_roots=self.active_roots(),
+            )
 
     def _cached(self, work: CrawlWork) -> dict[str, object] | None:
         if work.favorite_refresh:
@@ -667,7 +707,9 @@ class TopologyService:
             "root": work.root_identifier,
             "updated_node": work.identifier,
         }
-        for queue in tuple(self._subscribers):
+        for queue, scope in tuple(self._subscribers):
+            if scope is not None and scope != (work.home_node, work.root_identifier):
+                continue
             if queue.full():
                 try:
                     queue.get_nowait()
@@ -687,6 +729,7 @@ class TopologyService:
                 self._publish(work)
                 await asyncio.sleep(0)
                 continue
+            await self._reserve_request_slot()
             try:
                 values = await asyncio.to_thread(
                     self.fetcher,
@@ -704,9 +747,20 @@ class TopologyService:
             self._publish(work)
             await asyncio.sleep(self.request_interval_seconds)
 
-    async def events(self, heartbeat_seconds: float = 15.0) -> AsyncIterator[dict[str, object]]:
+    async def events(
+        self,
+        heartbeat_seconds: float = 15.0,
+        *,
+        home_node: str | None = None,
+        root_identifier: str | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
         queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(maxsize=20)
-        self._subscribers.add(queue)
+        scope = (home_node, root_identifier) if home_node and root_identifier else None
+        subscription = (queue, scope)
+        self._subscribers.add(subscription)
+        if scope is not None:
+            self._viewer_streams[scope] += 1
+            self.mark_viewer(*scope)
         try:
             while True:
                 try:
@@ -714,4 +768,9 @@ class TopologyService:
                 except TimeoutError:
                     yield {"heartbeat": True}
         finally:
-            self._subscribers.discard(queue)
+            self._subscribers.discard(subscription)
+            if scope is not None:
+                self._viewer_streams[scope] -= 1
+                if self._viewer_streams[scope] <= 0:
+                    del self._viewer_streams[scope]
+                    self.mark_viewer(*scope)
