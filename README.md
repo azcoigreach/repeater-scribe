@@ -71,12 +71,20 @@ The JSON output includes audio duration, processing duration, real-time factor,
 raw text, and callsign-corrected display text. A real-time factor below `1.0`
 means inference completed faster than the recording duration.
 
-Callsign handling remains local. `ASLT_KNOWN_CALLSIGNS` is a comma-separated,
-short list of locally relevant calls. Each call is supplied to Whisper in both
-written and NATO-phonetic form, and the display transcript converts a spoken
-phonetic sequence only when it exactly matches that candidate list. The raw
-model transcript is retained unchanged. Add current club/operator calls here;
-do not add an entire callsign database to the hotword prompt.
+Callsign handling remains local. `ASLT_KNOWN_CALLSIGNS` is a comma-separated
+list of especially important club/operator calls. Repeater Scribe combines it
+with callsigns already present in favorites, recent node statistics, and the
+local topology cache. The ranked candidate set corrects NATO phonetics, split
+suffixes, numeric-slot errors such as `KDIDJ` to `KD1DJ`, and conservative
+near-matches such as `AM7GHS` to a locally relevant `KM7GHS`. Raw model text is
+retained unchanged.
+
+`ASLT_CALLSIGN_HOTWORD_LIMIT` defaults to `0`: dynamic callsigns are used for
+post-decode correction but are not inserted into Whisper's prompt, avoiding
+hotword-list echoes. Set a small positive value only for measured A/B tests.
+`ASLT_CALLSIGN_MAX_CANDIDATES` bounds the local fuzzy-search set, and
+`ASLT_CALLSIGN_CONTEXT_CACHE_SECONDS` controls how frequently database context
+is refreshed.
 
 No OpenAI credentials or remote transcription API are used by this profile.
 The transcription engine protocol remains backend-neutral so an explicitly

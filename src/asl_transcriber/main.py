@@ -40,7 +40,8 @@ from asl_transcriber.topology import (
     ensure_topology_crawl,
     serialize_topology,
 )
-from asl_transcriber.transcription.callsigns import CallsignResolver, callsign_hotwords
+from asl_transcriber.transcription.callsigns import CallsignResolver
+from asl_transcriber.transcription.context import DatabaseCallsignProvider
 from asl_transcriber.transcription.faster_whisper import FasterWhisperEngine
 from asl_transcriber.transcription.live import FfmpegSnapshotter, LiveTranscriptionService
 
@@ -128,7 +129,14 @@ def current_runtime() -> ArchiveRuntime:
 
 
 def build_local_transcription_engine() -> FasterWhisperEngine:
-    resolver = CallsignResolver(tuple(settings.known_callsign_list))
+    configured_callsigns = tuple(settings.known_callsign_list)
+    resolver = CallsignResolver(configured_callsigns)
+    candidate_provider = DatabaseCallsignProvider(
+        SessionLocal,
+        configured_callsigns=configured_callsigns,
+        cache_seconds=settings.callsign_context_cache_seconds,
+        max_candidates=settings.callsign_max_candidates,
+    )
     return FasterWhisperEngine(
         model_size=settings.whisper_model,
         device=settings.whisper_device,
@@ -137,10 +145,12 @@ def build_local_transcription_engine() -> FasterWhisperEngine:
         beam_size=settings.whisper_beam_size,
         vad_filter=settings.whisper_vad_filter,
         initial_prompt=settings.whisper_initial_prompt,
-        hotwords=callsign_hotwords(settings.known_callsign_list, settings.whisper_hotwords),
+        hotwords=settings.whisper_hotwords or None,
         workers=settings.worker_concurrency,
         model_dir=settings.whisper_model_dir,
         callsign_resolver=resolver,
+        callsign_provider=candidate_provider,
+        callsign_hotword_limit=settings.callsign_hotword_limit,
     )
 
 

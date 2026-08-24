@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Lock
 from time import perf_counter
 from typing import Any
 
 from asl_transcriber.transcription.base import TranscriptResult, TranscriptSegment
-from asl_transcriber.transcription.callsigns import CallsignResolver
+from asl_transcriber.transcription.callsigns import CallsignResolver, callsign_hotwords
 
 WhisperModel: Any | None = None
 try:
@@ -32,6 +33,8 @@ class FasterWhisperEngine:
     workers: int = 1
     model_dir: str | None = None
     callsign_resolver: CallsignResolver | None = None
+    callsign_provider: Callable[[], tuple[str, ...]] | None = None
+    callsign_hotword_limit: int = 0
     _model: Any | None = field(default=None, init=False, repr=False)
     _model_lock: Lock = field(default_factory=Lock, init=False, repr=False)
     _inference_lock: Lock = field(default_factory=Lock, init=False, repr=False)
@@ -69,7 +72,16 @@ class FasterWhisperEngine:
         model = self._get_model()
         selected_beam_size = self.beam_size if beam_size is None else beam_size
         selected_vad_filter = self.vad_filter if vad_filter is None else vad_filter
+        resolver = self.callsign_resolver
         selected_hotwords = self.hotwords if use_hotwords else None
+        if self.callsign_provider is not None:
+            dynamic_callsigns = self.callsign_provider()
+            resolver = CallsignResolver(dynamic_callsigns)
+            selected_hotwords = None
+            if use_hotwords and (self.callsign_hotword_limit > 0 or self.hotwords):
+                selected_hotwords = callsign_hotwords(
+                    dynamic_callsigns[: self.callsign_hotword_limit], self.hotwords
+                )
         selected_conditioning = (
             self.condition_on_previous_text
             if condition_on_previous_text is None
@@ -112,11 +124,8 @@ class FasterWhisperEngine:
         with self._inference_lock:
             segments, info = decode(selected_vad_filter)
         transcript_text = " ".join(segment.text for segment in segments).strip()
-        display_text = (
-            self.callsign_resolver.resolve(transcript_text)
-            if self.callsign_resolver is not None
-            else transcript_text
-        )
+        resolution = resolver.resolve_detailed(transcript_text) if resolver else None
+        display_text = resolution.text if resolution else transcript_text
         duration = perf_counter() - start
 
         def info_value(key: str) -> Any:
@@ -144,6 +153,19 @@ class FasterWhisperEngine:
                 "word_timestamps": self.word_timestamps,
                 "condition_on_previous_text": selected_conditioning,
                 "hotwords": selected_hotwords,
+                "callsign_corrections": (
+                    [
+                        {
+                            "original": correction.original,
+                            "corrected": correction.corrected,
+                            "confidence": correction.confidence,
+                            "reason": correction.reason,
+                        }
+                        for correction in resolution.corrections
+                    ]
+                    if resolution
+                    else []
+                ),
                 "workers": self.workers,
             },
         )

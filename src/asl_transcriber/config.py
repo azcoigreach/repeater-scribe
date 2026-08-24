@@ -32,8 +32,11 @@ class Settings(BaseSettings):
     whisper_initial_prompt: str | None = Field(
         default="Amateur radio repeater traffic. Transcribe callsigns exactly."
     )
-    whisper_hotwords: str = Field(default="AllStar, repeater, simplex, net control, Arizona")
+    whisper_hotwords: str = Field(default="")
     known_callsigns: str = Field(default="KM7GHS,NY7S,W7JHQ")
+    callsign_hotword_limit: int = Field(default=0, ge=0, le=50)
+    callsign_max_candidates: int = Field(default=250, ge=1, le=5_000)
+    callsign_context_cache_seconds: float = Field(default=30.0, ge=1)
     worker_concurrency: int = Field(default=1)
     archive_poll_seconds: float = Field(default=5.0)
     auto_process: bool = Field(default=False)

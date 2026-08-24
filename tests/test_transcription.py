@@ -145,3 +145,46 @@ def test_faster_whisper_does_not_force_decode_when_vad_finds_no_speech(
 
     assert [call["vad_filter"] for call in calls] == [True]
     assert result.display_text == ""
+
+
+def test_faster_whisper_uses_dynamic_callsigns_for_prompt_and_correction(
+    monkeypatch, tmp_path
+) -> None:
+    target = tmp_path / "audio.wav"
+    write_pcm_wav(target)
+    calls = []
+
+    class FakeModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, *args, **kwargs):
+            calls.append(kwargs)
+            return {
+                "segments": [{"start": 0, "end": 1, "text": "AM7 VHS"}],
+                "language": "en",
+            }
+
+    monkeypatch.setattr("asl_transcriber.transcription.faster_whisper.WhisperModel", FakeModel)
+    engine = FasterWhisperEngine(
+        callsign_provider=lambda: ("KM7GHS", "KE7WIL"),
+        callsign_hotword_limit=1,
+    )
+
+    result = engine.transcribe(str(target))
+    live_result = engine.transcribe(str(target), use_hotwords=False)
+
+    assert calls[0]["hotwords"].startswith("KM7GHS, Kilo Mike Seven")
+    assert "KE7WIL" not in calls[0]["hotwords"]
+    assert calls[1]["hotwords"] is None
+    assert result.raw_text == "AM7 VHS"
+    assert result.display_text == "KM7GHS"
+    assert live_result.display_text == "KM7GHS"
+    assert result.options["callsign_corrections"] == [
+        {
+            "original": "AM7 VHS",
+            "corrected": "KM7GHS",
+            "confidence": "medium",
+            "reason": "local candidate weighted distance 1.40",
+        }
+    ]

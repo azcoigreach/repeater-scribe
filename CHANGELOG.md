@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
   snapshots and SSE updates.
 - Callsign hotwords, NATO-phonetic decoding, and allowlisted callsign correction while
   retaining the model's raw transcript.
+- Dynamic callsign candidates from favorites, node activity, and topology, with weighted
+  correction for fast-speech substitutions, split suffixes, and numeric-slot errors.
 - A 12 GB NVIDIA profile using `large-v3`, CUDA FP16, and separate low-latency and
   beam-5 final decoding passes.
 
@@ -17,6 +19,8 @@ All notable changes to this project will be documented in this file.
 
 - The Docker image now includes the CUDA 12 cuBLAS/cuDNN libraries and Compose requests
   access to the host GPU.
+- Dynamic callsign hotword prompting now defaults off; candidates are applied after decode
+  to prevent prompt-list hallucinations while preserving local callsign correction.
 
 ## [0.4.0] - 2026-08-23
 

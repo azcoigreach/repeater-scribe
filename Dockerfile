@@ -14,8 +14,9 @@ RUN apt-get update && apt-get install --yes --no-install-recommends ffmpeg && \
 
 # Install the dependency layer before application source so ordinary code changes
 # do not trigger another multi-gigabyte CUDA package download.
-COPY pyproject.toml README.md /app/
+COPY pyproject.toml /app/
 RUN python -m pip install --upgrade pip && \
+    touch README.md && \
     mkdir -p src/asl_transcriber && \
     touch src/asl_transcriber/__init__.py && \
     python -m pip install . nvidia-cublas-cu12 nvidia-cudnn-cu12
