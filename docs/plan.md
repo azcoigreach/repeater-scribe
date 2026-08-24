@@ -34,6 +34,14 @@ This phase establishes the application skeleton and operating model needed to su
 - Add opt-in authenticated AMI status and AllStar function controls.
 - Associate AMI station events with archive recordings and transcripts.
 
+### Node-control foundation
+
+- Persistent AMI transport with buffered framing, reconnect, and ActionID routing.
+- Native app_rpt event normalization and baseline reconciliation.
+- Protected named link controls with pending confirmation state and node SSE.
+- Next milestones: favorites CRUD, durable transmission aggregation, station
+	enrichment, recording correlation, and persisted statistics.
+
 ## Phase 5: Production hardening
 
 - Add retention, authentication, CSRF, and security policy documents.

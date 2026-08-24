@@ -60,11 +60,17 @@ the external Docker network named by `ASL3_NETWORK_NAME` (default:
 - `GET /api/v1/activity` lists parsed ASL3 activity events.
 - `GET /api/v1/recordings?q=...&status=...` searches queued recordings and transcripts.
 - `GET /api/v1/events` provides an SSE stream of discovery and processing events.
-- `GET /api/v1/node/status` reads node status through authenticated AMI.
+- `GET /api/v1/node/status` returns the shared app_rpt node-state cache without opening AMI.
 - `POST /api/v1/node/ping` checks AMI connectivity.
 - `POST /api/v1/node/{node_id}/function` sends an AllStar function code when AMI control and API-key protection are enabled.
 - `GET /api/v1/node/{node_id}/commands` lists the named Functions menu.
 - `POST /api/v1/node/{node_id}/command` executes a named command for API clients.
+- `GET /api/v1/nodes` and `GET /api/v1/nodes/{home}/state` expose normalized app_rpt state.
+- `GET /api/v1/nodes/{home}/links` and `GET /api/v1/nodes/{home}/events` expose live links and SSE updates.
+- `POST`/`DELETE /api/v1/nodes/{home}/links` provide protected, named link controls.
+- `GET /api/v1/nodes/{home}/favorites` lists durable favorites, cached public-node statistics,
+  and reported connection topology.
+- `POST`/`PATCH`/`DELETE /api/v1/nodes/{home}/favorites` manage favorites with `X-API-Key` protection.
 
 ## AMI control
 
@@ -73,10 +79,51 @@ AMI is disabled by default. Set the AMI connection values in `.env`, then set
 `ASLT_API_KEY` to enable node control. Send the key in the `X-API-Key` header.
 Control requests are limited to AllStar DTMF function codes; arbitrary AMI
 actions are not exposed by the HTTP API.
+The container owns one persistent AMI connection per configured home node. It
+logs in with events enabled, preserves repeated headers, routes actions by
+unique `ActionID`, and refreshes app_rpt state after authentication and
+reconnect. `RptStatus XStat` is authoritative for direct links and is joined to
+`SawStat` for key-up timing. Older app_rpt installations fall back to adjacent
+links from `RPT_ALINKS`; `activity.log` is never used as current link state.
+The backend repairs its cache every five seconds and publishes changes to all
+browsers over one SSE path, so additional dashboard sessions do not create AMI
+connections or add app_rpt polling load.
 The dashboard uses the server-configured AMI credentials and does not ask the
 operator to enter the API key. Its command drawer is available only when web
 authentication is explicitly off; enable authentication before exposing the
 dashboard beyond a trusted local network.
 
+Favorite nodes are stored in the same Docker-mounted database configured by
+`ASLT_DATABASE_URL`, including their callsign, description, and location. The
+backend counts observed remote key-up transitions for every direct node link,
+so existing history is available if a node is favorited later. Counts and
+transmit time begin accumulating after this version is deployed; they are not
+reconstructed from historical recordings.
+
+For public numeric favorites, the backend also polls the AllStarLink statistics
+API while the favorite is disconnected. A persistent breadth-first crawler
+follows public numeric downstream nodes to build the full observable connected
+component, while caching node reports, crawl queues, metadata, and one- or
+two-sided edges in the Docker-mounted database. Container restarts therefore
+resume discovery instead of starting over. The dashboard uses that cache for
+its Favorites table and dockable Network map, streams progressive graph updates,
+merges live AMI state, keeps manually dragged bubble positions, and opens current
+metadata and connection controls when a bubble is selected.
+
+All AllStar traffic passes through one scheduler paced at one request every
+three seconds (20/minute), below the service's discussed 30-request-per-minute
+limit. Recent reports are reused across favorite crawls so a node is not fetched
+twice, while favorite roots retain a 15-second priority refresh so activity and
+key totals stay responsive during a long crawl. A crawl defaults to 200 nodes and 12 levels and clearly reports a safety
+limit instead of silently claiming the graph is complete. Configure those bounds
+with `ASLT_TOPOLOGY_MAX_NODES` and `ASLT_TOPOLOGY_MAX_DEPTH`; completed components
+are revisited after `ASLT_TOPOLOGY_REFRESH_SECONDS` (15 minutes by default). Set
+`ASLT_FAVORITE_STATS_ENABLED=false` to opt out; private nodes and nonnumeric
+client identifiers continue to use locally observed AMI history only.
+
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.
+
+Node-control milestones after this foundation are favorites ordering, durable
+transmission-to-recording correlation, AllStar/EchoLink station enrichment, and
+time-zone-aware statistics presentation.

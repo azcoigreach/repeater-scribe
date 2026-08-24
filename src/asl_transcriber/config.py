@@ -47,10 +47,30 @@ class Settings(BaseSettings):
     ami_port: int = Field(default=5038)
     ami_username: str = Field(default="admin")
     ami_secret: str = Field(default="")
+    ami_node_id: str = Field(default="668390")
     ami_timeout_seconds: float = Field(default=5.0)
+    ami_reconnect_max_seconds: float = Field(default=60.0)
+    ami_reconcile_seconds: float = Field(default=5.0)
+    ami_event_debounce_seconds: float = Field(default=0.15)
+    ami_sse_heartbeat_seconds: float = Field(default=15.0)
+    ami_confirmation_timeout_seconds: float = Field(default=10.0)
     ami_connection_grace_seconds: float = Field(default=15.0)
     ami_control_enabled: bool = Field(default=False)
     api_key: str = Field(default="")
+    favorite_stats_enabled: bool = Field(default=True)
+    favorite_stats_base_url: str = Field(
+        default="http://stats.allstarlink.org/api/stats"
+    )
+    favorite_stats_request_interval_seconds: float = Field(default=3.0, ge=2.1)
+    favorite_stats_timeout_seconds: float = Field(default=20.0, gt=0)
+    favorite_stats_refresh_seconds: int = Field(default=15, ge=3)
+    favorite_stats_stale_seconds: int = Field(default=300, gt=0)
+    favorite_stats_recent_activity_seconds: int = Field(default=120, gt=0)
+    topology_max_nodes: int = Field(default=200, ge=2, le=2_000)
+    topology_max_depth: int = Field(default=12, ge=1, le=50)
+    topology_refresh_seconds: int = Field(default=900, ge=60)
+    topology_node_cache_seconds: int = Field(default=300, ge=30)
+    topology_sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
 
     @property
     def archive_path_list(self) -> list[str]:

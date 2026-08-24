@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from asl_transcriber.main import app
+from asl_transcriber.main import app, render_node_command
+
+
+def test_network_status_uses_asterisk_iax_network_statistics_command() -> None:
+    assert render_node_command("Show Network Status", 668390) == "iax2 show netstats"
+
+
+def test_announce_functions_use_app_rpt_status_commands() -> None:
+    assert render_node_command("Announce", 668390) == "rpt cmd 668390 status 11"
+    assert render_node_command("Say Time of Day", 668390) == "rpt cmd 668390 status 12"
+    assert render_node_command("Force ID", 668390) == "rpt cmd 668390 status 1"
 
 
 def test_node_function_requires_control_enablement_and_api_key(monkeypatch) -> None:

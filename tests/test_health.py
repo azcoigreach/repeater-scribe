@@ -11,3 +11,4 @@ def test_health_endpoint_returns_ok() -> None:
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["service"] == "repeater-scribe"
+    assert payload["version"] == "0.4.0"

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-08-23
+
+### Added
+
+- Persistent AMI node control and live connected-node monitoring.
+- Favorite node management with metadata, activity, keyup, and transmit-time statistics.
+- Rate-limited AllStar topology discovery with a live, dockable network map.
+- Interactive topology bubbles with pan, zoom, dragging, metadata, and rooted branch layout.
+
+### Changed
+
+- Disconnected favorites continue to receive activity and keyup monitoring.
+- Topology bubbles resize horizontally to display their metadata without truncation.
+
 ## [0.1.0] - 2026-08-22
 
 ### Added

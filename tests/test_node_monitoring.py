@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from asl_transcriber.ami import AmiFrame
+from asl_transcriber.node_control import NodeState, normalize_app_rpt_event, parse_alinks
+
+
+def test_parse_alinks_supports_numeric_and_callsign_identifiers() -> None:
+    links = parse_alinks("2,41522TU,667342TK")
+
+    assert [(link.identifier, link.mode, link.keyed) for link in links] == [
+        ("41522", "T", False),
+        ("667342", "T", True),
+    ]
+
+
+def test_parse_alinks_preserves_unknown_mode() -> None:
+    link = parse_alinks("1,KC2ABCZU")[0]
+
+    assert link.identifier == "KC2ABC"
+    assert link.mode == "Z"
+    assert link.mode_name == "unknown"
+    assert not link.keyed
+
+
+def test_parse_alinks_zero_is_a_successful_empty_list() -> None:
+    assert parse_alinks("0") == []
+
+
+def test_blank_alinks_event_does_not_clear_existing_links() -> None:
+    existing = parse_alinks("1,41522TU")[0]
+    state = NodeState(home_node="668390", links={existing.identifier: existing})
+
+    updated = normalize_app_rpt_event(state, AmiFrame({"event": ["RPT_ALINKS"]}))
+
+    assert updated.links == state.links
+
+
+def test_explicit_zero_alinks_event_clears_existing_links() -> None:
+    existing = parse_alinks("1,41522TU")[0]
+    state = NodeState(home_node="668390", links={existing.identifier: existing})
+
+    updated = normalize_app_rpt_event(
+        state, AmiFrame({"event": ["RPT_ALINKS"], "eventvalue": ["0"]})
+    )
+
+    assert updated.links == {}
+
+
+def test_parse_alinks_keeps_multiple_entries_and_parses_from_the_right() -> None:
+    links = parse_alinks("3,12345RU,KM7GHSTK,CLIENT-7XU")
+
+    assert [(link.identifier, link.mode, link.keyed) for link in links] == [
+        ("12345", "R", False),
+        ("KM7GHS", "T", True),
+        ("CLIENT-7", "X", False),
+    ]
+
+
+def test_native_keying_does_not_assign_home_callsign_to_local_rf() -> None:
+    state = NodeState(home_node="668390")
+    state = normalize_app_rpt_event(
+        state, AmiFrame({"event": ["RPT_RXKEYED"], "eventvalue": ["1"]})
+    )
+
+    assert state.local_rx_keyed
+    assert state.keyed_links == []

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>REPEATER SCRIBE dashboard</title>
-  <link rel="stylesheet" href="/static/dashboard.css">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260824-1">
 </head>
 <body>
   <header class="topbar">
@@ -24,11 +24,14 @@
             <div class="submenu" id="windows-submenu" hidden>
               <label><input type="checkbox" data-toggle-win="queue" checked> Queue summary</label>
               <label><input type="checkbox" data-toggle-win="node" checked> Node status</label>
-              <label><input type="checkbox" data-toggle-win="stations" checked> Connected stations</label>
+              <label><input type="checkbox" data-toggle-win="stations" checked> Connected nodes</label>
+              <label><input type="checkbox" data-toggle-win="favorites" checked> Favorites</label>
+              <label><input type="checkbox" data-toggle-win="topology"> Network map</label>
               <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
               <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
               <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
-              <label><input type="checkbox" id="toggle-properties" data-toggle-win="properties"> Properties</label>
+              <label><input type="checkbox" id="toggle-functions" data-toggle-win="functions" checked> Functions</label>
+              <label><input type="checkbox" id="toggle-status" data-toggle-win="status"> Status</label>
             </div>
             <div class="menu-item has-submenu" data-submenu="layout-submenu" role="button" tabindex="0">
               <span>LAYOUTS</span><span class="submenu-caret">&#9666;</span>
@@ -45,7 +48,7 @@
     </div>
   </header>
 
-  <main id="desktop" class="desktop">
+  <main id="desktop" class="desktop" data-controlled-node="{{ ami_node_id }}">
     <div id="dock-root" class="dock-root"></div>
     <div id="float-layer" class="float-layer"></div>
 
@@ -68,7 +71,7 @@
     <section class="win" data-win="node" data-title="Node status">
       <header class="win-titlebar">
         <span class="status-dot offline" id="node-status-dot" aria-hidden="true"></span>
-        <span class="win-title">Node 668390</span>
+        <span class="win-title">Node {{ ami_node_id }}</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
@@ -76,25 +79,74 @@
         <div class="node-grid">
           <div><span class="stat-label">Connected nodes</span><div id="connected-nodes" class="node-value">Loading...</div></div>
           <div><span class="stat-label">Talking now</span><div id="talkers" class="node-value">None detected</div></div>
-          <div><span class="stat-label">Active channels</span><div id="active-channels" class="node-value">Loading...</div></div>
+          <div><span class="stat-label">Direct app_rpt links</span><div id="active-channels" class="node-value">Loading...</div></div>
         </div>
         <button id="refresh-node" class="control-button" type="button">Refresh status</button>
       </div>
     </section>
 
-    <section class="win" data-win="stations" data-title="Connected stations">
+    <section class="win" data-win="stations" data-title="Connected nodes">
       <header class="win-titlebar">
-        <span class="win-title">Connected stations</span>
+        <span class="win-title">Connected nodes</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
       <div class="win-body">
         <details class="collapsible-table" open>
-          <summary>Stations <span id="stations-count" class="count">0</span></summary>
-          <table class="stations-table">
+          <summary>Connected nodes <span id="stations-count" class="count">0</span></summary>
+          <table class="stations-table connected-stations-table">
+            <colgroup>
+              <col class="station-col-indicator">
+              <col class="station-col-node">
+              <col class="station-col-name">
+              <col class="station-col-state">
+              <col class="station-col-actions">
+            </colgroup>
             <thead><tr><th></th><th>Node</th><th>Name</th><th>State</th><th></th></tr></thead>
             <tbody id="stations"><tr><td colspan="5" class="empty">Loading station list...</td></tr></tbody>
           </table>
         </details>
+      </div>
+    </section>
+
+    <section class="win" data-win="favorites" data-title="Favorites">
+      <header class="win-titlebar">
+        <span class="win-title">&#9734; Favorites</span>
+        <span id="favorites-count" class="count">0</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body">
+        <table class="stations-table favorites-table">
+          <thead><tr><th></th><th>Node</th><th>Callsign</th><th>Description</th><th>Location</th><th>Keys</th><th>TX</th><th>Rx%</th><th>Links</th><th>Updated</th><th>Actions</th></tr></thead>
+          <tbody id="favorites"><tr><td colspan="11" class="empty">No favorite nodes yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="win" data-win="topology" data-title="Network map">
+      <header class="win-titlebar">
+        <span class="win-title">Network map</span>
+        <span id="topology-live-state" class="topology-live-state">Waiting for a favorite</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body topology-window-body">
+        <div class="topology-toolbar">
+          <label>Chart root<select id="topology-root"><option value="">Choose a favorite</option></select></label>
+          <button id="topology-refresh" class="control-button" type="button" title="Restart discovery from this favorite">Recrawl</button>
+          <div class="topology-zoom-controls" role="group" aria-label="Map zoom controls">
+            <button id="topology-zoom-out" class="control-button" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>
+            <button id="topology-zoom-in" class="control-button" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+            <button id="topology-fit" class="control-button" type="button" title="Fit all bubbles in view">Fit</button>
+          </div>
+          <button id="topology-reset-positions" class="control-button" type="button" title="Rebuild positions from network connections">Auto layout</button>
+          <span id="topology-summary" class="topology-summary">Select Chart from a favorite row.</span>
+        </div>
+        <div class="topology-workspace">
+          <div id="topology-chart" class="topology-chart" role="application" aria-label="Interactive live node connection bubble chart"><div class="empty">Select Chart from a favorite row.</div></div>
+          <aside id="topology-details" class="topology-details" aria-live="polite">
+            <p class="empty">Click a bubble for current node details and controls.</p>
+          </aside>
+        </div>
+        <div class="topology-legend"><span><i class="bubble-swatch home"></i> Chart root</span><span><i class="bubble-swatch keyed"></i> Keyed</span><span><i class="bubble-swatch connected"></i> AMI connected</span><span><i class="bubble-swatch active"></i> AllStar active</span><span><i class="bubble-swatch missing"></i> Not in directory</span><span><i class="bubble-swatch unknown"></i> Unknown or stale</span><span>Wheel: zoom</span><span>Drag background: pan</span><span>Double-click background: fit</span><span>Solid edge: reported both ways</span><span>Dashed edge: reported one way</span></div>
       </div>
     </section>
 
@@ -106,17 +158,31 @@
       <div class="win-body">
         <div class="controls">
           <div class="controls-row">
-            <label class="node-selector">Operating node<input id="control-node-id" inputmode="numeric" value="668390" required></label>
-            <label class="node-selector">Command<select id="command-buttons" class="command-select"></select></label>
+            <label class="node-selector">Node or client ID<input id="control-target-id" placeholder="e.g. 41522 or KM7GHS"></label>
           </div>
-          <div class="controls-row">
-            <button id="run-command" class="control-button primary" type="button">Run command</button>
-            <button id="ping-node" class="control-button" type="button">Ping node</button>
-            <label class="confirm-label"><input id="command-confirm" type="checkbox"> Confirm node command</label>
+          <div class="control-groups">
+            <fieldset class="control-group">
+              <legend>Transceive</legend>
+              <button class="control-button node-action" data-command="Connect node" type="button">Transceive</button>
+              <button class="control-button node-action" data-command="Connect permanent transceive" type="button">Permanent</button>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Monitor</legend>
+              <button class="control-button node-action" data-command="Connect monitor" type="button">Monitor</button>
+              <button class="control-button node-action" data-command="Connect permanent monitor" type="button">Permanent</button>
+              <button class="control-button node-action" data-command="Connect local monitor" type="button">Monitor local</button>
+              <button class="control-button node-action" data-command="Connect permanent local monitor" type="button">Local permanent</button>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>Disconnect</legend>
+              <button class="control-button node-action" data-command="Disconnect node" type="button">Disconnect</button>
+              <button class="control-button node-action" data-command="Disconnect all links" type="button">Disconnect all</button>
+            </fieldset>
           </div>
           <div class="controls-row">
             <label class="node-selector">Function code<input id="function-code" placeholder="e.g. *3" maxlength="12"></label>
             <button id="run-function" class="control-button" type="button">Send function</button>
+            <button id="ping-node" class="control-button" type="button">Ping node</button>
           </div>
           <output id="control-result" class="control-result" aria-live="polite"></output>
         </div>
@@ -141,12 +207,48 @@
       <div class="win-body"><div id="activity" class="activity"><div class="empty">No activity log found.</div></div></div>
     </section>
 
-    <section class="win" data-win="properties" data-title="Properties">
+    <section class="win" data-win="functions" data-title="Functions">
       <header class="win-titlebar">
-        <span class="win-title">Properties</span>
+        <span class="win-title">Functions</span>
         <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
       </header>
-      <div class="win-body"><p class="empty">No item selected.</p></div>
+      <div class="win-body">
+        <div class="function-groups">
+          <fieldset class="function-group">
+            <legend>Announce</legend>
+            <button class="control-button function-action" data-command="Announce" type="button">Announce</button>
+            <button class="control-button function-action" data-command="Say Time of Day" type="button">Say time of day</button>
+            <button class="control-button function-action" data-command="Force ID" type="button">Force ID</button>
+          </fieldset>
+          <fieldset class="function-group">
+            <legend>Link</legend>
+            <button class="control-button function-action" data-command="Reconnect" type="button">Reconnect</button>
+          </fieldset>
+          <fieldset class="function-group">
+            <legend>Status</legend>
+            <button class="control-button function-action" data-command="Show node status" type="button">Show node status</button>
+            <button class="control-button function-action" data-command="Show link status" type="button">Show link status</button>
+            <button class="control-button function-action" data-command="Show IAX registry" type="button">Show IAX registry</button>
+            <button class="control-button function-action" data-command="Show IAX channels" type="button">Show IAX channels</button>
+            <button class="control-button function-action" data-command="Show Network Status" type="button">Show network status</button>
+            <button class="control-button function-action" data-command="Show uptime" type="button">Show uptime</button>
+          </fieldset>
+        </div>
+      </div>
+    </section>
+
+    <section class="win" data-win="status" data-title="Status">
+      <header class="win-titlebar">
+        <span class="win-title">Status</span>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body status-body">
+        <div class="status-toolbar">
+          <button id="save-status" class="control-button" type="button" disabled>Save .txt</button>
+          <span id="status-source" class="status-source">No status requested</span>
+        </div>
+        <pre id="status-output" class="status-output" tabindex="0">No status requested.</pre>
+      </div>
     </section>
   </main>
 
@@ -160,6 +262,25 @@
       </div>
     </div>
   </div>
-  <script src="/static/dashboard.js"></script>
+
+  <div id="favorite-modal" class="modal" hidden>
+    <form id="favorite-form" class="modal-content favorite-form">
+      <div class="modal-head"><h2>Edit favorite</h2><button id="close-favorite" class="icon-button" type="button" aria-label="Close favorite editor">&#10005;</button></div>
+      <input id="favorite-id" type="hidden">
+      <div class="favorite-fields">
+        <label>Node or client ID<input id="favorite-target" readonly></label>
+        <label>Label<input id="favorite-label" maxlength="255" required></label>
+        <label>Callsign<input id="favorite-callsign" maxlength="32"></label>
+        <label>Description<input id="favorite-description" maxlength="255"></label>
+        <label>Location<input id="favorite-location" maxlength="255"></label>
+      </div>
+      <div class="favorite-form-actions">
+        <button id="delete-favorite" class="control-button danger" type="button">Remove favorite</button>
+        <button class="control-button primary" type="submit">Save favorite</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="/static/dashboard.js?v=20260824-5"></script>
 </body>
 </html>
