@@ -60,7 +60,7 @@ the external Docker network named by `ASL3_NETWORK_NAME` (default:
 - `GET /api/v1/activity` lists parsed ASL3 activity events.
 - `GET /api/v1/recordings?q=...&status=...` searches queued recordings and transcripts.
 - `GET /api/v1/events` provides an SSE stream of discovery and processing events.
-- `GET /api/v1/node/status` reads node status through authenticated AMI.
+- `GET /api/v1/node/status` returns the shared app_rpt node-state cache without opening AMI.
 - `POST /api/v1/node/ping` checks AMI connectivity.
 - `POST /api/v1/node/{node_id}/function` sends an AllStar function code when AMI control and API-key protection are enabled.
 - `GET /api/v1/node/{node_id}/commands` lists the named Functions menu.
@@ -76,11 +76,15 @@ AMI is disabled by default. Set the AMI connection values in `.env`, then set
 `ASLT_API_KEY` to enable node control. Send the key in the `X-API-Key` header.
 Control requests are limited to AllStar DTMF function codes; arbitrary AMI
 actions are not exposed by the HTTP API.
-The persistent AMI monitor logs in with events enabled, preserves repeated
-headers, routes actions by unique `ActionID`, and refreshes app_rpt baseline
-state after authentication and reconnect. `RPT_ALINKS` is authoritative for
-adjacent links; local `RPT_RXKEYED` activity is displayed as `Local RF - operator
-unknown` unless a separate received identifier supplies attribution.
+The container owns one persistent AMI connection per configured home node. It
+logs in with events enabled, preserves repeated headers, routes actions by
+unique `ActionID`, and refreshes app_rpt state after authentication and
+reconnect. `RptStatus XStat` is authoritative for direct links and is joined to
+`SawStat` for key-up timing. Older app_rpt installations fall back to adjacent
+links from `RPT_ALINKS`; `activity.log` is never used as current link state.
+The backend repairs its cache every five seconds and publishes changes to all
+browsers over one SSE path, so additional dashboard sessions do not create AMI
+connections or add app_rpt polling load.
 The dashboard uses the server-configured AMI credentials and does not ask the
 operator to enter the API key. Its command drawer is available only when web
 authentication is explicitly off; enable authentication before exposing the

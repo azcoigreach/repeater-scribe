@@ -22,9 +22,20 @@ def test_dashboard_page_is_available(monkeypatch, tmp_path) -> None:
     assert "/static/dashboard.css" in response.text
 
 
-def test_dashboard_renders_active_nodes_from_connected_node_ids() -> None:
+def test_dashboard_renders_normalized_callsign_rows_from_sse() -> None:
     script = Path("src/asl_transcriber/static/dashboard.js").read_text()
 
-    assert "data.connected_nodes.forEach" in script
-    assert "ASL3 remote node" in script
+    assert "connection.identifier" in script
+    assert "connection.callsign" in script
+    assert "node-state" in script
+    assert "setInterval(loadNodeStatus, 5000)" not in script
+    assert "enableNodeRestFallback" in script
     assert "No connected nodes." in script
+
+
+def test_dashboard_waits_for_snapshot_confirmation_after_control() -> None:
+    script = Path("src/asl_transcriber/static/dashboard.js").read_text()
+
+    assert "waiting for node state to confirm" in script
+    assert "state confirmation was not received" in script
+    assert "confirmPendingControl(connections)" in script

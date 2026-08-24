@@ -72,28 +72,46 @@ async function loadNodeStatus() {
     dot.className = 'status-dot offline';
     return;
   }
-  const data = await response.json();
-  state.textContent = data.ami_connected ? 'AMI connected' : 'Node unavailable';
-  state.className = data.ami_connected ? 'status' : 'status processing';
-  dot.className = `status-dot ${data.talkers.length ? 'talking' : data.ami_connected ? 'idle' : 'offline'}`;
-  document.querySelector('#connected-nodes').textContent = data.connected_nodes.length ? data.connected_nodes.join(', ') : 'None';
-  document.querySelector('#talkers').textContent = data.talkers.length ? data.talkers.join(', ') : 'None detected';
-  document.querySelector('#active-channels').textContent = data.active_channels.length;
-  const stations = [...data.connected_stations];
-  const knownStationIds = new Set(stations.map(station => String(station.id)));
-  data.connected_nodes.forEach(node => {
-    if (!knownStationIds.has(String(node))) {
-      stations.push({ id: String(node), name: 'ASL3 remote node', channel: '', state: 'Connected' });
-    }
-  });
-  document.querySelector('#stations-count').textContent = stations.length;
-  document.querySelector('#stations').innerHTML = stations.length
-    ? stations.map(station => {
-        const talking = data.talkers.includes(station.id);
-        return `<tr class="station-row${talking ? ' talking' : ''}"><td><span class="status-dot ${talking ? 'talking' : 'idle'}"></span></td><td><strong>${esc(station.id)}</strong></td><td>${esc(station.name)}</td><td>${esc(station.state)} · ${esc(station.channel)}</td><td><button class="station-action" data-target="${esc(station.id)}" type="button">Disconnect</button></td></tr>`;
+  renderNodeSnapshot(await response.json());
+}
+
+let pendingControl = null;
+function renderNodeSnapshot(data) {
+  const state = document.querySelector('#node-state');
+  const dot = document.querySelector('#node-status-dot');
+  const connections = data.connections || data.links || [];
+  const talkers = connections.filter(connection => connection.keyed === true).map(connection => connection.identifier);
+  state.textContent = data.stale ? 'AMI state stale' : data.ami_connected ? 'AMI connected' : 'Node unavailable';
+  state.className = data.ami_connected && !data.stale ? 'status' : 'status processing';
+  dot.className = `status-dot ${talkers.length ? 'talking' : data.ami_connected ? 'idle' : 'offline'}`;
+  document.querySelector('#connected-nodes').textContent = connections.length
+    ? connections.map(connection => connection.display_name || connection.identifier).join(', ')
+    : 'None';
+  document.querySelector('#talkers').textContent = talkers.length ? talkers.join(', ') : 'None detected';
+  document.querySelector('#active-channels').textContent = connections.length;
+  document.querySelector('#stations-count').textContent = connections.length;
+  document.querySelector('#stations').innerHTML = connections.length
+    ? connections.map(connection => {
+        const talking = connection.keyed === true;
+        const status = [connection.connection_state, connection.direction, connection.peer].filter(Boolean).join(' · ');
+        const stale = connection.stale ? ' · stale' : '';
+        return `<tr class="station-row${talking ? ' talking' : ''}"><td><span class="status-dot ${talking ? 'talking' : 'idle'}"></span></td><td><strong>${esc(connection.identifier)}</strong></td><td>${esc(connection.display_name || connection.callsign || connection.node_number || connection.identifier)}</td><td>${esc(status)}${esc(stale)}</td><td><button class="station-action" data-target="${esc(connection.identifier)}" type="button">Disconnect</button></td></tr>`;
       }).join('')
     : '<tr><td colspan="5" class="empty">No connected nodes.</td></tr>';
   document.querySelectorAll('.station-action').forEach(button => button.addEventListener('click', () => runCommand('Disconnect node', button.dataset.target)));
+  confirmPendingControl(connections);
+}
+
+function confirmPendingControl(connections) {
+  if (!pendingControl) return;
+  const identifiers = new Set(connections.map(connection => String(connection.identifier)));
+  const confirmed = pendingControl.desiredConnected
+    ? identifiers.has(pendingControl.target)
+    : pendingControl.target ? !identifiers.has(pendingControl.target) : identifiers.size === 0;
+  if (!confirmed) return;
+  clearTimeout(pendingControl.timer);
+  setControlResult(`Node state confirmed ${pendingControl.name.toLowerCase()}.`);
+  pendingControl = null;
 }
 
 function setControlResult(message, error = false) {
@@ -149,7 +167,19 @@ async function runCommand(name, target = null) {
   if (response.ok) {
     const data = await response.json();
     if (name.startsWith('Show ')) showStatusWindow(name, data.response_text);
-    setControlResult(`Command ${name} sent to node ${nodeId}.`);
+    if (data.pending_confirmation) {
+      if (pendingControl) clearTimeout(pendingControl.timer);
+      const desiredConnected = name.startsWith('Connect');
+      const timeout = Number(data.confirmation_timeout_seconds || 10) * 1000;
+      pendingControl = { name, target: target ? String(target) : null, desiredConnected, timer: null };
+      pendingControl.timer = setTimeout(() => {
+        setControlResult('Command was accepted, but state confirmation was not received.', true);
+        pendingControl = null;
+      }, timeout);
+      setControlResult(`Command accepted; waiting for node state to confirm ${name.toLowerCase()}.`);
+    } else {
+      setControlResult(`Command ${name} sent to node ${nodeId}.`);
+    }
   } else {
     const detail = await response.json().catch(() => ({}));
     setControlResult(detail.detail || `Command failed (${response.status}).`, true);
@@ -190,8 +220,26 @@ searchInput.addEventListener('input', loadJobs);
 loadJobs();
 loadActivity();
 setInterval(loadActivity, 5000);
-loadNodeStatus();
-setInterval(loadNodeStatus, 5000);
+let nodeFallbackTimer = null;
+function enableNodeRestFallback() {
+  if (nodeFallbackTimer !== null) return;
+  loadNodeStatus();
+  nodeFallbackTimer = setInterval(loadNodeStatus, 15000);
+}
+function disableNodeRestFallback() {
+  if (nodeFallbackTimer === null) return;
+  clearInterval(nodeFallbackTimer);
+  nodeFallbackTimer = null;
+}
+const nodeId = controlledNodeId();
+const nodeStream = new EventSource(`/api/v1/nodes/${encodeURIComponent(nodeId)}/events`);
+nodeStream.addEventListener('open', disableNodeRestFallback);
+nodeStream.addEventListener('node-state', event => {
+  const payload = JSON.parse(event.data);
+  renderNodeSnapshot(payload.state);
+});
+nodeStream.addEventListener('error', enableNodeRestFallback);
+enableNodeRestFallback();
 const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
 stream.addEventListener('job', () => { loadJobs(); });
@@ -840,4 +888,3 @@ window.addEventListener('resize', () => {
     if (changed) { renderAll(); persist(); }
   }, 200);
 });
-
