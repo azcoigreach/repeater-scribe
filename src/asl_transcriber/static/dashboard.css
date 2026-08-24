@@ -98,6 +98,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 /* Status indicators */
 .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; flex-shrink: 0; }
 .status-dot.idle { background: var(--green); box-shadow: 0 0 0 4px rgba(116,199,255,.18); }
+.status-dot.active { background: #63d28b; box-shadow: 0 0 0 4px rgba(99,210,139,.16); }
+.status-dot.recent { background: var(--amber); box-shadow: 0 0 0 4px rgba(241,179,95,.16); }
 .status-dot.talking { background: #ff5c5c; animation: dot-pulse 1s ease-in-out infinite; }
 .status-dot.offline { background: #5a6472; }
 @keyframes dot-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,92,92,.55); } 50% { box-shadow: 0 0 0 7px rgba(255,92,92,0); } }
@@ -137,15 +139,16 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .connected-stations-table td:nth-child(4) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .station-row.talking td { background: rgba(255,92,92,.08); }
 .station-actions, .favorite-actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
-.station-action, .favorite-add, .favorite-connect, .favorite-edit { border: 1px solid var(--green); border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
-.station-action:hover, .favorite-add:hover, .favorite-connect:hover, .favorite-edit:hover { background: var(--green); color: var(--panel); }
+.station-action, .favorite-add, .favorite-connect, .favorite-edit, .favorite-topology { border: 1px solid var(--green); border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
+.station-action:hover, .favorite-add:hover, .favorite-connect:hover, .favorite-edit:hover, .favorite-topology:hover { background: var(--green); color: var(--panel); }
 .favorite-add { border-color: var(--amber); color: var(--amber); }
 .favorite-add:hover { background: var(--amber); }
 .favorite-add.active, .favorite-add:disabled { border-color: var(--line); color: var(--muted); cursor: default; opacity: .75; }
 .favorite-add:disabled:hover { background: transparent; color: var(--muted); }
-.favorites-table { min-width: 840px; }
+.favorites-table { min-width: 1220px; }
 .favorite-row.talking td { background: rgba(255,92,92,.08); }
 .favorite-duration { font-family: "IBM Plex Mono", monospace; white-space: nowrap; }
+.favorite-age { color: var(--muted) !important; white-space: nowrap; }
 
 /* Controls */
 .controls { display: grid; gap: 14px; }
@@ -204,6 +207,21 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .favorite-fields input { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 9px; color: var(--ink); background: var(--paper); font: 13px "IBM Plex Mono", monospace; }
 .favorite-fields input[readonly] { color: var(--muted); }
 .favorite-form-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.topology-modal-content { width: min(900px, calc(100% - 40px)); }
+.topology-summary { margin: -6px 0 14px; color: var(--muted); font-size: 12px; }
+.topology-chart { min-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+.topology-chart svg { display: block; width: 100%; min-width: 620px; height: auto; }
+.topology-edge { stroke: var(--line); stroke-width: 1.5; }
+.topology-bubble { fill: var(--panel); stroke: var(--muted); stroke-width: 2; }
+.topology-node.active .topology-bubble { stroke: #63d28b; fill: color-mix(in srgb, #63d28b 12%, var(--panel)); }
+.topology-node.keyed .topology-bubble { stroke: #ff5c5c; fill: color-mix(in srgb, #ff5c5c 14%, var(--panel)); }
+.topology-label { fill: var(--ink); font: 700 12px "IBM Plex Mono", monospace; text-anchor: middle; }
+.topology-detail { fill: var(--muted); font: 10px "IBM Plex Mono", monospace; text-anchor: middle; }
+.topology-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 12px; color: var(--muted); font-size: 11px; }
+.topology-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.bubble-swatch { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--muted); border-radius: 50%; }
+.bubble-swatch.keyed { border-color: #ff5c5c; }
+.bubble-swatch.active { border-color: #63d28b; }
 
 @media (max-width: 900px) {
   .topbar { height: auto; min-height: 56px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }

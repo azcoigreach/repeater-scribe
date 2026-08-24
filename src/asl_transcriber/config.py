@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     ami_connection_grace_seconds: float = Field(default=15.0)
     ami_control_enabled: bool = Field(default=False)
     api_key: str = Field(default="")
+    favorite_stats_enabled: bool = Field(default=True)
+    favorite_stats_base_url: str = Field(
+        default="http://stats.allstarlink.org/api/stats"
+    )
+    favorite_stats_request_interval_seconds: float = Field(default=3.0, ge=2.1)
+    favorite_stats_timeout_seconds: float = Field(default=20.0, gt=0)
+    favorite_stats_stale_seconds: int = Field(default=300, gt=0)
+    favorite_stats_recent_activity_seconds: int = Field(default=120, gt=0)
 
     @property
     def archive_path_list(self) -> list[str]:

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from asl_transcriber.models import Favorite, RemoteNodeStat
+from asl_transcriber.models import Favorite, FavoriteStatsSnapshot, RemoteNodeStat
 from asl_transcriber.node_control import AdjacentLink, RemoteKeyTransition
 
 
@@ -92,6 +93,8 @@ def list_favorite_items(
     live_links: Mapping[str, AdjacentLink],
     *,
     now: datetime | None = None,
+    public_stale_seconds: int = 300,
+    recent_activity_seconds: int = 120,
 ) -> list[dict[str, object]]:
     favorites = session.scalars(
         select(Favorite)
@@ -104,13 +107,22 @@ def list_favorite_items(
             select(RemoteNodeStat).where(RemoteNodeStat.home_node == home_node)
         ).all()
     }
+    public_stats = {
+        snapshot.remote_identifier: snapshot
+        for snapshot in session.scalars(
+            select(FavoriteStatsSnapshot).where(FavoriteStatsSnapshot.home_node == home_node)
+        ).all()
+    }
     timestamp = now or datetime.now(UTC)
     return [
         serialize_favorite(
             favorite,
             stats.get(favorite.target_identifier),
+            public_stats.get(favorite.target_identifier),
             live_links.get(favorite.target_identifier),
             now=timestamp,
+            public_stale_seconds=public_stale_seconds,
+            recent_activity_seconds=recent_activity_seconds,
         )
         for favorite in favorites
     ]
@@ -119,40 +131,98 @@ def list_favorite_items(
 def serialize_favorite(
     favorite: Favorite,
     stat: RemoteNodeStat | None,
+    public_stat: FavoriteStatsSnapshot | None,
     live_link: AdjacentLink | None,
     *,
     now: datetime | None = None,
+    public_stale_seconds: int = 300,
+    recent_activity_seconds: int = 120,
 ) -> dict[str, object]:
     timestamp = now or datetime.now(UTC)
-    tx_milliseconds = stat.total_tx_milliseconds if stat else 0
+    ami_tx_milliseconds = stat.total_tx_milliseconds if stat else 0
     if stat is not None and stat.active_keyed_at is not None:
-        tx_milliseconds += max(
+        ami_tx_milliseconds += max(
             0, int((timestamp - _utc(stat.active_keyed_at)).total_seconds() * 1000)
         )
+    source_age_seconds: int | None = None
+    public_stale = True
+    if public_stat is not None:
+        freshness_time = public_stat.source_reported_at or public_stat.fetched_at
+        source_age_seconds = max(0, int((timestamp - _utc(freshness_time)).total_seconds()))
+        public_stale = source_age_seconds > public_stale_seconds
+    topology: list[dict[str, object]] = []
+    if public_stat is not None:
+        try:
+            parsed_topology = json.loads(public_stat.topology_json)
+            if isinstance(parsed_topology, list):
+                topology = [item for item in parsed_topology if isinstance(item, dict)]
+        except json.JSONDecodeError:
+            pass
     callsign = favorite.callsign_override
     if not callsign and live_link is not None:
         callsign = live_link.callsign
+    if not callsign and public_stat is not None:
+        callsign = public_stat.callsign
+    local_keyups = stat.keyup_count if stat else 0
+    local_last_activity = stat.last_keyed_at if stat else None
+    public_last_activity = public_stat.last_activity_at if public_stat else None
+    last_activity = public_last_activity or local_last_activity
+    recently_active = bool(
+        last_activity
+        and (timestamp - _utc(last_activity)).total_seconds() <= recent_activity_seconds
+    )
+    connected = live_link is not None
+    keyed = live_link.keyed if live_link is not None else bool(
+        public_stat and public_stat.keyed and not public_stale
+    )
     return {
         "id": favorite.id,
         "home_node": favorite.home_node,
         "target_identifier": favorite.target_identifier,
         "label": favorite.label,
         "callsign": callsign,
-        "description": favorite.description_override,
-        "location": favorite.location_override,
+        "description": favorite.description_override or (public_stat.description if public_stat else None),
+        "location": favorite.location_override or (public_stat.location if public_stat else None),
         "group_name": favorite.group_name,
         "sort_order": favorite.sort_order,
         "default_connection_mode": favorite.default_connection_mode,
         "permanent": favorite.permanent,
         "exclusive_connect": favorite.exclusive_connect,
-        "keyup_count": stat.keyup_count if stat else 0,
-        "total_tx_milliseconds": tx_milliseconds,
+        "keyup_count": public_stat.total_keyups if public_stat else local_keyups,
+        "total_tx_milliseconds": (
+            public_stat.total_tx_seconds * 1000 if public_stat else ami_tx_milliseconds
+        ),
+        "ami_keyup_count": local_keyups,
+        "ami_total_tx_milliseconds": ami_tx_milliseconds,
+        "reported_keyup_count": public_stat.total_keyups if public_stat else None,
+        "reported_total_tx_seconds": public_stat.total_tx_seconds if public_stat else None,
+        "reported_kerchunk_count": public_stat.total_kerchunks if public_stat else None,
+        "reported_uptime_seconds": public_stat.uptime_seconds if public_stat else None,
+        "reported_link_count": public_stat.link_count if public_stat else None,
+        "reported_busy_percent": (
+            round(public_stat.total_tx_seconds * 100 / public_stat.uptime_seconds, 1)
+            if public_stat and public_stat.uptime_seconds > 0
+            else None
+        ),
+        "public_active": bool(public_stat and public_stat.active and not public_stale),
+        "recently_active": recently_active,
+        "stats_source": "allstar" if public_stat else ("ami" if stat else None),
+        "stats_stale": public_stale if public_stat else False,
+        "stats_age_seconds": source_age_seconds,
+        "stats_fetched_at": _utc(public_stat.fetched_at).isoformat() if public_stat else None,
+        "stats_reported_at": (
+            _utc(public_stat.source_reported_at).isoformat()
+            if public_stat and public_stat.source_reported_at
+            else None
+        ),
+        "last_activity_at": _utc(last_activity).isoformat() if last_activity else None,
+        "topology": topology,
         "last_keyed_at": stat.last_keyed_at.isoformat() if stat and stat.last_keyed_at else None,
         "last_unkeyed_at": (
             stat.last_unkeyed_at.isoformat() if stat and stat.last_unkeyed_at else None
         ),
-        "connected": live_link is not None,
-        "keyed": live_link.keyed if live_link is not None else False,
+        "connected": connected,
+        "keyed": keyed,
         "connection_state": live_link.connection_state if live_link is not None else None,
         "created_at": favorite.created_at.isoformat(),
         "updated_at": favorite.updated_at.isoformat(),

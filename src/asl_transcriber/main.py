@@ -17,6 +17,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from asl_transcriber.allstar_stats import (
+    AllStarStatsError,
+    favorite_public_targets,
+    refresh_target,
+)
 from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal, get_db
@@ -133,7 +138,36 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     async def persist_key_transition(transition: RemoteKeyTransition) -> None:
         await asyncio.to_thread(record_remote_key_transition, SessionLocal, transition)
 
+    def public_targets() -> dict[str, list[str]]:
+        with SessionLocal() as session:
+            return favorite_public_targets(session)
+
+    async def poll_favorite_stats() -> None:
+        while True:
+            targets = await asyncio.to_thread(public_targets)
+            if not targets:
+                await asyncio.sleep(settings.favorite_stats_request_interval_seconds)
+                continue
+            for target, home_nodes in targets.items():
+                try:
+                    await asyncio.to_thread(
+                        refresh_target,
+                        SessionLocal,
+                        target,
+                        home_nodes,
+                        base_url=settings.favorite_stats_base_url,
+                        timeout_seconds=settings.favorite_stats_timeout_seconds,
+                    )
+                except AllStarStatsError as error:
+                    logger.warning("Could not refresh AllStar stats for %s: %s", target, error)
+                except Exception:
+                    logger.exception("Favorite stats refresh failed for %s", target)
+                await asyncio.sleep(settings.favorite_stats_request_interval_seconds)
+
     watcher = asyncio.create_task(poll_archive())
+    favorite_watcher = (
+        asyncio.create_task(poll_favorite_stats()) if settings.favorite_stats_enabled else None
+    )
     node_monitor = (
         NodeStateService(settings, transition_callback=persist_key_transition)
         if settings.ami_enabled and settings.ami_secret
@@ -145,7 +179,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         watcher.cancel()
-        await asyncio.gather(watcher, return_exceptions=True)
+        tasks = [watcher]
+        if favorite_watcher is not None:
+            favorite_watcher.cancel()
+            tasks.append(favorite_watcher)
+        await asyncio.gather(*tasks, return_exceptions=True)
         if node_monitor is not None:
             await node_monitor.stop()
         node_monitor = None
@@ -256,7 +294,13 @@ class FavoriteUpdateRequest(BaseModel):
 
 def favorite_items(db: Session, home: str) -> list[dict[str, object]]:
     links = node_monitor.state(home).links if node_monitor is not None else {}
-    return list_favorite_items(db, home, links)
+    return list_favorite_items(
+        db,
+        home,
+        links,
+        public_stale_seconds=settings.favorite_stats_stale_seconds,
+        recent_activity_seconds=settings.favorite_stats_recent_activity_seconds,
+    )
 
 
 def require_ui_write() -> None:

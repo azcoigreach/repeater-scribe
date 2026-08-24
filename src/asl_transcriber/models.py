@@ -166,6 +166,33 @@ class RemoteNodeStat(Base):
     )
 
 
+class FavoriteStatsSnapshot(Base):
+    __tablename__ = "favorite_stats_snapshots"
+    __table_args__ = (
+        UniqueConstraint("home_node", "remote_identifier", name="uq_favorite_snapshot_home_target"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    home_node: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    remote_identifier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    callsign: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    keyed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    total_keyups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_tx_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_kerchunks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    uptime_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    link_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    topology_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    source_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+
 class LinkSession(Base):
     __tablename__ = "link_sessions"
 

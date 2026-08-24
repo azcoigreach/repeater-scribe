@@ -68,7 +68,8 @@ the external Docker network named by `ASL3_NETWORK_NAME` (default:
 - `GET /api/v1/nodes` and `GET /api/v1/nodes/{home}/state` expose normalized app_rpt state.
 - `GET /api/v1/nodes/{home}/links` and `GET /api/v1/nodes/{home}/events` expose live links and SSE updates.
 - `POST`/`DELETE /api/v1/nodes/{home}/links` provide protected, named link controls.
-- `GET /api/v1/nodes/{home}/favorites` lists durable favorites and their key-up totals.
+- `GET /api/v1/nodes/{home}/favorites` lists durable favorites, cached public-node statistics,
+  and reported connection topology.
 - `POST`/`PATCH`/`DELETE /api/v1/nodes/{home}/favorites` manage favorites with `X-API-Key` protection.
 
 ## AMI control
@@ -98,6 +99,16 @@ backend counts observed remote key-up transitions for every direct node link,
 so existing history is available if a node is favorited later. Counts and
 transmit time begin accumulating after this version is deployed; they are not
 reconstructed from historical recordings.
+
+For public numeric favorites, the backend also polls the AllStarLink statistics
+API while the favorite is disconnected. It caches reported keyups, transmit
+time, uptime, kerchunks, activity state, and downstream link metadata in the
+Docker-mounted database. The dashboard uses that cache for its Favorites table
+and connection bubble charts, and marks old reports stale instead of erasing
+them during an upstream outage. Requests are paced at one every three seconds
+to remain below the service's 30-request-per-minute limit. Set
+`ASLT_FAVORITE_STATS_ENABLED=false` to opt out; private nodes and nonnumeric
+client identifiers continue to use locally observed AMI history only.
 
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.

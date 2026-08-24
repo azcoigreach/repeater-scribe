@@ -124,12 +124,20 @@ function formatDuration(milliseconds) {
   return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+function formatAge(seconds) {
+  if (seconds === null || seconds === undefined) return 'local';
+  const value = Math.max(0, Number(seconds || 0));
+  if (value < 60) return `${Math.floor(value)}s ago`;
+  if (value < 3600) return `${Math.floor(value / 60)}m ago`;
+  return `${Math.floor(value / 3600)}h ago`;
+}
+
 function renderFavorites() {
   const connections = new Map(currentConnections.map(connection => [String(connection.identifier), connection]));
   document.querySelector('#favorites-count').textContent = favoriteItems.length;
   const table = document.querySelector('#favorites');
   if (!favoriteItems.length) {
-    table.innerHTML = '<tr><td colspan="8" class="empty">No favorite nodes yet. Add one from Connected nodes.</td></tr>';
+    table.innerHTML = '<tr><td colspan="11" class="empty">No favorite nodes yet. Add one from Connected nodes.</td></tr>';
     return;
   }
   table.innerHTML = favoriteItems.map(item => {
@@ -137,15 +145,72 @@ function renderFavorites() {
     const connection = connections.get(identifier);
     const connected = Boolean(connection || item.connected);
     const keyed = connection ? connection.keyed === true : item.keyed === true;
+    const active = item.public_active === true;
+    const recent = item.recently_active === true;
+    const dotState = keyed ? 'talking' : connected ? 'idle' : active ? 'active' : recent ? 'recent' : 'offline';
+    const dotTitle = keyed ? 'Transmitting' : connected ? 'Connected' : active ? 'Reporting active' : recent ? 'Recently active' : item.stats_stale ? 'Statistics stale' : 'Inactive';
     const callsign = item.callsign || (connection && connection.callsign) || (/^\d+$/.test(identifier) ? '—' : identifier);
-    return `<tr class="favorite-row${keyed ? ' talking' : ''}"><td><span class="status-dot ${keyed ? 'talking' : connected ? 'idle' : 'offline'}" title="${keyed ? 'Transmitting' : connected ? 'Connected' : 'Disconnected'}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(callsign)}</td><td>${esc(item.description || item.label || '—')}</td><td>${esc(item.location || '—')}</td><td>${esc(item.keyup_count || 0)}</td><td class="favorite-duration">${esc(formatDuration(item.total_tx_milliseconds))}</td><td><div class="favorite-actions"><button class="favorite-connect" data-target="${esc(identifier)}" data-connected="${connected}" type="button">${connected ? 'Disconnect' : 'Connect'}</button><button class="favorite-edit" data-favorite-id="${esc(item.id)}" type="button">Edit</button></div></td></tr>`;
+    const busy = item.reported_busy_percent === null || item.reported_busy_percent === undefined ? '—' : `${item.reported_busy_percent}%`;
+    const links = item.reported_link_count === null || item.reported_link_count === undefined ? '—' : item.reported_link_count;
+    const age = item.stats_stale ? `${formatAge(item.stats_age_seconds)} · stale` : formatAge(item.stats_age_seconds);
+    return `<tr class="favorite-row${keyed ? ' talking' : ''}"><td><span class="status-dot ${dotState}" title="${esc(dotTitle)}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(callsign)}</td><td>${esc(item.description || item.label || '—')}</td><td>${esc(item.location || '—')}</td><td>${esc(item.keyup_count || 0)}</td><td class="favorite-duration">${esc(formatDuration(item.total_tx_milliseconds))}</td><td>${esc(busy)}</td><td>${esc(links)}</td><td class="favorite-age">${esc(age)}</td><td><div class="favorite-actions"><button class="favorite-connect" data-target="${esc(identifier)}" data-connected="${connected}" type="button">${connected ? 'Disconnect' : 'Connect'}</button><button class="favorite-topology" data-favorite-id="${esc(item.id)}" type="button">Chart</button><button class="favorite-edit" data-favorite-id="${esc(item.id)}" type="button">Edit</button></div></td></tr>`;
   }).join('');
   table.querySelectorAll('.favorite-connect').forEach(button => button.addEventListener('click', () => {
     const connected = button.dataset.connected === 'true';
     runCommand(connected ? 'Disconnect node' : 'Connect node', button.dataset.target);
   }));
+  table.querySelectorAll('.favorite-topology').forEach(button => button.addEventListener('click', () => openTopology(button.dataset.favoriteId)));
   table.querySelectorAll('.favorite-edit').forEach(button => button.addEventListener('click', () => openFavoriteEditor(button.dataset.favoriteId)));
 }
+
+function openTopology(favoriteId) {
+  const item = favoriteItems.find(candidate => candidate.id === favoriteId);
+  if (!item) return;
+  const links = Array.isArray(item.topology) ? item.topology : [];
+  const favoriteByTarget = new Map(favoriteItems.map(candidate => [String(candidate.target_identifier), candidate]));
+  const width = 800;
+  const height = Math.max(440, links.length > 14 ? 560 : 440);
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const rings = links.length > 10 ? 2 : 1;
+  const positions = links.map((link, index) => {
+    const ring = rings === 2 && index >= Math.ceil(links.length / 2) ? 1 : 0;
+    const ringStart = ring === 0 ? 0 : Math.ceil(links.length / 2);
+    const ringCount = ring === 0 ? Math.min(links.length, Math.ceil(links.length / 2)) : links.length - ringStart;
+    const ringIndex = index - ringStart;
+    const radiusX = ring === 0 ? 245 : 350;
+    const radiusY = ring === 0 ? 145 : 220;
+    const angle = -Math.PI / 2 + (Math.PI * 2 * ringIndex / Math.max(1, ringCount));
+    return { x: centerX + Math.cos(angle) * radiusX, y: centerY + Math.sin(angle) * radiusY };
+  });
+  const edges = positions.map(position => `<line class="topology-edge" x1="${centerX}" y1="${centerY}" x2="${position.x.toFixed(1)}" y2="${position.y.toFixed(1)}"></line>`).join('');
+  const bubbles = links.map((link, index) => {
+    const identifier = String(link.identifier || 'unknown');
+    const cached = favoriteByTarget.get(identifier);
+    const keyed = cached?.keyed === true;
+    const active = keyed || cached?.public_active === true || link.active === true;
+    const stateClass = keyed ? 'keyed' : active ? 'active' : 'unknown';
+    const detail = link.callsign && link.callsign !== identifier ? link.callsign : link.mode || 'linked';
+    const title = [link.description, link.location, link.mode].filter(Boolean).join(' · ');
+    const position = positions[index];
+    return `<g class="topology-node ${stateClass}" transform="translate(${position.x.toFixed(1)} ${position.y.toFixed(1)})"><title>${esc(title || identifier)}</title><ellipse class="topology-bubble" rx="57" ry="29"></ellipse><text class="topology-label" y="-3">${esc(identifier)}</text><text class="topology-detail" y="14">${esc(detail)}</text></g>`;
+  }).join('');
+  const centerState = item.keyed ? 'keyed' : item.public_active ? 'active' : 'unknown';
+  const centerDetail = item.callsign || item.label || 'favorite';
+  const center = `<g class="topology-node ${centerState}" transform="translate(${centerX} ${centerY})"><ellipse class="topology-bubble" rx="68" ry="35"></ellipse><text class="topology-label" y="-4">${esc(item.target_identifier)}</text><text class="topology-detail" y="14">${esc(centerDetail)}</text></g>`;
+  document.querySelector('#topology-title').textContent = `${item.target_identifier} connection bubbles`;
+  document.querySelector('#topology-summary').textContent = links.length
+    ? `${links.length} reported link${links.length === 1 ? '' : 's'} · AllStar stats ${formatAge(item.stats_age_seconds)}${item.stats_stale ? ' · cached/stale' : ''}`
+    : `No links reported · AllStar stats ${formatAge(item.stats_age_seconds)}${item.stats_stale ? ' · cached/stale' : ''}`;
+  document.querySelector('#topology-chart').innerHTML = links.length
+    ? `<svg viewBox="0 0 ${width} ${height}" aria-hidden="true">${edges}${bubbles}${center}</svg>`
+    : `<div class="empty">No downstream connections are present in the cached AllStar report.</div>`;
+  document.querySelector('#topology-modal').hidden = false;
+}
+
+const topologyModal = document.querySelector('#topology-modal');
+document.querySelector('#close-topology').addEventListener('click', () => { topologyModal.hidden = true; });
+topologyModal.addEventListener('click', event => { if (event.target === topologyModal) topologyModal.hidden = true; });
 
 async function loadFavorites() {
   const response = await fetch(`/api/v1/nodes/${encodeURIComponent(controlledNodeId())}/favorites`, { cache: 'no-store' });
@@ -315,6 +380,7 @@ nodeStream.addEventListener('node-transition', loadFavorites);
 nodeStream.addEventListener('error', enableNodeRestFallback);
 enableNodeRestFallback();
 loadFavorites();
+setInterval(loadFavorites, 10000);
 const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
 stream.addEventListener('job', () => { loadJobs(); });
