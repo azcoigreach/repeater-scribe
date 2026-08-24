@@ -227,6 +227,7 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .topology-edge.stale { opacity: .35; }
 .topology-node { cursor: grab; outline: none; touch-action: none; }
 .topology-node:active { cursor: grabbing; }
+.topology-node.root, .topology-node.root:active { cursor: pointer; }
 .topology-node:focus .topology-bubble, .topology-node.selected .topology-bubble { stroke-width: 4; filter: drop-shadow(0 0 6px rgba(116,199,255,.35)); }
 .topology-bubble { fill: var(--panel); stroke: var(--muted); stroke-width: 2; }
 .topology-node.root .topology-bubble { stroke: #74c7ff; fill: color-mix(in srgb, #74c7ff 14%, var(--panel)); }

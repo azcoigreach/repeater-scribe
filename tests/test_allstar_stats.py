@@ -159,7 +159,9 @@ def test_dashboard_has_dockable_draggable_live_network_map() -> None:
     assert "topologyInteractionActive" in script
     assert "forceTopologyLayout" in script
     assert "topologyAdjacency" in script
-    assert "placeNewTopologyNodes" in script
-    assert "distance < 150" in script
+    assert "TOPOLOGY_BUBBLE_CLEARANCE" in script
+    assert "graphChanged" in script
+    assert "bubble.dataset.nodeId === rootId" in script
+    assert "x: root.x - halfWidth" in script
     assert "Auto layout" in template
     assert "user-select: none" in stylesheet
