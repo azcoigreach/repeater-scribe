@@ -143,8 +143,19 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .connected-stations-table td:nth-child(4) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .station-row.talking td { background: rgba(255,92,92,.08); }
 .station-actions, .favorite-actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
-.station-action, .favorite-add, .favorite-connect, .favorite-edit, .favorite-topology { border: 1px solid var(--green); border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
-.station-action:hover, .favorite-add:hover, .favorite-connect:hover, .favorite-edit:hover, .favorite-topology:hover { background: var(--green); color: var(--panel); }
+.station-action, .favorite-add, .favorite-connect, .favorite-connect-toggle, .favorite-edit, .favorite-topology { border: 1px solid var(--green); border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
+.station-action:hover, .favorite-add:hover, .favorite-connect:hover, .favorite-connect-toggle:hover, .favorite-edit:hover, .favorite-topology:hover { background: var(--green); color: var(--panel); }
+.favorite-connect-split { position: relative; display: inline-flex; }
+.favorite-connect-primary { border-radius: 6px 0 0 6px; }
+.favorite-connect-toggle { min-width: 25px; padding-right: 6px; padding-left: 6px; border-left: 0; border-radius: 0 6px 6px 0; }
+.favorite-connect-options { position: absolute; top: calc(100% + 5px); left: 0; z-index: 20; display: grid; min-width: 205px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); box-shadow: var(--shadow); }
+.favorite-row:last-child .favorite-connect-options { top: auto; bottom: calc(100% + 5px); }
+.favorite-connect-options[hidden] { display: none; }
+.favorite-connect-group { display: grid; gap: 2px; padding: 3px 0; }
+.favorite-connect-group + .favorite-connect-group { margin-top: 5px; padding-top: 9px; border-top: 1px solid var(--line); }
+.favorite-connect-group-label { padding: 2px 8px 5px; color: var(--muted); font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .07em; }
+.favorite-connect-option { width: 100%; border: 0; border-radius: 4px; padding: 8px 9px; background: transparent; color: var(--ink); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-align: left; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+.favorite-connect-option:hover, .favorite-connect-option:focus-visible { outline: 0; background: var(--green); color: var(--panel); }
 .favorite-add { border-color: var(--amber); color: var(--amber); }
 .favorite-add:hover { background: var(--amber); }
 .favorite-add.active, .favorite-add:disabled { border-color: var(--line); color: var(--muted); cursor: default; opacity: .75; }

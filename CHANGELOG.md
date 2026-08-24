@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ## [0.5.1] - 2026-08-24
 
+### Added
+
+- Favorites now provide a split connect control for transceive, permanent,
+  monitor, and local-monitor connection modes.
+
 ### Changed
 
 - The README now documents Repeater Scribe as an AllStar node-operations,
@@ -17,6 +22,11 @@ All notable changes to this project will be documented in this file.
   they did not enforce authentication or disable AMI controls.
 - Shipped callsign, AMI-secret, and API-key examples now default empty so each
   installation must supply its own site-specific values.
+
+### Fixed
+
+- Provisional rolling transcripts now replace a re-decoded trailing window instead of
+  appending a near-duplicate copy of the same speech.
 
 ## [0.5.0] - 2026-08-24
 
