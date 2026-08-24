@@ -285,7 +285,6 @@ def system_info() -> dict[str, object]:
         "database_url": settings.database_url,
         "archive_paths": settings.archive_path_list,
         "api_version": "v1",
-        "read_only_mode": settings.read_only_mode,
         "transcription": {
             "backend": "local",
             "model": settings.whisper_model,

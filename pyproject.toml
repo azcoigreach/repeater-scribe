@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asl-transcriber"
-version = "0.5.0"
-description = "ASL archive monitoring and local radio transcription companion"
+version = "0.5.1"
+description = "AllStarLink node control, network mapping, and local transcription dashboard"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "ASL Transcriber Contributors" }]

@@ -1,183 +1,407 @@
+<p align="center">
+  <img src="src/asl_transcriber/static/logo.png" alt="Repeater Scribe" width="650">
+</p>
+
 # Repeater Scribe
 
-Read-only companion application for AllStarLink 3 archive recordings. It scans
-WAV files, reads node-local `activity.log` files, and queues recordings for
-local transcription without connecting to or controlling Asterisk.
+Repeater Scribe is a self-hosted operations dashboard for AllStarLink 3 nodes.
+It combines live Asterisk/app_rpt monitoring and control, local AI transcription
+of repeater recordings, favorite-node statistics, and interactive AllStar
+network discovery in one web application.
 
-## Live ASL3 archive
+It runs alongside an ASL3 node rather than replacing it. The recording archive
+is always mounted read-only. Node commands are optional and travel through a
+separately enabled Asterisk Manager Interface (AMI) connection.
 
-For a Dockerized ASL3 node, mount the host archive read-only and point the app
-at the container path:
+Version `0.5.1` is local-first: audio transcription uses `faster-whisper` on the
+machine running Repeater Scribe. No OpenAI or other hosted transcription backend
+is implemented in this release.
 
-```yaml
-volumes:
-	- /home/azcoigreach/ASL3-Docker/asl_monitor:/audio:ro
-	- ./data:/data
-environment:
-	ASLT_ARCHIVE_PATHS: /audio
-	ASLT_DATABASE_URL: sqlite:////data/asl_transcriber.db
+## What it does
+
+### Operates an AllStar node
+
+- Maintains one backend-owned AMI connection instead of opening a connection for
+  every browser.
+- Displays AMI health, direct app_rpt links, connection modes, and the station
+  currently transmitting.
+- Reconciles event-driven state with `RptStatus XStat` and `SawStat`, with an
+  `RPT_ALINKS` fallback for older app_rpt installations.
+- Connects nodes in transceive, monitor, local-monitor, and permanent modes.
+- Disconnects one or all links and requests reconnects.
+- Provides named commands for announcements, time, ID, node/link status, IAX
+  status, network status, and uptime.
+- Accepts validated AllStar DTMF function strings when raw function access is
+  explicitly enabled with AMI control.
+- Waits for refreshed node state after connection commands instead of treating
+  AMI command acceptance as proof that the link changed.
+
+### Transcribes radio traffic locally
+
+- Discovers `.wav` and `.wav49` recordings recursively without modifying the
+  ASL3 archive.
+- Produces provisional text while a recording is still growing by decoding
+  rolling FFmpeg tail snapshots.
+- Runs a new beginning-to-end accuracy pass after the source file is stable.
+- Uses one shared `faster-whisper` model for live and final work and serializes
+  inference to avoid competing copies in GPU memory.
+- Preserves the model's raw text and stores a separate callsign-corrected display
+  transcript.
+- Builds callsign context from configured calls, favorites, live node activity,
+  and discovered topology data.
+- Decodes phonetic callsigns and conservatively repairs split suffixes,
+  number-slot mistakes, and locally relevant near-matches.
+- Searches completed and provisional transcripts, streams updates through SSE,
+  and plays the original archive audio from the dashboard.
+
+The supplied deployment profile uses `large-v3`, CUDA FP16, beam 1 for live
+snapshots, and beam 5 for completed recordings. See
+[AI transcription](docs/transcription.md) for the exact pipeline, callsign
+logic, benchmarks, CPU fallback, tuning, and current limitations.
+
+### Explores the AllStar network
+
+- Stores favorite nodes with operator-supplied callsign, description, location,
+  grouping, ordering, and connection preferences.
+- Combines live AMI state with locally observed key-up counts and transmit time.
+- Polls the public AllStar statistics API for numeric favorites, including
+  directory metadata, activity, keying, uptime, and reported links.
+- Runs a persistent breadth-first crawl from favorite roots to discover their
+  observable connected component. It does not attempt to scrape every AllStar
+  node globally.
+- Caches crawl work, node snapshots, and one-sided or two-sided edges in SQLite,
+  allowing discovery to resume after a restart.
+- Streams crawl progress into an interactive network map with pan, zoom, fit,
+  draggable nodes, automatic layout, link-confidence styling, live AMI state,
+  and node controls.
+- Bounds discovery by configurable node and depth limits and paces all public
+  statistics requests through one scheduler.
+
+### Provides a live operations workspace
+
+- Dockable, collapsible, and movable dashboard windows with saved layouts.
+- Queue, node status, connected-node, favorite, network-map, control,
+  transcript, activity, function, and command-output panels.
+- Activity-aware favicon and dashboard emblem states for idle, transcribing,
+  node-keyed, and keyed-plus-transcribing operation.
+- Server-Sent Events for archive jobs, node state, key transitions, and topology
+  progress.
+- SQLite persistence for ingestion jobs, final transcripts, favorites, node
+  statistics, and topology discovery.
+
+## System overview
+
+```mermaid
+flowchart LR
+    A[ASL3 recording archive] -->|read-only WAV files| B[Archive scanner]
+    B --> C[Live and final local Whisper passes]
+    C --> D[(SQLite)]
+    E[Asterisk AMI and app_rpt] <--> F[Node monitor and constrained controls]
+    G[AllStar statistics API] --> H[Rate-paced topology crawler]
+    H --> D
+    F --> D
+    B --> I[FastAPI and SSE]
+    C --> I
+    D --> I
+    F --> I
+    I --> J[Browser dashboard]
 ```
 
-The application never renames, moves, deletes, or writes to files below the
-configured archive paths. It scans on startup and polls the archive every five
-seconds by default; adjust `ASLT_ARCHIVE_POLL_SECONDS` when needed.
-With `ASLT_AUTO_PROCESS=true`, stable recordings are also transcribed
-automatically in the background. With `ASLT_LIVE_TRANSCRIPTION=true`, a second
-local loop snapshots a growing WAV through FFmpeg and publishes a provisional
-rolling transcript while the radio is still keyed. The archive mount remains
-read-only; snapshots are created below `ASLT_TMP_DIR` and deleted after each
-pass. The completed recording always receives a new full-file accuracy pass.
-Recordings are shown as `waiting` while their size or modification time is
-changing, and as `live` after the first provisional result. They are queued for
-the final pass only after size and modification time remain unchanged for
-`ASLT_FILE_STABILIZATION_SECONDS`.
+The archive path is read-only, but Repeater Scribe itself is not a read-only
+application when AMI control is enabled. It can issue real app_rpt commands to
+the configured node.
 
-## AI transcription
+## Operating modes
 
-Repeater Scribe uses a fully local, two-pass `faster-whisper` pipeline. While a
-WAV is growing, FFmpeg extracts rolling 16 kHz tail snapshots for low-latency
-provisional text. After the file is stable, the complete WAV receives a new
-accuracy-oriented pass whose result is persisted. The two paths share one model
-and serialize inference to stay within GPU memory.
+| Mode | Configuration | Behavior |
+| --- | --- | --- |
+| Transcription only | `ASLT_AMI_ENABLED=false` | Scans and transcribes the archive; node status and controls are unavailable. |
+| Monitor | `ASLT_AMI_ENABLED=true`, `ASLT_AMI_CONTROL_ENABLED=false` | Adds live node/link/key state without allowing control commands. |
+| Control | Both AMI settings `true` | Enables trusted-network dashboard control and API-key-protected node-control routes. |
 
-The supplied profile targets a 12 GB NVIDIA card:
+Public favorite statistics and topology crawling are independently controlled
+by `ASLT_FAVORITE_STATS_ENABLED`.
+
+## Requirements
+
+- Docker Engine with Docker Compose v2.
+- An ASL3 recording archive visible on the Docker host.
+- An existing Docker network shared with the ASL3/Asterisk container when AMI
+  monitoring or control is used.
+- AMI credentials permitted to receive events and execute the fixed `Command`
+  actions used by Repeater Scribe.
+- Persistent space for SQLite and Whisper model files.
+- For the supplied GPU profile: a compatible NVIDIA driver, NVIDIA Container
+  Toolkit, and approximately 12 GB VRAM.
+
+The Compose file requests a GPU with `gpus: all`. CPU-only users must remove or
+override that Compose setting in addition to selecting the CPU model profile
+described below.
+
+## Quick start
+
+### 1. Prepare the configuration
+
+```bash
+git clone https://github.com/azcoigreach/repeater-scribe.git
+cd repeater-scribe
+cp .env.example .env
+```
+
+At minimum, set the host archive path:
 
 ```dotenv
-ASLT_WHISPER_MODEL=large-v3
-ASLT_WHISPER_DEVICE=cuda
-ASLT_WHISPER_COMPUTE_TYPE=float16
-ASLT_WHISPER_BEAM_SIZE=5
-ASLT_LIVE_TRANSCRIPTION=true
-ASLT_LIVE_BEAM_SIZE=1
-ASLT_LIVE_WINDOW_SECONDS=12
-ASLT_LIVE_POLL_SECONDS=1.5
+ASLT_HOST_ARCHIVE_PATH=/absolute/path/to/asl_monitor
 ```
 
-Model files are cached under `ASLT_WHISPER_MODEL_DIR`; after the initial model
-download, audio and text remain local. There is no OpenAI transcription adapter
-in the current application, and adding an API key does not activate one.
+For node monitoring and control, also configure the shared Docker network and
+AMI values. Replace every placeholder; Repeater Scribe intentionally ships with
+no node ID default.
 
-Benchmark the configured local final-pass model against real archive audio:
+```dotenv
+ASL3_NETWORK_NAME=asl3-docker_default
+ASLT_AMI_ENABLED=true
+ASLT_AMI_HOST=allstarlink3
+ASLT_AMI_PORT=5038
+ASLT_AMI_USERNAME=admin
+ASLT_AMI_SECRET=replace-with-ami-secret
+ASLT_AMI_NODE_ID=YOUR_NODE_ID
+ASLT_AMI_CONTROL_ENABLED=true
+ASLT_API_KEY=replace-with-a-long-random-secret
+ASLT_KNOWN_CALLSIGNS=YOURCALL,CLUBCALL
+```
+
+The external network named by `ASL3_NETWORK_NAME` must already exist. The
+Asterisk container and Repeater Scribe must both be attached to it, and
+`ASLT_AMI_HOST` must resolve from that network. If no suitable network exists,
+create one and attach the Asterisk container before starting Repeater Scribe.
+
+```bash
+docker network create asl3-docker_default
+```
+
+Do not run that command when the network already exists.
+
+### 2. Start Repeater Scribe
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail 100 repeater-scribe
+```
+
+Open <http://localhost:8088>.
+
+The service can become healthy before Whisper has been loaded. The first
+transcription may download `large-v3` into `./data/models/whisper` and will take
+longer than later passes.
+
+### 3. Verify the GPU and configured profile
+
+```bash
+docker compose exec -T repeater-scribe nvidia-smi
+curl http://localhost:8088/api/v1/system/info
+```
+
+Benchmark a real completed recording:
 
 ```bash
 docker compose run --rm repeater-scribe \
   asl-transcriber benchmark /audio/YOUR_NODE_ID/example.wav
 ```
 
-The JSON output includes audio duration, processing duration, real-time factor,
-raw text, and callsign-corrected display text. A real-time factor below `1.0`
-means inference completed faster than the recording duration.
+A reported real-time factor below `1.0` means the final pass completed faster
+than the audio duration.
 
-Callsign handling is also local. Configured calls, favorites, active node data,
-and topology calls form a ranked candidate set for phonetic decoding and
-conservative correction. Prompt/hotword injection defaults off so candidate
-lists cannot leak into provisional text. Both the untouched model output and
-corrected display text are retained for completed recordings.
+## CPU-only profile
 
-See [AI transcription](docs/transcription.md) for the exact live/final decode
-settings, callsign algorithm, privacy boundary, CPU fallback, tuning procedure,
-troubleshooting steps, and current limitations.
+Remove or override `gpus: all` in `docker-compose.yml`, then use a CPU profile in
+`.env`:
+
+```dotenv
+ASLT_WHISPER_MODEL=medium.en
+ASLT_WHISPER_DEVICE=cpu
+ASLT_WHISPER_COMPUTE_TYPE=int8
+```
+
+`large-v3` can run on a CPU, but it is unlikely to maintain near-live latency on
+typical machines. Actual performance depends on the processor and recording
+quality; benchmark representative repeater audio before choosing a model.
+
+## Important configuration
+
+### Archive and transcription
+
+| Setting | Purpose |
+| --- | --- |
+| `ASLT_HOST_ARCHIVE_PATH` | Host directory mounted read-only at `/audio`. |
+| `ASLT_ARCHIVE_PATHS` | One or more archive roots inside the container. |
+| `ASLT_ARCHIVE_POLL_SECONDS` | Archive discovery/final-processing interval. |
+| `ASLT_FILE_STABILIZATION_SECONDS` | Required unchanged interval before a final pass. |
+| `ASLT_AUTO_PROCESS` | Automatically process stable pending recordings. |
+| `ASLT_LIVE_TRANSCRIPTION` | Enable provisional growing-file transcription. |
+| `ASLT_WHISPER_MODEL` | Local model identifier or model path. |
+| `ASLT_WHISPER_DEVICE` | `cuda` or `cpu`. |
+| `ASLT_WHISPER_COMPUTE_TYPE` | CTranslate2 precision or quantization mode. |
+| `ASLT_KNOWN_CALLSIGNS` | Comma-separated high-priority local callsigns. |
+
+The full transcription setting reference is in
+[docs/transcription.md](docs/transcription.md).
+
+### AMI monitoring and control
+
+| Setting | Purpose |
+| --- | --- |
+| `ASLT_AMI_ENABLED` | Start persistent AMI monitoring. |
+| `ASLT_AMI_HOST` / `ASLT_AMI_PORT` | Asterisk Manager endpoint reachable from the container. |
+| `ASLT_AMI_USERNAME` / `ASLT_AMI_SECRET` | Server-side AMI credentials; never exposed to the browser. |
+| `ASLT_AMI_NODE_ID` | Required home-node ID. No real node is hardcoded. |
+| `ASLT_AMI_CONTROL_ENABLED` | Permit the constrained node-control routes. |
+| `ASLT_AMI_RECONCILE_SECONDS` | Periodic state-repair interval. |
+| `ASLT_API_KEY` | Required in `X-API-Key` for node-control and favorite mutation API routes. |
+
+### Public statistics and topology
+
+| Setting | Purpose |
+| --- | --- |
+| `ASLT_FAVORITE_STATS_ENABLED` | Enable public favorite refresh and topology crawling. |
+| `ASLT_FAVORITE_STATS_REQUEST_INTERVAL_SECONDS` | Minimum delay between outbound AllStar statistics requests. |
+| `ASLT_FAVORITE_STATS_REFRESH_SECONDS` | Priority refresh interval for favorite roots. |
+| `ASLT_TOPOLOGY_MAX_NODES` | Maximum nodes in one connected-component crawl. |
+| `ASLT_TOPOLOGY_MAX_DEPTH` | Maximum traversal depth from the favorite root. |
+| `ASLT_TOPOLOGY_REFRESH_SECONDS` | Delay before a completed component is revisited. |
+
+## Data, network, and privacy boundaries
+
+- The ASL3 archive is mounted `/audio:ro`; Repeater Scribe does not rename,
+  delete, or modify source recordings.
+- Temporary live snapshots are written below `/tmp` and removed after each
+  attempt.
+- SQLite data and downloaded Whisper models are stored below `/data` and persist
+  through container recreation via the `./data` bind mount.
+- Audio and transcript text stay on the local machine. The only transcription
+  network requirement is the initial model download.
+- Enabling favorite statistics sends public numeric node IDs to the configured
+  AllStar statistics endpoint and stores the returned public metadata locally.
+- No OpenAI token is read and no remote transcription request is made in version
+  `0.5.1`.
+
+## Security warning
+
+Repeater Scribe currently has no built-in user login. Treat port `8088` as a
+trusted-network service:
+
+- Do not expose it directly to the public internet.
+- Use a firewall, private LAN/VPN, or an authenticated reverse proxy.
+- Read endpoints, transcript search, archive-audio playback, and manual ingestion
+  triggers are not protected by `ASLT_API_KEY`.
+- Node-control and favorite mutation routes below `/api/v1` require
+  `X-API-Key`, but the browser dashboard uses separate `/ui` write routes while
+  `ASLT_AUTH_MODE=off`.
+- Setting `ASLT_AUTH_MODE` to any other value disables those dashboard write
+  routes; it does not provide a login implementation.
+- `ASLT_AMI_CONTROL_ENABLED=false` is the reliable way to disable node commands
+  while retaining AMI monitoring.
+- A raw DTMF function can activate anything configured behind that function in
+  app_rpt. Restrict network access and AMI permissions accordingly.
+
+Keep `.env`, AMI credentials, and API keys out of version control. See
+[SECURITY.md](SECURITY.md) for vulnerability reporting.
+
+## API
+
+FastAPI exposes interactive OpenAPI documentation at <http://localhost:8088/docs>.
+The main route groups are:
+
+| Area | Routes |
+| --- | --- |
+| Health/configuration | `GET /health`, `/api/v1/health`, `/api/v1/system/info` |
+| Recordings | `/api/v1/ingestion/*`, `/api/v1/recordings`, `/api/v1/audio`, `/api/v1/activity` |
+| Live archive events | `GET /api/v1/events` |
+| Node state | `GET /api/v1/nodes`, `/api/v1/nodes/{home}/state`, `/links`, `/events` |
+| Node control | `POST`/`DELETE /api/v1/nodes/{home}/links`, `/reconnect`, `/api/v1/node/{id}/command`, `/function` |
+| Favorites | `GET`/`POST`/`PATCH`/`DELETE /api/v1/nodes/{home}/favorites` |
+| Topology | `GET /api/v1/nodes/{home}/topology`, `/topology/events` |
+
+Node-control and favorite mutation API requests require the configured key. For
+example, add a favorite with:
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: replace-with-your-key" \
+  -d '{"target_identifier":"FAVORITE_NODE","label":"Local repeater"}' \
+  http://localhost:8088/api/v1/nodes/YOUR_NODE_ID/favorites
+```
+
+## Operations
+
+```bash
+# Service and health
+docker compose ps
+curl http://localhost:8088/api/v1/health
+
+# Recent logs
+docker compose logs --tail 200 repeater-scribe
+
+# Restart without rebuilding
+docker compose restart repeater-scribe
+
+# Rebuild after an update
+docker compose up -d --build --force-recreate
+```
+
+The persistent state is in `./data`. Back it up according to the normal SQLite
+and filesystem practices for the host; do not rely on the container layer for
+durable data.
 
 ## Development
+
+Python `3.12` or newer is required.
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e '.[dev]'
+python -m pip install -e '.[dev]'
 pytest -q
-ruff check src tests
+ruff check .
 mypy src
 ```
 
-Run a one-time scan with the configured archive paths:
+Run a one-time archive scan:
 
 ```bash
-ASLT_ARCHIVE_PATHS=/home/azcoigreach/ASL3-Docker/asl_monitor \
-	asl-transcriber scan
+ASLT_ARCHIVE_PATHS=/absolute/path/to/asl_monitor asl-transcriber scan
 ```
 
-Start the API with `uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080`.
+Run the development API:
 
-When running beside the AllScan Reimagined virtual-node stack, create or reuse
-the external Docker network named by `ASL3_NETWORK_NAME` (default:
-`asl3-docker_default`). This lets the AMI adapter resolve `allstarlink3`.
+```bash
+uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080
+```
 
-## API
+## Documentation
 
-- `GET /api/v1/health` reports service readiness.
-- `POST /api/v1/ingestion/scan` performs a read-only archive scan.
-- `POST /api/v1/ingestion/process` processes pending recordings with local Whisper.
-- `GET /api/v1/ingestion/jobs` lists discovered recording jobs.
-- `GET /api/v1/activity` lists parsed ASL3 activity events.
-- `GET /api/v1/recordings?q=...&status=...` searches queued recordings and transcripts.
-- `GET /api/v1/events` provides an SSE stream of discovery and processing events.
-- `GET /api/v1/node/status` returns the shared app_rpt node-state cache without opening AMI.
-- `POST /api/v1/node/ping` checks AMI connectivity.
-- `POST /api/v1/node/{node_id}/function` sends an AllStar function code when AMI control and API-key protection are enabled.
-- `GET /api/v1/node/{node_id}/commands` lists the named Functions menu.
-- `POST /api/v1/node/{node_id}/command` executes a named command for API clients.
-- `GET /api/v1/nodes` and `GET /api/v1/nodes/{home}/state` expose normalized app_rpt state.
-- `GET /api/v1/nodes/{home}/links` and `GET /api/v1/nodes/{home}/events` expose live links and SSE updates.
-- `POST`/`DELETE /api/v1/nodes/{home}/links` provide protected, named link controls.
-- `GET /api/v1/nodes/{home}/favorites` lists durable favorites, cached public-node statistics,
-  and reported connection topology.
-- `POST`/`PATCH`/`DELETE /api/v1/nodes/{home}/favorites` manage favorites with `X-API-Key` protection.
+- [AI transcription](docs/transcription.md)
+- [Architecture overview](docs/architecture.md)
+- [Archive-ingestion decision](docs/adr/0001-archive-based-ingestion.md)
+- [Implementation plan](docs/plan.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
-## AMI control
+## Current limitations
 
-AMI is disabled by default. Set the AMI connection values in `.env`, then set
-`ASLT_AMI_ENABLED=true`, `ASLT_AMI_CONTROL_ENABLED=true`, and a private
-`ASLT_API_KEY` to enable node control. `ASLT_AMI_NODE_ID` has no default and must
-be set to the operator's own node ID. Send the key in the `X-API-Key` header.
-Control requests are limited to AllStar DTMF function codes; arbitrary AMI
-actions are not exposed by the HTTP API.
-The container owns one persistent AMI connection per configured home node. It
-logs in with events enabled, preserves repeated headers, routes actions by
-unique `ActionID`, and refreshes app_rpt state after authentication and
-reconnect. `RptStatus XStat` is authoritative for direct links and is joined to
-`SawStat` for key-up timing. Older app_rpt installations fall back to adjacent
-links from `RPT_ALINKS`; `activity.log` is never used as current link state.
-The backend repairs its cache every five seconds and publishes changes to all
-browsers over one SSE path, so additional dashboard sessions do not create AMI
-connections or add app_rpt polling load.
-The dashboard uses the server-configured AMI credentials and does not ask the
-operator to enter the API key. Its command drawer is available only when web
-authentication is explicitly off; enable authentication before exposing the
-dashboard beyond a trusted local network.
+- Near-live text is produced from the tail of a growing archive WAV; it is not a
+  direct PCM stream and may repeat or revise phrases before the final pass.
+- Callsign correction is probabilistic. The untouched raw model transcript is
+  retained for review.
+- Topology discovery is limited to public numeric nodes visible through the
+  configured AllStar statistics API and the configured crawl bounds.
+- Dashboard write controls assume a trusted network; built-in interactive user
+  authentication is not implemented.
+- OpenAI and other hosted transcription backends are not implemented.
 
-Favorite nodes are stored in the same Docker-mounted database configured by
-`ASLT_DATABASE_URL`, including their callsign, description, and location. The
-backend counts observed remote key-up transitions for every direct node link,
-so existing history is available if a node is favorited later. Counts and
-transmit time begin accumulating after this version is deployed; they are not
-reconstructed from historical recordings.
+## License
 
-For public numeric favorites, the backend also polls the AllStarLink statistics
-API while the favorite is disconnected. A persistent breadth-first crawler
-follows public numeric downstream nodes to build the full observable connected
-component, while caching node reports, crawl queues, metadata, and one- or
-two-sided edges in the Docker-mounted database. Container restarts therefore
-resume discovery instead of starting over. The dashboard uses that cache for
-its Favorites table and dockable Network map, streams progressive graph updates,
-merges live AMI state, keeps manually dragged bubble positions, and opens current
-metadata and connection controls when a bubble is selected.
-
-All AllStar traffic passes through one scheduler paced at one request every
-three seconds (20/minute), below the service's discussed 30-request-per-minute
-limit. Recent reports are reused across favorite crawls so a node is not fetched
-twice, while favorite roots retain a 15-second priority refresh so activity and
-key totals stay responsive during a long crawl. A crawl defaults to 200 nodes and 12 levels and clearly reports a safety
-limit instead of silently claiming the graph is complete. Configure those bounds
-with `ASLT_TOPOLOGY_MAX_NODES` and `ASLT_TOPOLOGY_MAX_DEPTH`; completed components
-are revisited after `ASLT_TOPOLOGY_REFRESH_SECONDS` (15 minutes by default). Set
-`ASLT_FAVORITE_STATS_ENABLED=false` to opt out; private nodes and nonnumeric
-client identifiers continue to use locally observed AMI history only.
-
-Processing loads the configured `faster-whisper` model on demand. The first
-processing request may download the model and take longer than later requests.
-See [AI transcription](docs/transcription.md) for the authoritative runtime
-behavior and tuning guidance.
-
-Node-control milestones after this foundation are favorites ordering, durable
-transmission-to-recording correlation, AllStar/EchoLink station enrichment, and
-time-zone-aware statistics presentation.
+Licensed under the [Apache License 2.0](LICENSE).
