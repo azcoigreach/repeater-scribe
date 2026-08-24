@@ -26,6 +26,26 @@ def test_parse_alinks_zero_is_a_successful_empty_list() -> None:
     assert parse_alinks("0") == []
 
 
+def test_blank_alinks_event_does_not_clear_existing_links() -> None:
+    existing = parse_alinks("1,41522TU")[0]
+    state = NodeState(home_node="668390", links={existing.identifier: existing})
+
+    updated = normalize_app_rpt_event(state, AmiFrame({"event": ["RPT_ALINKS"]}))
+
+    assert updated.links == state.links
+
+
+def test_explicit_zero_alinks_event_clears_existing_links() -> None:
+    existing = parse_alinks("1,41522TU")[0]
+    state = NodeState(home_node="668390", links={existing.identifier: existing})
+
+    updated = normalize_app_rpt_event(
+        state, AmiFrame({"event": ["RPT_ALINKS"], "eventvalue": ["0"]})
+    )
+
+    assert updated.links == {}
+
+
 def test_parse_alinks_keeps_multiple_entries_and_parses_from_the_right() -> None:
     links = parse_alinks("3,12345RU,KM7GHSTK,CLIENT-7XU")
 

@@ -220,8 +220,12 @@ def normalize_app_rpt_event(state: NodeState, frame: AmiFrame) -> NodeState:
         updated_at=timestamp,
     )
     if event == "RPT_ALINKS":
-        parsed = parse_alinks(_event_value(frame), now=timestamp)
-        next_state.links = {link.identifier: link for link in parsed}
+        value = _event_value(frame).strip()
+        # app_rpt can emit RPT_ALINKS without a value while link state is changing.
+        # That is not an authoritative empty snapshot; an explicit "0" is.
+        if value:
+            parsed = parse_alinks(value, now=timestamp)
+            next_state.links = {link.identifier: link for link in parsed}
     elif event == "RPT_RXKEYED":
         next_state.local_rx_keyed = _event_value(frame) == "1"
     elif event == "RPT_TXKEYED":

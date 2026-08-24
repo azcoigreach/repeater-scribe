@@ -238,6 +238,11 @@ class NodeStateService:
                 link,
                 connected_at=old.connected_at if old else link.connected_at,
                 link_mode=link.link_mode or (old.link_mode if old else None),
+                node_number=link.node_number or (old.node_number if old else None),
+                callsign=link.callsign or (old.callsign if old else None),
+                display_name=link.display_name or (old.display_name if old else ""),
+                peer=link.peer or (old.peer if old else None),
+                direction=link.direction or (old.direction if old else None),
             )
         return result
 

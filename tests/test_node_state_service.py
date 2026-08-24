@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
-from asl_transcriber.ami import AmiConnectionState, AmiResponse
+from asl_transcriber.ami import AmiConnectionState, AmiFrame, AmiResponse
 from asl_transcriber.config import Settings
 from asl_transcriber.node_control import RemoteKeyTransition, parse_alinks, parse_xstat_snapshot
 from asl_transcriber.node_service import NodeStateService
@@ -74,6 +74,35 @@ def test_stable_connected_at_survives_consecutive_snapshots() -> None:
         await service.reconcile("668390")
 
         assert service.state("668390").links["674982"].connected_at == connected_at
+
+    asyncio.run(scenario())
+
+
+def test_sparse_alinks_key_event_preserves_xstat_connection_metadata() -> None:
+    async def scenario() -> None:
+        service, _ = service_with()
+        links, _ = parse_xstat_snapshot(
+            response(Conn=["674982 192.0.2.4 0 OUT 00:00:20 ESTABLISHED"]),
+            response(Conn=["674982 0 8 1"]),
+        )
+        service.state("668390").links = links
+        service.state("668390").stale = False
+
+        await service._on_event(
+            "668390",
+            AmiFrame(
+                {
+                    "event": ["RPT_ALINKS"],
+                    "node": ["668390"],
+                    "eventvalue": ["1,674982RK"],
+                }
+            ),
+        )
+
+        link = service.state("668390").links["674982"]
+        assert link.keyed is True
+        assert link.peer == "192.0.2.4"
+        assert link.direction == "out"
 
     asyncio.run(scenario())
 
