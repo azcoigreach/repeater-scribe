@@ -73,12 +73,12 @@ def test_allstar_stats_populate_disconnected_favorite_and_topology(tmp_path) -> 
     with sessions() as session:
         create_favorite(
             session,
-            home_node="668390",
+            home_node="100000",
             target_identifier="674982",
             label="Netoholics HUB",
         )
-        store_allstar_snapshot(session, ["668390"], values)
-        item = list_favorite_items(session, "668390", {}, now=fetched_at)[0]
+        store_allstar_snapshot(session, ["100000"], values)
+        item = list_favorite_items(session, "100000", {}, now=fetched_at)[0]
 
     assert item["connected"] is False
     assert item["public_active"] is True
@@ -115,13 +115,13 @@ def test_stats_deltas_mark_recent_activity_without_requiring_keyed_flag(tmp_path
     with sessions() as session:
         create_favorite(
             session,
-            home_node="668390",
+            home_node="100000",
             target_identifier="674982",
             label="Netoholics HUB",
         )
         initial = parse_allstar_stats(stats_payload(), fetched_at=first_fetch)
-        store_allstar_snapshot(session, ["668390"], initial)
-        assert list_favorite_items(session, "668390", {}, now=first_fetch)[0][
+        store_allstar_snapshot(session, ["100000"], initial)
+        assert list_favorite_items(session, "100000", {}, now=first_fetch)[0][
             "recently_active"
         ] is False
 
@@ -129,9 +129,9 @@ def test_stats_deltas_mark_recent_activity_without_requiring_keyed_flag(tmp_path
             stats_payload(keyups=117, tx_seconds=5375),
             fetched_at=first_fetch + timedelta(seconds=3),
         )
-        store_allstar_snapshot(session, ["668390"], changed)
+        store_allstar_snapshot(session, ["100000"], changed)
         item = list_favorite_items(
-            session, "668390", {}, now=first_fetch + timedelta(seconds=4)
+            session, "100000", {}, now=first_fetch + timedelta(seconds=4)
         )[0]
 
     assert item["keyup_count"] == 117

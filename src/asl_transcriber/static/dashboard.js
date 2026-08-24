@@ -6,14 +6,46 @@ function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
+// Activity states: 0 idle, 1 transcribing, 2 node keyed, 3 both.
+const ACTIVITY_STATE_ICONS = [
+  '/static/repeater-scribe-state0-256px.png',
+  '/static/repeater-scribe-state1-256px.png',
+  '/static/repeater-scribe-state2-256px.png',
+  '/static/repeater-scribe-state3-256px.png',
+];
+const ACTIVITY_STATE_EMBLEMS = ACTIVITY_STATE_ICONS;
+const ACTIVITY_STATE_LABELS = ['IDLE', 'TRANSCRIBING', 'NODE KEYED', 'KEYED + TRANSCRIBING'];
+let transcriptionActive = false;
+let nodeKeyed = false;
+let activityState = null;
+
+function updateActivityState() {
+  const state = (transcriptionActive ? 1 : 0) + (nodeKeyed ? 2 : 0);
+  if (state === activityState) return;
+  activityState = state;
+  document.querySelectorAll('#favicon, link[rel="apple-touch-icon"]').forEach(icon => {
+    icon.setAttribute('href', ACTIVITY_STATE_ICONS[state]);
+  });
+  const emblem = document.querySelector('#state-emblem-image');
+  if (emblem) {
+    emblem.src = ACTIVITY_STATE_EMBLEMS[state];
+    emblem.alt = `Activity state: ${ACTIVITY_STATE_LABELS[state]}`;
+  }
+  const label = document.querySelector('#state-emblem-label');
+  if (label) label.textContent = ACTIVITY_STATE_LABELS[state];
+}
+
 function renderJobs(items, databaseTotals = {}) {
   const counts = items.reduce((result, item) => {
     result[item.status] = (result[item.status] || 0) + 1;
     return result;
   }, {});
+  const processing = (counts.processing || 0) + (counts.live || 0);
+  transcriptionActive = processing > 0;
+  updateActivityState();
   document.querySelector('#total-count').textContent = databaseTotals.recordings ?? items.length;
   document.querySelector('#completed-count').textContent = databaseTotals.transcribed ?? counts.completed ?? 0;
-  document.querySelector('#processing-count').textContent = counts.processing || 0;
+  document.querySelector('#processing-count').textContent = processing;
   document.querySelector('#pending-count').textContent = (counts.pending || 0) + (counts.waiting || 0);
   if (!items.length) {
     recordings.innerHTML = '<div class="empty">No recordings match this search.</div>';
@@ -23,7 +55,7 @@ function renderJobs(items, databaseTotals = {}) {
     <article class="recording">
       <div class="recording-meta"><span class="recording-path">${esc(item.source_path)}</span><span class="recording-date">${item.timestamp ? esc(new Date(item.timestamp).toLocaleString()) : 'Timestamp unavailable'}</span><span class="status ${item.status}">${esc(item.status)}</span></div>
       <button class="play-button" type="button" data-audio-url="${esc(item.audio_url)}" aria-label="Play ${esc(item.source_path)}">▶ Play audio</button>
-      <p class="transcript">${item.transcript ? esc(item.transcript.display_text) : '<span style="color:var(--muted)">Awaiting local transcription</span>'}</p>
+      <p class="transcript">${item.transcript ? `${esc(item.transcript.display_text)}${item.transcript.provisional ? ' <span style="color:var(--muted)">(provisional)</span>' : ''}` : '<span style="color:var(--muted)">Awaiting local transcription</span>'}</p>
     </article>`).join('');
   recordings.querySelectorAll('.play-button').forEach(button => button.addEventListener('click', () => playAudio(button)));
 }
@@ -73,6 +105,8 @@ async function loadNodeStatus() {
     state.textContent = response.status === 503 ? 'AMI disabled' : 'Node unavailable';
     state.className = 'status processing';
     dot.className = 'status-dot offline';
+    nodeKeyed = false;
+    updateActivityState();
     return;
   }
   renderNodeSnapshot(await response.json());
@@ -89,6 +123,8 @@ function renderNodeSnapshot(data) {
     : Array.isArray(data.links) ? data.links : currentConnections;
   currentConnections = connections;
   const talkers = connections.filter(connection => connection.keyed === true).map(connection => connection.identifier);
+  nodeKeyed = talkers.length > 0 && data.ami_connected !== false;
+  updateActivityState();
   state.textContent = data.stale ? 'AMI state stale' : data.ami_connected ? 'AMI connected' : 'Node unavailable';
   state.className = data.ami_connected && !data.stale ? 'status' : 'status processing';
   dot.className = `status-dot ${talkers.length ? 'talking' : data.ami_connected ? 'idle' : 'offline'}`;

@@ -40,12 +40,19 @@ from asl_transcriber.topology import (
     ensure_topology_crawl,
     serialize_topology,
 )
+from asl_transcriber.transcription.callsigns import CallsignResolver
+from asl_transcriber.transcription.context import DatabaseCallsignProvider
 from asl_transcriber.transcription.faster_whisper import FasterWhisperEngine
+from asl_transcriber.transcription.live import FfmpegSnapshotter, LiveTranscriptionService
 
 logger = logging.getLogger(__name__)
-runtime = ArchiveRuntime(settings.archive_path_list)
+runtime = ArchiveRuntime(
+    settings.archive_path_list,
+    stable_seconds=settings.file_stabilization_seconds,
+)
 node_monitor: NodeStateService | None = None
 topology_service: TopologyService | None = None
+transcription_engine: FasterWhisperEngine | None = None
 
 NODE_COMMANDS = [
     {"name": "Announce", "template": "rpt cmd {node} status 11", "target": False},
@@ -110,23 +117,63 @@ def recording_timestamp(source_path: str) -> str | None:
 def current_runtime() -> ArchiveRuntime:
     global runtime
     configured_roots = [Path(root) for root in settings.archive_path_list]
-    if runtime.roots != configured_roots:
-        runtime = ArchiveRuntime(settings.archive_path_list)
+    if (
+        runtime.roots != configured_roots
+        or runtime.stable_seconds != settings.file_stabilization_seconds
+    ):
+        runtime = ArchiveRuntime(
+            settings.archive_path_list,
+            stable_seconds=settings.file_stabilization_seconds,
+        )
     return runtime
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global node_monitor, topology_service
-    active_runtime = current_runtime()
-    active_runtime.scan_once()
-    engine = FasterWhisperEngine(
+def build_local_transcription_engine() -> FasterWhisperEngine:
+    configured_callsigns = tuple(settings.known_callsign_list)
+    resolver = CallsignResolver(configured_callsigns)
+    candidate_provider = DatabaseCallsignProvider(
+        SessionLocal,
+        configured_callsigns=configured_callsigns,
+        cache_seconds=settings.callsign_context_cache_seconds,
+        max_candidates=settings.callsign_max_candidates,
+    )
+    return FasterWhisperEngine(
         model_size=settings.whisper_model,
         device=settings.whisper_device,
         compute_type=settings.whisper_compute_type,
         language=settings.whisper_language,
+        beam_size=settings.whisper_beam_size,
+        vad_filter=settings.whisper_vad_filter,
+        initial_prompt=settings.whisper_initial_prompt,
+        hotwords=settings.whisper_hotwords or None,
         workers=settings.worker_concurrency,
         model_dir=settings.whisper_model_dir,
+        callsign_resolver=resolver,
+        callsign_provider=candidate_provider,
+        callsign_hotword_limit=settings.callsign_hotword_limit,
+    )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    global node_monitor, topology_service, transcription_engine
+    active_runtime = current_runtime()
+    active_runtime.scan_once()
+    transcription_engine = build_local_transcription_engine()
+    live_service = LiveTranscriptionService(
+        snapshotter=FfmpegSnapshotter(
+            Path(settings.tmp_dir) / "live",
+            window_seconds=settings.live_window_seconds,
+            ffmpeg_binary=settings.ffmpeg_binary,
+        ),
+        transcribe=lambda path: transcription_engine.transcribe(
+            path,
+            beam_size=settings.live_beam_size,
+            vad_filter=False,
+            condition_on_previous_text=False,
+            use_hotwords=False,
+        ),
+        min_file_bytes=settings.live_min_file_bytes,
     )
 
     async def poll_archive() -> None:
@@ -135,15 +182,27 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             active_runtime.scan_once()
             if settings.auto_process:
                 try:
-                    await asyncio.to_thread(active_runtime.process_pending, engine.transcribe)
+                    await asyncio.to_thread(
+                        active_runtime.process_pending, transcription_engine.transcribe
+                    )
                 except Exception:
                     logger.exception("Background archive processing cycle failed")
             await asyncio.sleep(settings.archive_poll_seconds)
+
+    async def transcribe_live_audio() -> None:
+        while True:
+            if settings.live_transcription:
+                try:
+                    await asyncio.to_thread(live_service.process_once, current_runtime())
+                except Exception:
+                    logger.exception("Live transcription cycle failed")
+            await asyncio.sleep(settings.live_poll_seconds)
 
     async def persist_key_transition(transition: RemoteKeyTransition) -> None:
         await asyncio.to_thread(record_remote_key_transition, SessionLocal, transition)
 
     watcher = asyncio.create_task(poll_archive())
+    live_watcher = asyncio.create_task(transcribe_live_audio())
     topology_service = (
         TopologyService(
             SessionLocal,
@@ -173,7 +232,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         watcher.cancel()
-        tasks = [watcher]
+        live_watcher.cancel()
+        tasks = [watcher, live_watcher]
         if topology_watcher is not None:
             topology_watcher.cancel()
             tasks.append(topology_watcher)
@@ -218,7 +278,7 @@ def health() -> dict[str, str | bool]:
 
 
 @app.get("/api/v1/system/info")
-def system_info() -> dict[str, str | list[str] | bool]:
+def system_info() -> dict[str, object]:
     return {
         "service": settings.app_name,
         "environment": settings.app_env,
@@ -226,6 +286,16 @@ def system_info() -> dict[str, str | list[str] | bool]:
         "archive_paths": settings.archive_path_list,
         "api_version": "v1",
         "read_only_mode": settings.read_only_mode,
+        "transcription": {
+            "backend": "local",
+            "model": settings.whisper_model,
+            "device": settings.whisper_device,
+            "compute_type": settings.whisper_compute_type,
+            "final_beam_size": settings.whisper_beam_size,
+            "live_enabled": settings.live_transcription,
+            "live_beam_size": settings.live_beam_size,
+            "live_window_seconds": settings.live_window_seconds,
+        },
     }
 
 
@@ -792,15 +862,11 @@ def ingestion_jobs() -> dict[str, object]:
 
 @app.post("/api/v1/ingestion/process")
 def process_ingestion() -> dict[str, int]:
+    global transcription_engine
     active_runtime = current_runtime()
-    engine = FasterWhisperEngine(
-        model_size=settings.whisper_model,
-        device=settings.whisper_device,
-        compute_type=settings.whisper_compute_type,
-        language=settings.whisper_language,
-        workers=settings.worker_concurrency,
-    )
-    results = active_runtime.process_pending(engine.transcribe)
+    if transcription_engine is None:
+        transcription_engine = build_local_transcription_engine()
+    results = active_runtime.process_pending(transcription_engine.transcribe)
     return {"processed": len(results), "total": len(active_runtime.jobs())}
 
 
@@ -828,17 +894,28 @@ def recordings(
     normalized_query = q.casefold() if q else None
     items: list[dict[str, object]] = []
     jobs = sorted(active_runtime.jobs(), key=lambda job: job.source_path, reverse=True)
-    waiting_items: list[dict[str, object]] = [
-        {
-            "id": None,
-            "source_path": source_path,
-            "status": "waiting",
-            "transcript": None,
-            "timestamp": recording_timestamp(source_path),
-            "audio_url": f"/api/v1/audio?path={quote(source_path)}",
-        }
-        for source_path in active_runtime.waiting_sources()
-    ]
+    waiting_items: list[dict[str, object]] = []
+    for source_path in active_runtime.waiting_sources():
+        live_result = active_runtime.live_results.get(source_path)
+        waiting_items.append(
+            {
+                "id": None,
+                "source_path": source_path,
+                "status": "live" if live_result is not None else "waiting",
+                "transcript": (
+                    {
+                        "raw_text": live_result.raw_text,
+                        "display_text": live_result.display_text,
+                        "language": live_result.language,
+                        "provisional": True,
+                    }
+                    if live_result is not None
+                    else None
+                ),
+                "timestamp": recording_timestamp(source_path),
+                "audio_url": f"/api/v1/audio?path={quote(source_path)}",
+            }
+        )
     all_items: list[dict[str, object]] = waiting_items + [
         {
             "id": job.id,
@@ -860,7 +937,11 @@ def recordings(
     ]
     for item in all_items:
         job_source_path = str(item["source_path"])
-        result = active_runtime.results.get(str(item["id"])) if item["id"] else None
+        result = (
+            active_runtime.results.get(str(item["id"]))
+            if item["id"]
+            else active_runtime.live_results.get(job_source_path)
+        )
         searchable = f"{job_source_path} {result.raw_text if result else ''} {result.display_text if result else ''}".casefold()
         if normalized_query and normalized_query not in searchable:
             continue

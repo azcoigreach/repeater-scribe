@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>REPEATER SCRIBE dashboard</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260824-1">
+  <title>REPEATER SCRIBE</title>
+  <link rel="icon" id="favicon" type="image/png" sizes="256x256" href="/static/repeater-scribe-state0-256px.png">
+  <link rel="apple-touch-icon" href="/static/repeater-scribe-state0-256px.png">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260824-2">
 </head>
 <body>
   <header class="topbar">
@@ -65,6 +67,10 @@
           <article><span class="stat-label">Waiting</span><strong id="pending-count">0</strong></article>
         </section>
         <div class="archive-badge"><span class="badge-label">ARCHIVE</span><strong>{{ archive_path }}</strong><span class="read-only">READ ONLY SOURCE</span></div>
+        <figure class="state-emblem">
+          <img id="state-emblem-image" src="/static/repeater-scribe-state0-256px.png" alt="Activity state" width="128" height="128">
+          <figcaption class="badge-label" id="state-emblem-label">IDLE</figcaption>
+        </figure>
       </div>
     </section>
 

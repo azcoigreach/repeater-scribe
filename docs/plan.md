@@ -15,16 +15,24 @@ This phase establishes the application skeleton and operating model needed to su
 
 - Watch archive directories recursively and wait for files to stop growing.
 - Stabilize files before processing.
-- Deduplicate by content hash and source path.
+- Deduplicate durable jobs by archive root and source-relative path.
 - Parse ASL3 activity logs and correlate events with recordings.
 - Create job lifecycle states and retry/dead-letter handling.
 
-## Phase 3: Transcription
+## Phase 3: Transcription (implemented)
 
-- Probe, normalize, and validate audio.
-- Implement the `FasterWhisperEngine` abstraction.
-- Persist raw and display transcripts with per-segment metadata.
-- Add post-processing for callsign correction with manual overrides.
+- Use one local `FasterWhisperEngine` for rolling provisional and full-file final
+  decoding.
+- Persist final raw model text and callsign-corrected display text.
+- Build ranked callsign context from configured calls, favorites, node activity,
+  and topology data.
+- Keep dynamic hotword prompting off by default and retain raw text for review.
+- Benchmark model speed and exact callsign accuracy against real repeater audio.
+
+Segment timestamps and callsign-correction evidence are currently returned by
+the engine but are not persisted. Manual transcript/callsign overrides and a
+remote transcription backend are not implemented. See
+[AI transcription](transcription.md) for the as-built design.
 
 ## Phase 4: API and UI
 

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
+from asl_transcriber.audio.probe import probe_audio
 from asl_transcriber.config import settings
-from asl_transcriber.main import app
+from asl_transcriber.main import app, build_local_transcription_engine
 from asl_transcriber.runtime import ArchiveRuntime
 
 
@@ -18,6 +20,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("config", help="Print the effective configuration")
     subparsers.add_parser("db", help="Database-related commands")
     subparsers.add_parser("health", help="Print health status")
+    benchmark = subparsers.add_parser(
+        "benchmark", help="Benchmark the configured local model on archive recordings"
+    )
+    benchmark.add_argument("audio", nargs="+", type=Path)
     return parser
 
 
@@ -37,6 +43,33 @@ def main() -> None:
                 }
             )
         )
+        return
+
+    if args.command == "benchmark":
+        engine = build_local_transcription_engine()
+        items: list[dict[str, object]] = []
+        for audio_path in args.audio:
+            probe = probe_audio(audio_path)
+            result = engine.transcribe(str(audio_path))
+            processing_seconds = result.processing_time_seconds or 0.0
+            items.append(
+                {
+                    "path": str(audio_path),
+                    "audio_seconds": round(probe.duration_seconds, 3),
+                    "processing_seconds": round(processing_seconds, 3),
+                    "real_time_factor": (
+                        round(processing_seconds / probe.duration_seconds, 3)
+                        if probe.duration_seconds
+                        else None
+                    ),
+                    "model": result.model_name,
+                    "device": result.options.get("device"),
+                    "compute_type": result.options.get("compute_type"),
+                    "raw_text": result.raw_text,
+                    "display_text": result.display_text,
+                }
+            )
+        print(json.dumps({"items": items}, indent=2))
         return
 
     if args.command in {"serve", "config", "health"}:

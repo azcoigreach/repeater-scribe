@@ -6,7 +6,7 @@ from asl_transcriber.main import app
 
 
 def test_recording_includes_timestamp_and_audio_url(monkeypatch, tmp_path) -> None:
-    node_dir = tmp_path / "668390"
+    node_dir = tmp_path / "100000"
     node_dir.mkdir()
     recording = node_dir / "2026082300415497.wav"
     recording.write_bytes(b"RIFF test audio")

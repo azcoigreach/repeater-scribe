@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import UTC
 from pathlib import Path
 from queue import Queue
 
@@ -21,9 +22,15 @@ from asl_transcriber.workers.processor import ProcessingResult, ProcessingWorker
 class ArchiveRuntime:
     """Coordinates read-only archive discovery and its in-memory job queue."""
 
-    def __init__(self, roots: Sequence[str | Path], session_factory: Callable = SessionLocal) -> None:
+    def __init__(
+        self,
+        roots: Sequence[str | Path],
+        session_factory: Callable = SessionLocal,
+        stable_seconds: float = 0.0,
+    ) -> None:
         self.roots = [Path(root) for root in roots]
         self.session_factory = session_factory
+        self.stable_seconds = stable_seconds
         bind = session_factory.kw.get("bind") if hasattr(session_factory, "kw") else None
         if bind is not None:
             ModelBase.metadata.create_all(bind)
@@ -31,10 +38,16 @@ class ArchiveRuntime:
             self._backfill_archive_roots(bind)
         self.job_store = JobStore()
         self.services = [
-            ArchiveIngestionService(root, self.job_store, require_stable=True)
+            ArchiveIngestionService(
+                root,
+                self.job_store,
+                require_stable=True,
+                stable_seconds=stable_seconds,
+            )
             for root in self.roots
         ]
         self.results: dict[str, ProcessingResult] = {}
+        self.live_results: dict[str, ProcessingResult] = {}
         self._events: Queue[dict[str, object]] = Queue()
         self._restore_state()
 
@@ -150,6 +163,31 @@ class ArchiveRuntime:
     def subscribe(self) -> Queue[dict[str, object]]:
         return self._events
 
+    def set_live_result(
+        self, source_path: str, transcript: TranscriptResult, *, display_text: str | None = None
+    ) -> None:
+        result = ProcessingResult(
+            source_path=source_path,
+            status="live",
+            raw_text=transcript.raw_text,
+            display_text=display_text if display_text is not None else transcript.display_text,
+            language=transcript.language,
+            confidence=transcript.confidence,
+        )
+        self.live_results[source_path] = result
+        self._events.put(
+            {
+                "id": None,
+                "source_path": source_path,
+                "status": "live",
+                "provisional": True,
+                "transcript": result.display_text,
+            }
+        )
+
+    def clear_live_result(self, source_path: str) -> None:
+        self.live_results.pop(source_path, None)
+
     @staticmethod
     def _event_payload(job: IngestionJob, result: ProcessingResult | None = None) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -186,11 +224,20 @@ class ArchiveRuntime:
                 if not self._source_exists(stored.source_path):
                     continue
                 job = IngestionJob(source_path=stored.source_path, id=stored.id)
-                job.status = JobState(stored.status)
+                status = JobState(stored.status)
+                if status == JobState.COMPLETED and stored.transcript is not None:
+                    source = self._resolve_source(stored.source_path)
+                    processed_at = stored.transcript.updated_at or stored.transcript.created_at
+                    if processed_at.tzinfo is None:
+                        processed_at = processed_at.replace(tzinfo=UTC)
+                    if source.stat().st_mtime > processed_at.timestamp():
+                        status = JobState.PENDING
+                        stored.status = status.value
+                job.status = status
                 job.attempt_count = stored.attempt_count
                 job.last_error = stored.last_error
                 self.job_store.add(job)
-                if stored.transcript is not None:
+                if stored.transcript is not None and status == JobState.COMPLETED:
                     self.results[job.id] = ProcessingResult(
                         source_path=job.source_path,
                         status="completed",
@@ -199,6 +246,7 @@ class ArchiveRuntime:
                         language=stored.transcript.language,
                         confidence=stored.transcript.confidence,
                     )
+            session.commit()
 
     def _persist_result(self, job: IngestionJob, result: ProcessingResult) -> None:
         with self.session_factory() as session:
@@ -209,15 +257,16 @@ class ArchiveRuntime:
             stored_job.status = job.status.value
             stored_job.attempt_count = job.attempt_count
             stored_job.last_error = job.last_error
-            session.add(
-                Transcript(
+            transcript = stored_job.transcript
+            if transcript is None:
+                transcript = Transcript(
                     job_id=job.id,
-                    raw_text=result.raw_text,
-                    display_text=result.display_text,
-                    language=result.language,
-                    confidence=result.confidence,
                 )
-            )
+                session.add(transcript)
+            transcript.raw_text = result.raw_text
+            transcript.display_text = result.display_text
+            transcript.language = result.language
+            transcript.confidence = result.confidence
             session.commit()
 
     def activity_events(self) -> list[ActivityLogEvent]:

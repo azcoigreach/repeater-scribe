@@ -34,7 +34,7 @@ def test_ami_client_logs_in_and_executes_command() -> None:
         return client
 
     response = AmiClient("node", 5038, "admin", "secret", socket_factory=factory).command(
-        "rpt fun 668390 *3"
+        "rpt fun 100000 *3"
     )
     thread.join()
 
@@ -42,7 +42,7 @@ def test_ami_client_logs_in_and_executes_command() -> None:
     assert "Action: Login" in received[0]
     assert "Secret: secret" in received[0]
     assert "Action: Command" in received[1]
-    assert "Command: rpt fun 668390 *3" in received[1]
+    assert "Command: rpt fun 100000 *3" in received[1]
 
 
 def test_ami_frame_parser_handles_fragmented_and_coalesced_frames() -> None:
@@ -94,7 +94,7 @@ def test_persistent_client_routes_concurrent_actions_and_events() -> None:
                     )
                 )
             writer.write(
-                f"Event: RPT_RXKEYED\r\nNode: 668390\r\nEventValue: 1\r\n\r\n"
+                f"Event: RPT_RXKEYED\r\nNode: 100000\r\nEventValue: 1\r\n\r\n"
                 f"Response: Success\r\nActionID: {actions[1]}\r\n\r\n"
                 f"Response: Success\r\nActionID: {actions[0]}\r\n\r\n".encode()
             )

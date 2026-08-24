@@ -17,7 +17,11 @@ The archive-based approach is a good match for a general-purpose companion appli
 
 ## Decision
 
-The application will treat the configured ASL3 archive as the authoritative input source. It will recursively scan configured archive roots, wait for file stabilization, deduplicate by source-relative path and content hash, and queue the recording for audio processing and transcription.
+The application will treat the configured ASL3 archive as the authoritative
+input source. It recursively scans configured archive roots and queues each
+source-relative path for final transcription after its size and modification
+time remain stable. An optional provisional path may read a growing WAV through
+a temporary FFmpeg tail snapshot; it does not modify the archive file.
 
 The ingestion architecture will isolate ASL3-specific parsing behind interfaces so that future sources (RTP, external-media, or stream sources) can be added without changing the rest of the pipeline.
 
@@ -32,14 +36,22 @@ The ingestion architecture will isolate ASL3-specific parsing behind interfaces 
 
 ### Negative
 
-- Archive-ingestion is inherently delayed by the file lifecycle on disk.
+- Final transcription is delayed by the file lifecycle on disk. Optional
+  archive-tail snapshots reduce perceived latency but are not true streaming.
 - Some recordings may be incomplete or malformed and must be filtered.
 - Correlation with ASL3 logs may remain ambiguous for certain edge cases.
 
 ## Implementation notes
 
 - Source files are never renamed, moved, or modified.
-- A file is processed only after it has reached a stable size and modification time.
-- Duplicate files are identified by a content hash and source-relative path.
-- `AudioSource` and `ActivityLogParser` interfaces will keep ASL3 parser logic separate from the rest of the system.
+- A file receives its durable final pass only after reaching a stable size and
+  modification time.
+- A growing file may receive non-durable provisional passes when live
+  transcription is enabled.
+- Persisted ingestion state and source-relative paths prevent the same archive
+  entry from being queued repeatedly.
+- `ArchiveScanner`, `ArchiveIngestionService`, and `ActivityLogParser` keep ASL3
+  archive logic separate from transcription.
 - This preserves a straightforward path to future adapters without redesigning the core pipeline.
+- The live and final transcription behavior is specified in
+  [AI transcription](../transcription.md).

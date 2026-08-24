@@ -7,7 +7,7 @@ from asl_transcriber.transcription.base import TranscriptResult
 
 
 def test_runtime_publishes_processing_and_completed_events(tmp_path: Path) -> None:
-    recording = tmp_path / "668390" / "call.wav"
+    recording = tmp_path / "100000" / "call.wav"
     recording.parent.mkdir()
     recording.write_bytes(b"audio")
     runtime = ArchiveRuntime([tmp_path])

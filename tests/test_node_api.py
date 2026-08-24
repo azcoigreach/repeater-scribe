@@ -9,8 +9,8 @@ from asl_transcriber.node_service import NodeStateService
 
 
 def test_node_status_returns_shared_service_cache_without_ami_action(monkeypatch) -> None:
-    service = NodeStateService(Settings(ami_node_id="668390", ami_secret="secret"))
-    state = service.state("668390")
+    service = NodeStateService(Settings(ami_node_id="100000", ami_secret="secret"))
+    state = service.state("100000")
     state.links = {link.identifier: link for link in parse_alinks("1,KM7GHSTK")}
     state.ami_state = "authenticated"
     state.stale = False

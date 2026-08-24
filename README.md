@@ -22,10 +22,61 @@ The application never renames, moves, deletes, or writes to files below the
 configured archive paths. It scans on startup and polls the archive every five
 seconds by default; adjust `ASLT_ARCHIVE_POLL_SECONDS` when needed.
 With `ASLT_AUTO_PROCESS=true`, stable recordings are also transcribed
-automatically in the background.
+automatically in the background. With `ASLT_LIVE_TRANSCRIPTION=true`, a second
+local loop snapshots a growing WAV through FFmpeg and publishes a provisional
+rolling transcript while the radio is still keyed. The archive mount remains
+read-only; snapshots are created below `ASLT_TMP_DIR` and deleted after each
+pass. The completed recording always receives a new full-file accuracy pass.
 Recordings are shown as `waiting` while their size or modification time is
-changing. They are queued only after an unchanged poll, so an active ASL3
-recording is never processed mid-write.
+changing, and as `live` after the first provisional result. They are queued for
+the final pass only after size and modification time remain unchanged for
+`ASLT_FILE_STABILIZATION_SECONDS`.
+
+## AI transcription
+
+Repeater Scribe uses a fully local, two-pass `faster-whisper` pipeline. While a
+WAV is growing, FFmpeg extracts rolling 16 kHz tail snapshots for low-latency
+provisional text. After the file is stable, the complete WAV receives a new
+accuracy-oriented pass whose result is persisted. The two paths share one model
+and serialize inference to stay within GPU memory.
+
+The supplied profile targets a 12 GB NVIDIA card:
+
+```dotenv
+ASLT_WHISPER_MODEL=large-v3
+ASLT_WHISPER_DEVICE=cuda
+ASLT_WHISPER_COMPUTE_TYPE=float16
+ASLT_WHISPER_BEAM_SIZE=5
+ASLT_LIVE_TRANSCRIPTION=true
+ASLT_LIVE_BEAM_SIZE=1
+ASLT_LIVE_WINDOW_SECONDS=12
+ASLT_LIVE_POLL_SECONDS=1.5
+```
+
+Model files are cached under `ASLT_WHISPER_MODEL_DIR`; after the initial model
+download, audio and text remain local. There is no OpenAI transcription adapter
+in the current application, and adding an API key does not activate one.
+
+Benchmark the configured local final-pass model against real archive audio:
+
+```bash
+docker compose run --rm repeater-scribe \
+  asl-transcriber benchmark /audio/YOUR_NODE_ID/example.wav
+```
+
+The JSON output includes audio duration, processing duration, real-time factor,
+raw text, and callsign-corrected display text. A real-time factor below `1.0`
+means inference completed faster than the recording duration.
+
+Callsign handling is also local. Configured calls, favorites, active node data,
+and topology calls form a ranked candidate set for phonetic decoding and
+conservative correction. Prompt/hotword injection defaults off so candidate
+lists cannot leak into provisional text. Both the untouched model output and
+corrected display text are retained for completed recordings.
+
+See [AI transcription](docs/transcription.md) for the exact live/final decode
+settings, callsign algorithm, privacy boundary, CPU fallback, tuning procedure,
+troubleshooting steps, and current limitations.
 
 ## Development
 
@@ -76,7 +127,8 @@ the external Docker network named by `ASL3_NETWORK_NAME` (default:
 
 AMI is disabled by default. Set the AMI connection values in `.env`, then set
 `ASLT_AMI_ENABLED=true`, `ASLT_AMI_CONTROL_ENABLED=true`, and a private
-`ASLT_API_KEY` to enable node control. Send the key in the `X-API-Key` header.
+`ASLT_API_KEY` to enable node control. `ASLT_AMI_NODE_ID` has no default and must
+be set to the operator's own node ID. Send the key in the `X-API-Key` header.
 Control requests are limited to AllStar DTMF function codes; arbitrary AMI
 actions are not exposed by the HTTP API.
 The container owns one persistent AMI connection per configured home node. It
@@ -123,6 +175,8 @@ client identifiers continue to use locally observed AMI history only.
 
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.
+See [AI transcription](docs/transcription.md) for the authoritative runtime
+behavior and tuning guidance.
 
 Node-control milestones after this foundation are favorites ordering, durable
 transmission-to-recording correlation, AllStar/EchoLink station enrichment, and
