@@ -167,11 +167,12 @@ function renderFavorites() {
   table.querySelectorAll('.favorite-edit').forEach(button => button.addEventListener('click', () => openFavoriteEditor(button.dataset.favoriteId)));
 }
 
-const TOPOLOGY_POSITIONS_KEY = 'dashboard-topology-positions-v4';
+const TOPOLOGY_POSITIONS_KEY = 'dashboard-topology-positions-v5';
 const TOPOLOGY_ROOT_KEY = 'dashboard-topology-root';
-const TOPOLOGY_VIEWS_KEY = 'dashboard-topology-views-v4';
+const TOPOLOGY_VIEWS_KEY = 'dashboard-topology-views-v5';
 const TOPOLOGY_CENTER = { x: 450, y: 300 };
-const TOPOLOGY_BUBBLE_CLEARANCE = { x: 132, y: 76 };
+const TOPOLOGY_BUBBLE_RADIUS = { x: 108, y: 46 };
+const TOPOLOGY_BUBBLE_CLEARANCE = { x: 232, y: 106 };
 const TOPOLOGY_RING_STEP = 1.18;
 const TOPOLOGY_RING_GAP = 1.12;
 const TOPOLOGY_BRANCH_SPREAD = Math.PI * 0.95;
@@ -507,10 +508,10 @@ function fitTopologyView() {
     .filter(Boolean);
   if (!positions.length) return;
   const root = topologyPositions[rootId]?.[rootId] || TOPOLOGY_CENTER;
-  const minX = Math.min(...positions.map(position => position.x)) - 90;
-  const maxX = Math.max(...positions.map(position => position.x)) + 90;
-  const minY = Math.min(...positions.map(position => position.y)) - 65;
-  const maxY = Math.max(...positions.map(position => position.y)) + 65;
+  const minX = Math.min(...positions.map(position => position.x)) - TOPOLOGY_BUBBLE_RADIUS.x - 30;
+  const maxX = Math.max(...positions.map(position => position.x)) + TOPOLOGY_BUBBLE_RADIUS.x + 30;
+  const minY = Math.min(...positions.map(position => position.y)) - TOPOLOGY_BUBBLE_RADIUS.y - 24;
+  const maxY = Math.max(...positions.map(position => position.y)) + TOPOLOGY_BUBBLE_RADIUS.y + 24;
   let halfWidth = Math.max(root.x - minX, maxX - root.x);
   let halfHeight = Math.max(root.y - minY, maxY - root.y);
   const chartRatio = Math.max(1, svg.clientWidth) / Math.max(1, svg.clientHeight);
@@ -536,6 +537,11 @@ function topologyNodeClass(node) {
   if (node.directory_status === 'not_found') return 'missing';
   if (node.active) return 'active';
   return 'unknown';
+}
+
+function topologyBubbleLine(parts, maximumLength = 34) {
+  const line = parts.filter(value => value !== null && value !== undefined && String(value).trim()).join(' ').trim() || '—';
+  return line.length > maximumLength ? `${line.slice(0, maximumLength - 1)}…` : line;
 }
 
 function renderTopology() {
@@ -579,8 +585,11 @@ function renderTopology() {
     const stateClass = topologyNodeClass(node);
     const selected = node.identifier === topologySelectedNodeId ? ' selected' : '';
     const stale = node.stale ? ' stale' : '';
-    const detail = node.callsign || node.mode || (node.directory_status === 'not_found' ? 'Not in directory' : 'AllStar node');
-    return `<g class="topology-node ${stateClass}${selected}${stale}" data-node-id="${esc(node.identifier)}" tabindex="0" role="button" aria-label="Node ${esc(node.identifier)} ${esc(detail)}" transform="translate(${position.x} ${position.y})"><ellipse class="topology-bubble" rx="58" ry="31"></ellipse><text class="topology-label" y="-5">${esc(node.identifier)}</text><text class="topology-detail" y="14">${esc(detail)}</text></g>`;
+    const firstLine = topologyBubbleLine(['Node', node.identifier, node.frequency], 36);
+    const secondLine = topologyBubbleLine([node.callsign, node.location]);
+    const thirdLine = topologyBubbleLine([node.affiliation]);
+    const accessibleDetail = [firstLine, secondLine, thirdLine].filter(line => line !== '—').join(', ');
+    return `<g class="topology-node ${stateClass}${selected}${stale}" data-node-id="${esc(node.identifier)}" tabindex="0" role="button" aria-label="${esc(accessibleDetail)}" transform="translate(${position.x} ${position.y})"><ellipse class="topology-bubble" rx="${TOPOLOGY_BUBBLE_RADIUS.x}" ry="${TOPOLOGY_BUBBLE_RADIUS.y}"></ellipse><text class="topology-label" y="-16">${esc(firstLine)}</text><text class="topology-meta" y="1">${esc(secondLine)}</text><text class="topology-detail" y="18">${esc(thirdLine)}</text></g>`;
   }).join('');
   chart.innerHTML = `<svg viewBox="${view.x} ${view.y} ${view.width} ${view.height}" data-canvas-x="${canvas.x}" data-canvas-y="${canvas.y}" data-canvas-width="${canvas.width}" data-canvas-height="${canvas.height}" preserveAspectRatio="xMidYMid meet">${edges}${bubbles}</svg>`;
   const progress = graph?.progress;
@@ -642,8 +651,8 @@ function attachTopologyInteraction(nodes, rootId, canvas) {
       const dy = point.y - drag.start.y;
       drag.moved ||= Math.abs(dx) + Math.abs(dy) > 3;
       const position = {
-        x: Math.min(canvas.x + canvas.width - 65, Math.max(canvas.x + 65, drag.origin.x + dx)),
-        y: Math.min(canvas.y + canvas.height - 40, Math.max(canvas.y + 40, drag.origin.y + dy)),
+        x: Math.min(canvas.x + canvas.width - TOPOLOGY_BUBBLE_RADIUS.x - 8, Math.max(canvas.x + TOPOLOGY_BUBBLE_RADIUS.x + 8, drag.origin.x + dx)),
+        y: Math.min(canvas.y + canvas.height - TOPOLOGY_BUBBLE_RADIUS.y - 8, Math.max(canvas.y + TOPOLOGY_BUBBLE_RADIUS.y + 8, drag.origin.y + dy)),
       };
       topologyPositions[rootId][bubble.dataset.nodeId] = position;
       bubble.setAttribute('transform', `translate(${position.x} ${position.y})`);

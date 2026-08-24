@@ -237,8 +237,9 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .topology-node.connecting .topology-bubble { stroke: var(--amber); fill: color-mix(in srgb, var(--amber) 14%, var(--panel)); }
 .topology-node.missing .topology-bubble { stroke: #ff7fb6; fill: color-mix(in srgb, #ff7fb6 11%, var(--panel)); }
 .topology-node.stale { opacity: .55; }
-.topology-label { fill: var(--ink); font: 700 12px "IBM Plex Mono", monospace; text-anchor: middle; }
-.topology-detail { fill: var(--muted); font: 10px "IBM Plex Mono", monospace; text-anchor: middle; }
+.topology-label { fill: var(--ink); font: 700 10px "IBM Plex Mono", monospace; text-anchor: middle; }
+.topology-meta { fill: var(--ink); font: 9px "IBM Plex Mono", monospace; text-anchor: middle; }
+.topology-detail { fill: var(--muted); font: 8px "IBM Plex Mono", monospace; text-anchor: middle; }
 .topology-details { overflow: auto; border-left: 1px solid var(--line); padding: 14px; background: color-mix(in srgb, var(--panel) 72%, var(--paper)); }
 .topology-details h3 { margin: 0 0 4px; font-size: 16px; }
 .topology-details .node-detail-callsign { margin: 0 0 12px; color: var(--green); font-weight: 700; }
