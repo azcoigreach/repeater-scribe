@@ -78,12 +78,11 @@ def test_queue_summary_shows_large_state_emblem() -> None:
     script = Path("src/asl_transcriber/static/dashboard.js").read_text()
     styles = Path("src/asl_transcriber/static/dashboard.css").read_text()
 
-    assert '<img id="state-emblem-image" src="/static/repeater-scribe-state0.png"' in template
+    assert '<img id="state-emblem-image" src="/static/repeater-scribe-state0-256px.png"' in template
     assert 'id="state-emblem-label"' in template
-    for state in range(4):
-        assert f"'/static/repeater-scribe-state{state}.png'" in script
+    assert "const ACTIVITY_STATE_EMBLEMS = ACTIVITY_STATE_ICONS;" in script
     assert "ACTIVITY_STATE_LABELS = ['IDLE', 'TRANSCRIBING', 'NODE KEYED', 'KEYED + TRANSCRIBING']" in script
-    assert ".state-emblem img" in styles
+    assert ".state-emblem img { display: block; width: 128px; max-width: 100%;" in styles
 
 
 def test_favicon_state_images_are_served() -> None:

@@ -13,12 +13,7 @@ const ACTIVITY_STATE_ICONS = [
   '/static/repeater-scribe-state2-256px.png',
   '/static/repeater-scribe-state3-256px.png',
 ];
-const ACTIVITY_STATE_EMBLEMS = [
-  '/static/repeater-scribe-state0.png',
-  '/static/repeater-scribe-state1.png',
-  '/static/repeater-scribe-state2.png',
-  '/static/repeater-scribe-state3.png',
-];
+const ACTIVITY_STATE_EMBLEMS = ACTIVITY_STATE_ICONS;
 const ACTIVITY_STATE_LABELS = ['IDLE', 'TRANSCRIBING', 'NODE KEYED', 'KEYED + TRANSCRIBING'];
 let transcriptionActive = false;
 let nodeKeyed = false;
