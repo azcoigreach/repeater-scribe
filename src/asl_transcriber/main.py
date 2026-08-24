@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from asl_transcriber import __version__
 from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal, get_db
@@ -183,7 +184,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         topology_service = None
 
 
-app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 
@@ -211,7 +212,7 @@ def health() -> dict[str, str | bool]:
     return {
         "status": "ok",
         "service": settings.app_name,
-        "version": "0.3.0",
+        "version": __version__,
         "ready": True,
     }
 
