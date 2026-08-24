@@ -6,13 +6,13 @@ function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-function renderJobs(items) {
+function renderJobs(items, databaseTotals = {}) {
   const counts = items.reduce((result, item) => {
     result[item.status] = (result[item.status] || 0) + 1;
     return result;
   }, {});
-  document.querySelector('#total-count').textContent = items.length;
-  document.querySelector('#completed-count').textContent = counts.completed || 0;
+  document.querySelector('#total-count').textContent = databaseTotals.recordings ?? items.length;
+  document.querySelector('#completed-count').textContent = databaseTotals.transcribed ?? counts.completed ?? 0;
   document.querySelector('#processing-count').textContent = counts.processing || 0;
   document.querySelector('#pending-count').textContent = (counts.pending || 0) + (counts.waiting || 0);
   if (!items.length) {
@@ -48,7 +48,10 @@ player.addEventListener('ended', () => { if (activeButton) activeButton.textCont
 async function loadJobs() {
   const query = encodeURIComponent(searchInput.value.trim());
   const response = await fetch(`/api/v1/recordings?limit=500${query ? `&q=${query}` : ''}`);
-  if (response.ok) renderJobs((await response.json()).items);
+  if (response.ok) {
+    const data = await response.json();
+    renderJobs(data.items, data.database_totals);
+  }
 }
 
 async function loadActivity() {

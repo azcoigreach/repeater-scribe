@@ -43,3 +43,7 @@ def test_recordings_total_is_not_truncated_by_limit(monkeypatch, tmp_path) -> No
 
     assert response.json()["total"] == 3
     assert len(response.json()["items"]) == 1
+    assert response.json()["database_totals"] == {
+        "recordings": 3,
+        "transcribed": 0,
+    }

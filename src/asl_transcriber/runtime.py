@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from queue import Queue
 
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.engine import Engine
 
 from asl_transcriber.database import SessionLocal
@@ -88,6 +88,29 @@ class ArchiveRuntime:
 
     def jobs(self) -> list[IngestionJob]:
         return self.job_store.list()
+
+    def database_totals(self) -> dict[str, int]:
+        """Return persisted recording and transcript counts for configured archives."""
+        archive_roots = [str(root.resolve()) for root in self.roots]
+        if not archive_roots:
+            return {"recordings": 0, "transcribed": 0}
+
+        recording_count = (
+            select(func.count())
+            .select_from(DbIngestionJob)
+            .where(DbIngestionJob.archive_root.in_(archive_roots))
+        )
+        transcript_count = (
+            select(func.count())
+            .select_from(Transcript)
+            .join(DbIngestionJob, Transcript.job_id == DbIngestionJob.id)
+            .where(DbIngestionJob.archive_root.in_(archive_roots))
+        )
+        with self.session_factory() as session:
+            return {
+                "recordings": int(session.scalar(recording_count) or 0),
+                "transcribed": int(session.scalar(transcript_count) or 0),
+            }
 
     def waiting_sources(self) -> list[str]:
         return sorted(

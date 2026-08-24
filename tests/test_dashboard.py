@@ -35,6 +35,14 @@ def test_dashboard_renders_normalized_callsign_rows_from_sse() -> None:
     assert "Array.isArray(data.links) ? data.links : currentConnections" in script
 
 
+def test_queue_summary_uses_database_totals() -> None:
+    script = Path("src/asl_transcriber/static/dashboard.js").read_text()
+
+    assert "databaseTotals.recordings ?? items.length" in script
+    assert "databaseTotals.transcribed ?? counts.completed ?? 0" in script
+    assert "renderJobs(data.items, data.database_totals)" in script
+
+
 def test_connected_node_columns_have_stable_layout() -> None:
     template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
     styles = Path("src/asl_transcriber/static/dashboard.css").read_text()

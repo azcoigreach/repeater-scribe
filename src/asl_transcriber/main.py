@@ -795,7 +795,11 @@ def recordings(
             continue
         items.append(item)
     result_limit = max(1, min(limit, 500))
-    return {"total": len(items), "items": items[:result_limit]}
+    return {
+        "total": len(items),
+        "database_totals": active_runtime.database_totals(),
+        "items": items[:result_limit],
+    }
 
 
 @app.get("/api/v1/audio")
