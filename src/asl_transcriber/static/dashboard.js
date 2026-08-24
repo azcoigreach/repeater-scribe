@@ -169,12 +169,17 @@ function renderFavorites() {
 
 const TOPOLOGY_POSITIONS_KEY = 'dashboard-topology-positions';
 const TOPOLOGY_ROOT_KEY = 'dashboard-topology-root';
+const TOPOLOGY_VIEWS_KEY = 'dashboard-topology-views';
+const TOPOLOGY_CENTER = { x: 450, y: 300 };
 let topologyRootFavoriteId = localStorage.getItem(TOPOLOGY_ROOT_KEY) || '';
 let topologySelectedNodeId = '';
 let topologyPositions = loadTopologyPositions();
+let topologyViews = loadTopologyViews();
 let topologyGraph = null;
 let topologyStream = null;
 let topologyReloadTimer = null;
+let topologyInteractionActive = false;
+let topologyRenderPending = false;
 
 function loadTopologyPositions() {
   try { return JSON.parse(localStorage.getItem(TOPOLOGY_POSITIONS_KEY) || '{}'); } catch { return {}; }
@@ -182,6 +187,25 @@ function loadTopologyPositions() {
 
 function saveTopologyPositions() {
   localStorage.setItem(TOPOLOGY_POSITIONS_KEY, JSON.stringify(topologyPositions));
+}
+
+function loadTopologyViews() {
+  try { return JSON.parse(localStorage.getItem(TOPOLOGY_VIEWS_KEY) || '{}'); } catch { return {}; }
+}
+
+function saveTopologyViews() {
+  localStorage.setItem(TOPOLOGY_VIEWS_KEY, JSON.stringify(topologyViews));
+}
+
+function beginTopologyInteraction() {
+  topologyInteractionActive = true;
+  document.body.classList.add('topology-interacting');
+}
+
+function endTopologyInteraction() {
+  topologyInteractionActive = false;
+  document.body.classList.remove('topology-interacting');
+  if (topologyRenderPending) requestAnimationFrame(renderTopology);
 }
 
 function topologyFavorite() {
@@ -247,25 +271,133 @@ function mergedTopology(item) {
   return { root, nodes, edges, graph: hasGraph ? topologyGraph : null };
 }
 
-function topologyCanvas(nodes) {
-  const maxDepth = Math.max(1, ...nodes.map(node => Number(node.depth) || 0));
-  const size = Math.max(900, 300 + maxDepth * 230);
-  return { width: size, height: Math.max(600, Math.round(size * 0.72)) };
+function topologyDepth(node, rootId) {
+  return Math.max(0, Number(node.depth) || (node.identifier === rootId ? 0 : 1));
+}
+
+function topologyRingLayout(depth, count, index) {
+  if (!depth) return { radius: 0, angle: 0 };
+  const baseRadius = 120 * depth;
+  const capacity = Math.max(8, Math.floor(Math.PI * 2 * baseRadius / 145));
+  const layer = Math.floor(index / capacity);
+  const layerStart = layer * capacity;
+  const layerCount = Math.min(capacity, count - layerStart);
+  return {
+    radius: baseRadius + layer * 82,
+    angle: -Math.PI / 2 + Math.PI * 2 * (index - layerStart) / Math.max(1, layerCount),
+  };
+}
+
+function topologyCanvas(nodes, rootId) {
+  let maxRadius = 300;
+  const depths = new Map();
+  nodes.forEach(node => {
+    const depth = topologyDepth(node, rootId);
+    depths.set(depth, (depths.get(depth) || 0) + 1);
+  });
+  depths.forEach((count, depth) => {
+    const last = topologyRingLayout(depth, count, Math.max(0, count - 1));
+    maxRadius = Math.max(maxRadius, last.radius + 100);
+  });
+  const width = Math.max(900, maxRadius * 2);
+  const height = Math.max(600, maxRadius * 2);
+  return {
+    x: TOPOLOGY_CENTER.x - width / 2,
+    y: TOPOLOGY_CENTER.y - height / 2,
+    width,
+    height,
+  };
 }
 
 function initialTopologyPosition(rootId, node, nodes, canvas) {
   topologyPositions[rootId] ||= {};
   if (topologyPositions[rootId][node.identifier]) return topologyPositions[rootId][node.identifier];
-  const depth = Math.max(0, Number(node.depth) || (node.identifier === rootId ? 0 : 1));
-  const ring = nodes.filter(candidate => Math.max(0, Number(candidate.depth) || (candidate.identifier === rootId ? 0 : 1)) === depth);
+  const depth = topologyDepth(node, rootId);
+  const ring = nodes.filter(candidate => topologyDepth(candidate, rootId) === depth);
   const ringIndex = Math.max(0, ring.findIndex(candidate => candidate.identifier === node.identifier));
-  const radius = depth ? 115 * depth : 0;
+  const layout = topologyRingLayout(depth, ring.length, ringIndex);
   const position = {
-    x: canvas.width / 2 + Math.cos(-Math.PI / 2 + Math.PI * 2 * ringIndex / Math.max(1, ring.length)) * radius,
-    y: canvas.height / 2 + Math.sin(-Math.PI / 2 + Math.PI * 2 * ringIndex / Math.max(1, ring.length)) * radius,
+    x: TOPOLOGY_CENTER.x + Math.cos(layout.angle) * layout.radius,
+    y: TOPOLOGY_CENTER.y + Math.sin(layout.angle) * layout.radius,
   };
   topologyPositions[rootId][node.identifier] = position;
   return position;
+}
+
+function topologyView(rootId) {
+  const stored = topologyViews[rootId];
+  if (stored && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(Number(stored[key])))) {
+    return { x: Number(stored.x), y: Number(stored.y), width: Number(stored.width), height: Number(stored.height) };
+  }
+  return { x: 0, y: 0, width: 900, height: 600 };
+}
+
+function setTopologyView(svg, rootId, view, persist = true) {
+  topologyViews[rootId] = view;
+  svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`);
+  if (persist) saveTopologyViews();
+}
+
+function topologyCanvasFromSvg(svg) {
+  return {
+    x: Number(svg.dataset.canvasX),
+    y: Number(svg.dataset.canvasY),
+    width: Number(svg.dataset.canvasWidth),
+    height: Number(svg.dataset.canvasHeight),
+  };
+}
+
+function zoomTopology(factor, event = null) {
+  const item = topologyFavorite();
+  const svg = document.querySelector('#topology-chart svg');
+  if (!item || !svg) return;
+  const rootId = String(item.target_identifier);
+  const current = topologyView(rootId);
+  const canvas = topologyCanvasFromSvg(svg);
+  const anchor = event ? svgPoint(svg, event) : {
+    x: current.x + current.width / 2,
+    y: current.y + current.height / 2,
+  };
+  const minWidth = 260;
+  const maxWidth = Math.max(1100, canvas.width * 1.35);
+  const width = Math.min(maxWidth, Math.max(minWidth, current.width * factor));
+  const scale = width / current.width;
+  const next = {
+    x: anchor.x - (anchor.x - current.x) * scale,
+    y: anchor.y - (anchor.y - current.y) * scale,
+    width,
+    height: current.height * scale,
+  };
+  setTopologyView(svg, rootId, next);
+}
+
+function fitTopologyView() {
+  const item = topologyFavorite();
+  const svg = document.querySelector('#topology-chart svg');
+  if (!item || !svg) return;
+  const rootId = String(item.target_identifier);
+  const positions = Array.from(svg.querySelectorAll('.topology-node'))
+    .map(bubble => topologyPositions[rootId]?.[bubble.dataset.nodeId])
+    .filter(Boolean);
+  if (!positions.length) return;
+  let minX = Math.min(...positions.map(position => position.x)) - 90;
+  let maxX = Math.max(...positions.map(position => position.x)) + 90;
+  let minY = Math.min(...positions.map(position => position.y)) - 65;
+  let maxY = Math.max(...positions.map(position => position.y)) + 65;
+  const chartRatio = Math.max(1, svg.clientWidth) / Math.max(1, svg.clientHeight);
+  const contentRatio = (maxX - minX) / Math.max(1, maxY - minY);
+  if (contentRatio < chartRatio) {
+    const expandedWidth = (maxY - minY) * chartRatio;
+    const center = (minX + maxX) / 2;
+    minX = center - expandedWidth / 2;
+    maxX = center + expandedWidth / 2;
+  } else {
+    const expandedHeight = (maxX - minX) / chartRatio;
+    const center = (minY + maxY) / 2;
+    minY = center - expandedHeight / 2;
+    maxY = center + expandedHeight / 2;
+  }
+  setTopologyView(svg, rootId, { x: minX, y: minY, width: maxX - minX, height: maxY - minY });
 }
 
 function topologyNodeClass(node) {
@@ -279,6 +411,11 @@ function topologyNodeClass(node) {
 }
 
 function renderTopology() {
+  if (topologyInteractionActive) {
+    topologyRenderPending = true;
+    return;
+  }
+  topologyRenderPending = false;
   updateTopologyRootOptions();
   const item = topologyFavorite();
   const chart = document.querySelector('#topology-chart');
@@ -290,7 +427,8 @@ function renderTopology() {
   }
   const { root, nodes, edges: reportedEdges, graph } = mergedTopology(item);
   const rootId = root.identifier;
-  const canvas = topologyCanvas(nodes);
+  const canvas = topologyCanvas(nodes, rootId);
+  const view = topologyView(rootId);
   const positions = new Map(nodes.map(node => [
     node.identifier,
     initialTopologyPosition(rootId, node, nodes, canvas),
@@ -315,7 +453,7 @@ function renderTopology() {
     const detail = node.callsign || node.mode || (node.directory_status === 'not_found' ? 'Not in directory' : 'AllStar node');
     return `<g class="topology-node ${stateClass}${selected}${stale}" data-node-id="${esc(node.identifier)}" tabindex="0" role="button" aria-label="Node ${esc(node.identifier)} ${esc(detail)}" transform="translate(${position.x} ${position.y})"><ellipse class="topology-bubble" rx="58" ry="31"></ellipse><text class="topology-label" y="-5">${esc(node.identifier)}</text><text class="topology-detail" y="14">${esc(detail)}</text></g>`;
   }).join('');
-  chart.innerHTML = `<svg viewBox="0 0 ${canvas.width} ${canvas.height}" preserveAspectRatio="xMidYMid meet">${edges}${bubbles}</svg>`;
+  chart.innerHTML = `<svg viewBox="${view.x} ${view.y} ${view.width} ${view.height}" data-canvas-x="${canvas.x}" data-canvas-y="${canvas.y}" data-canvas-width="${canvas.width}" data-canvas-height="${canvas.height}" preserveAspectRatio="xMidYMid meet">${edges}${bubbles}</svg>`;
   const progress = graph?.progress;
   document.querySelector('#topology-summary').textContent = progress
     ? `${progress.discovered} discovered · ${progress.queried} fetched · ${progress.queued} queued · ${reportedEdges.length} edges${graph.limited ? ` · ${graph.limit_reason === 'max_depth' ? `depth limit ${progress.max_depth}` : `node limit ${progress.max_nodes}`}` : ''}`
@@ -323,7 +461,7 @@ function renderTopology() {
   document.querySelector('#topology-live-state').textContent = graph?.complete
     ? (graph.limited ? 'Cached component · safety limit reached' : 'Full observable component cached')
     : `Discovering topology${root.connected ? ' · AMI live' : ''}`;
-  attachTopologyInteraction(nodes, rootId);
+  attachTopologyInteraction(nodes, rootId, canvas);
   if (topologySelectedNodeId) renderTopologyDetails(nodes.find(node => node.identifier === topologySelectedNodeId));
 }
 
@@ -347,28 +485,33 @@ function updateTopologyEdges(svg, identifier, position) {
   });
 }
 
-function attachTopologyInteraction(nodes, rootId) {
+function attachTopologyInteraction(nodes, rootId, canvas) {
   const svg = document.querySelector('#topology-chart svg');
   if (!svg) return;
   const byId = new Map(nodes.map(node => [node.identifier, node]));
   svg.querySelectorAll('.topology-node').forEach(bubble => {
     let drag = null;
     bubble.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
       const start = svgPoint(svg, event);
       const position = topologyPositions[rootId][bubble.dataset.nodeId];
       drag = { start, origin: { ...position }, moved: false };
+      beginTopologyInteraction();
+      bubble.parentNode.appendChild(bubble);
       bubble.setPointerCapture(event.pointerId);
     });
     bubble.addEventListener('pointermove', event => {
       if (!drag) return;
+      event.preventDefault();
       const point = svgPoint(svg, event);
       const dx = point.x - drag.start.x;
       const dy = point.y - drag.start.y;
       drag.moved ||= Math.abs(dx) + Math.abs(dy) > 3;
-      const box = svg.viewBox.baseVal;
       const position = {
-        x: Math.min(box.width - 65, Math.max(65, drag.origin.x + dx)),
-        y: Math.min(box.height - 40, Math.max(40, drag.origin.y + dy)),
+        x: Math.min(canvas.x + canvas.width - 65, Math.max(canvas.x + 65, drag.origin.x + dx)),
+        y: Math.min(canvas.y + canvas.height - 40, Math.max(canvas.y + 40, drag.origin.y + dy)),
       };
       topologyPositions[rootId][bubble.dataset.nodeId] = position;
       bubble.setAttribute('transform', `translate(${position.x} ${position.y})`);
@@ -376,10 +519,26 @@ function attachTopologyInteraction(nodes, rootId) {
     });
     bubble.addEventListener('pointerup', event => {
       if (!drag) return;
-      bubble.releasePointerCapture(event.pointerId);
-      if (drag.moved) saveTopologyPositions();
-      else selectTopologyNode(byId.get(bubble.dataset.nodeId));
+      event.preventDefault();
+      const completed = drag;
       drag = null;
+      if (bubble.hasPointerCapture(event.pointerId)) bubble.releasePointerCapture(event.pointerId);
+      if (completed.moved) saveTopologyPositions();
+      else selectTopologyNode(byId.get(bubble.dataset.nodeId));
+      endTopologyInteraction();
+    });
+    bubble.addEventListener('pointercancel', event => {
+      if (!drag) return;
+      drag = null;
+      if (bubble.hasPointerCapture(event.pointerId)) bubble.releasePointerCapture(event.pointerId);
+      saveTopologyPositions();
+      endTopologyInteraction();
+    });
+    bubble.addEventListener('lostpointercapture', () => {
+      if (!drag) return;
+      drag = null;
+      saveTopologyPositions();
+      endTopologyInteraction();
     });
     bubble.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
@@ -387,6 +546,54 @@ function attachTopologyInteraction(nodes, rootId) {
         selectTopologyNode(byId.get(bubble.dataset.nodeId));
       }
     });
+  });
+
+  let pan = null;
+  svg.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || event.target.closest('.topology-node')) return;
+    event.preventDefault();
+    const view = topologyView(rootId);
+    pan = { x: event.clientX, y: event.clientY, view };
+    beginTopologyInteraction();
+    svg.classList.add('panning');
+    svg.setPointerCapture(event.pointerId);
+  });
+  svg.addEventListener('pointermove', event => {
+    if (!pan) return;
+    event.preventDefault();
+    const scaleX = pan.view.width / Math.max(1, svg.clientWidth);
+    const scaleY = pan.view.height / Math.max(1, svg.clientHeight);
+    setTopologyView(svg, rootId, {
+      ...pan.view,
+      x: pan.view.x - (event.clientX - pan.x) * scaleX,
+      y: pan.view.y - (event.clientY - pan.y) * scaleY,
+    }, false);
+  });
+  const finishPan = event => {
+    if (!pan) return;
+    pan = null;
+    if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+    svg.classList.remove('panning');
+    saveTopologyViews();
+    endTopologyInteraction();
+  };
+  svg.addEventListener('pointerup', finishPan);
+  svg.addEventListener('pointercancel', finishPan);
+  svg.addEventListener('lostpointercapture', event => {
+    if (!pan) return;
+    pan = null;
+    svg.classList.remove('panning');
+    saveTopologyViews();
+    endTopologyInteraction();
+  });
+  svg.addEventListener('wheel', event => {
+    event.preventDefault();
+    zoomTopology(Math.min(1.35, Math.max(0.74, Math.exp(event.deltaY * 0.0012))), event);
+  }, { passive: false });
+  svg.addEventListener('dblclick', event => {
+    if (event.target.closest('.topology-node')) return;
+    event.preventDefault();
+    fitTopologyView();
   });
 }
 
@@ -495,12 +702,16 @@ document.querySelector('#topology-root').addEventListener('change', event => {
   connectTopologyStream();
 });
 document.querySelector('#topology-refresh').addEventListener('click', () => startTopologyCrawl(true));
+document.querySelector('#topology-zoom-in').addEventListener('click', () => zoomTopology(0.75));
+document.querySelector('#topology-zoom-out').addEventListener('click', () => zoomTopology(1.333));
+document.querySelector('#topology-fit').addEventListener('click', fitTopologyView);
 document.querySelector('#topology-reset-positions').addEventListener('click', () => {
   const item = topologyFavorite();
   if (!item) return;
   delete topologyPositions[String(item.target_identifier)];
   saveTopologyPositions();
   renderTopology();
+  requestAnimationFrame(fitTopologyView);
 });
 
 async function loadFavorites() {

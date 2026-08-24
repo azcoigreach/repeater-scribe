@@ -211,16 +211,21 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .topology-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .topology-toolbar label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .topology-toolbar select { min-width: 180px; border: 1px solid var(--line); border-radius: 6px; padding: 7px; color: var(--ink); background: var(--paper); }
+.topology-zoom-controls { display: inline-flex; gap: 3px; }
+.topology-zoom-controls .control-button { min-width: 30px; padding-inline: 8px; }
 .topology-summary { margin-left: auto; color: var(--muted); font-size: 11px; }
 .topology-live-state { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .topology-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 28%); min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
-.topology-chart { min-height: 320px; overflow: hidden; touch-action: none; }
-.topology-chart svg { display: block; width: 100%; height: 100%; min-height: 320px; }
+.topology-chart { min-height: 320px; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.topology-chart svg { display: block; width: 100%; height: 100%; min-height: 320px; cursor: grab; touch-action: none; overscroll-behavior: contain; }
+.topology-chart svg.panning { cursor: grabbing; }
+.topology-chart text { pointer-events: none; user-select: none; -webkit-user-select: none; }
+.topology-interacting, .topology-interacting * { user-select: none !important; -webkit-user-select: none !important; }
 .topology-edge { stroke: var(--line); stroke-width: 1.5; }
 .topology-edge.live { stroke: var(--green); stroke-width: 2.5; }
 .topology-edge.provisional { stroke-dasharray: 7 5; }
 .topology-edge.stale { opacity: .35; }
-.topology-node { cursor: grab; outline: none; }
+.topology-node { cursor: grab; outline: none; touch-action: none; }
 .topology-node:active { cursor: grabbing; }
 .topology-node:focus .topology-bubble, .topology-node.selected .topology-bubble { stroke-width: 4; filter: drop-shadow(0 0 6px rgba(116,199,255,.35)); }
 .topology-bubble { fill: var(--panel); stroke: var(--muted); stroke-width: 2; }

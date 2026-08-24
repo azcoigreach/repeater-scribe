@@ -142,6 +142,7 @@ def test_stats_deltas_mark_recent_activity_without_requiring_keyed_flag(tmp_path
 def test_dashboard_has_dockable_draggable_live_network_map() -> None:
     template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
     script = Path("src/asl_transcriber/static/dashboard.js").read_text()
+    stylesheet = Path("src/asl_transcriber/static/dashboard.css").read_text()
 
     assert 'data-win="topology"' in template
     assert 'data-toggle-win="topology"' in template
@@ -149,3 +150,11 @@ def test_dashboard_has_dockable_draggable_live_network_map() -> None:
     assert "setPointerCapture" in script
     assert "renderTopology();" in script
     assert "topology-node-control" in script
+    assert 'id="topology-zoom-in"' in template
+    assert 'id="topology-fit"' in template
+    assert "zoomTopology" in script
+    assert "fitTopologyView" in script
+    assert "pointercancel" in script
+    assert "event.preventDefault()" in script
+    assert "topologyInteractionActive" in script
+    assert "user-select: none" in stylesheet
