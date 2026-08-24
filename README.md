@@ -29,12 +29,18 @@ read-only; snapshots are created below `ASLT_TMP_DIR` and deleted after each
 pass. The completed recording always receives a new full-file accuracy pass.
 Recordings are shown as `waiting` while their size or modification time is
 changing, and as `live` after the first provisional result. They are queued for
-the final pass only after an unchanged archive poll.
+the final pass only after size and modification time remain unchanged for
+`ASLT_FILE_STABILIZATION_SECONDS`.
 
-## Local Whisper profiles
+## AI transcription
 
-The supplied configuration targets a 12 GB NVIDIA card with the largest stock
-Whisper model:
+Repeater Scribe uses a fully local, two-pass `faster-whisper` pipeline. While a
+WAV is growing, FFmpeg extracts rolling 16 kHz tail snapshots for low-latency
+provisional text. After the file is stable, the complete WAV receives a new
+accuracy-oriented pass whose result is persisted. The two paths share one model
+and serialize inference to stay within GPU memory.
+
+The supplied profile targets a 12 GB NVIDIA card:
 
 ```dotenv
 ASLT_WHISPER_MODEL=large-v3
@@ -47,18 +53,9 @@ ASLT_LIVE_WINDOW_SECONDS=12
 ASLT_LIVE_POLL_SECONDS=1.5
 ```
 
-The same loaded `large-v3` model is shared by both paths. Live snapshots use a
-greedy beam of 1 and no cross-window conditioning for latency; the final pass
-uses beam 5, VAD, and the complete WAV. Inference calls are serialized so two
-copies of the model do not compete for VRAM. Docker Compose requests the NVIDIA
-GPU and the image contains the CUDA 12 cuBLAS/cuDNN runtime libraries. The host
-still needs an NVIDIA driver and NVIDIA Container Toolkit.
-
-For a CPU-only installation, use `ASLT_WHISPER_DEVICE=cpu` and
-`ASLT_WHISPER_COMPUTE_TYPE=int8`. `large-v3` is the largest CPU-capable model,
-but `medium.en` is generally the more practical near-live CPU profile. Model
-files are cached under `ASLT_WHISPER_MODEL_DIR`; after the one-time model
-download, transcription does not send audio or text to an external service.
+Model files are cached under `ASLT_WHISPER_MODEL_DIR`; after the initial model
+download, audio and text remain local. There is no OpenAI transcription adapter
+in the current application, and adding an API key does not activate one.
 
 Benchmark the configured local final-pass model against real archive audio:
 
@@ -71,25 +68,15 @@ The JSON output includes audio duration, processing duration, real-time factor,
 raw text, and callsign-corrected display text. A real-time factor below `1.0`
 means inference completed faster than the recording duration.
 
-Callsign handling remains local. `ASLT_KNOWN_CALLSIGNS` is a comma-separated
-list of especially important club/operator calls. Repeater Scribe combines it
-with callsigns already present in favorites, recent node statistics, and the
-local topology cache. The ranked candidate set corrects NATO phonetics, split
-suffixes, numeric-slot errors such as `KDIDJ` to `KD1DJ`, and conservative
-near-matches such as `AM7GHS` to a locally relevant `KM7GHS`. Raw model text is
-retained unchanged.
+Callsign handling is also local. Configured calls, favorites, active node data,
+and topology calls form a ranked candidate set for phonetic decoding and
+conservative correction. Prompt/hotword injection defaults off so candidate
+lists cannot leak into provisional text. Both the untouched model output and
+corrected display text are retained for completed recordings.
 
-`ASLT_CALLSIGN_HOTWORD_LIMIT` defaults to `0`: dynamic callsigns are used for
-post-decode correction but are not inserted into Whisper's prompt, avoiding
-hotword-list echoes. Set a small positive value only for measured A/B tests.
-`ASLT_CALLSIGN_MAX_CANDIDATES` bounds the local fuzzy-search set, and
-`ASLT_CALLSIGN_CONTEXT_CACHE_SECONDS` controls how frequently database context
-is refreshed.
-
-No OpenAI credentials or remote transcription API are used by this profile.
-The transcription engine protocol remains backend-neutral so an explicitly
-configured remote adapter can be added later without changing ingestion or the
-provisional/final transcript states.
+See [AI transcription](docs/transcription.md) for the exact live/final decode
+settings, callsign algorithm, privacy boundary, CPU fallback, tuning procedure,
+troubleshooting steps, and current limitations.
 
 ## Development
 
@@ -187,8 +174,8 @@ client identifiers continue to use locally observed AMI history only.
 
 Processing loads the configured `faster-whisper` model on demand. The first
 processing request may download the model and take longer than later requests.
-Provisional transcript events are emitted on the existing `/api/v1/events` SSE
-stream and are marked with `"provisional": true`.
+See [AI transcription](docs/transcription.md) for the authoritative runtime
+behavior and tuning guidance.
 
 Node-control milestones after this foundation are favorites ordering, durable
 transmission-to-recording correlation, AllStar/EchoLink station enrichment, and
