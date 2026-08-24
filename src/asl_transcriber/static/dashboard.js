@@ -167,9 +167,9 @@ function renderFavorites() {
   table.querySelectorAll('.favorite-edit').forEach(button => button.addEventListener('click', () => openFavoriteEditor(button.dataset.favoriteId)));
 }
 
-const TOPOLOGY_POSITIONS_KEY = 'dashboard-topology-positions';
+const TOPOLOGY_POSITIONS_KEY = 'dashboard-topology-positions-v2';
 const TOPOLOGY_ROOT_KEY = 'dashboard-topology-root';
-const TOPOLOGY_VIEWS_KEY = 'dashboard-topology-views';
+const TOPOLOGY_VIEWS_KEY = 'dashboard-topology-views-v2';
 const TOPOLOGY_CENTER = { x: 450, y: 300 };
 let topologyRootFavoriteId = localStorage.getItem(TOPOLOGY_ROOT_KEY) || '';
 let topologySelectedNodeId = '';
@@ -288,40 +288,205 @@ function topologyRingLayout(depth, count, index) {
   };
 }
 
-function topologyCanvas(nodes, rootId) {
-  let maxRadius = 300;
-  const depths = new Map();
-  nodes.forEach(node => {
-    const depth = topologyDepth(node, rootId);
-    depths.set(depth, (depths.get(depth) || 0) + 1);
+function topologyHash(value) {
+  let hash = 2166136261;
+  String(value).split('').forEach(character => {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
   });
-  depths.forEach((count, depth) => {
-    const last = topologyRingLayout(depth, count, Math.max(0, count - 1));
-    maxRadius = Math.max(maxRadius, last.radius + 100);
-  });
-  const width = Math.max(900, maxRadius * 2);
-  const height = Math.max(600, maxRadius * 2);
-  return {
-    x: TOPOLOGY_CENTER.x - width / 2,
-    y: TOPOLOGY_CENTER.y - height / 2,
-    width,
-    height,
-  };
+  return hash >>> 0;
 }
 
-function initialTopologyPosition(rootId, node, nodes, canvas) {
-  topologyPositions[rootId] ||= {};
-  if (topologyPositions[rootId][node.identifier]) return topologyPositions[rootId][node.identifier];
-  const depth = topologyDepth(node, rootId);
-  const ring = nodes.filter(candidate => topologyDepth(candidate, rootId) === depth);
-  const ringIndex = Math.max(0, ring.findIndex(candidate => candidate.identifier === node.identifier));
-  const layout = topologyRingLayout(depth, ring.length, ringIndex);
-  const position = {
-    x: TOPOLOGY_CENTER.x + Math.cos(layout.angle) * layout.radius,
-    y: TOPOLOGY_CENTER.y + Math.sin(layout.angle) * layout.radius,
+function topologyAdjacency(nodes, edges) {
+  const identifiers = new Set(nodes.map(node => String(node.identifier)));
+  const adjacency = new Map(Array.from(identifiers, identifier => [identifier, new Set()]));
+  edges.forEach(edge => {
+    const source = String(edge.source);
+    const target = String(edge.target);
+    if (!adjacency.has(source) || !adjacency.has(target) || source === target) return;
+    adjacency.get(source).add(target);
+    adjacency.get(target).add(source);
+  });
+  return adjacency;
+}
+
+function forceTopologyLayout(rootId, nodes, edges) {
+  const ordered = [...nodes].sort((left, right) => {
+    const depthDifference = topologyDepth(left, rootId) - topologyDepth(right, rootId);
+    return depthDifference || String(left.identifier).localeCompare(String(right.identifier));
+  });
+  const indexById = new Map(ordered.map((node, index) => [String(node.identifier), index]));
+  const depthGroups = new Map();
+  ordered.forEach(node => {
+    const depth = topologyDepth(node, rootId);
+    if (!depthGroups.has(depth)) depthGroups.set(depth, []);
+    depthGroups.get(depth).push(node);
+  });
+  const points = ordered.map(node => {
+    const identifier = String(node.identifier);
+    if (identifier === rootId) return { x: TOPOLOGY_CENTER.x, y: TOPOLOGY_CENTER.y };
+    const depth = topologyDepth(node, rootId);
+    const ring = depthGroups.get(depth);
+    const ringIndex = ring.findIndex(candidate => String(candidate.identifier) === identifier);
+    const initial = topologyRingLayout(depth, ring.length, ringIndex);
+    return {
+      x: TOPOLOGY_CENTER.x + Math.cos(initial.angle) * initial.radius,
+      y: TOPOLOGY_CENTER.y + Math.sin(initial.angle) * initial.radius,
+    };
+  });
+  const velocities = ordered.map(() => ({ x: 0, y: 0 }));
+  const adjacency = topologyAdjacency(ordered, edges);
+  const edgePairs = edges.map(edge => [indexById.get(String(edge.source)), indexById.get(String(edge.target))])
+    .filter(pair => pair[0] !== undefined && pair[1] !== undefined && pair[0] !== pair[1]);
+  const rootIndex = indexById.get(rootId);
+  const iterations = ordered.length > 160 ? 210 : ordered.length > 80 ? 270 : 320;
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const cooling = 0.3 + 0.7 * (1 - iteration / iterations);
+    const forces = ordered.map(() => ({ x: 0, y: 0 }));
+    for (let left = 0; left < points.length; left += 1) {
+      for (let right = left + 1; right < points.length; right += 1) {
+        let dx = points[left].x - points[right].x;
+        let dy = points[left].y - points[right].y;
+        let distanceSquared = dx * dx + dy * dy;
+        if (distanceSquared < 1) {
+          const angle = (topologyHash(`${ordered[left].identifier}:${ordered[right].identifier}`) % 6283) / 1000;
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          distanceSquared = 1;
+        }
+        const distance = Math.sqrt(distanceSquared);
+        const collision = distance < 150 ? (150 - distance) * 0.18 : 0;
+        const repulsion = 6200 / Math.max(100, distanceSquared);
+        const force = (repulsion + collision) * cooling;
+        const forceX = dx / distance * force;
+        const forceY = dy / distance * force;
+        forces[left].x += forceX;
+        forces[left].y += forceY;
+        forces[right].x -= forceX;
+        forces[right].y -= forceY;
+      }
+    }
+    edgePairs.forEach(([left, right]) => {
+      const dx = points[right].x - points[left].x;
+      const dy = points[right].y - points[left].y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const degree = (adjacency.get(String(ordered[left].identifier))?.size || 0)
+        + (adjacency.get(String(ordered[right].identifier))?.size || 0);
+      const target = 165 + Math.min(75, degree * 2.5);
+      const spring = (distance - target) * 0.055 * cooling;
+      const forceX = dx / distance * spring;
+      const forceY = dy / distance * spring;
+      forces[left].x += forceX;
+      forces[left].y += forceY;
+      forces[right].x -= forceX;
+      forces[right].y -= forceY;
+    });
+    points.forEach((point, index) => {
+      if (index === rootIndex) {
+        point.x = TOPOLOGY_CENTER.x;
+        point.y = TOPOLOGY_CENTER.y;
+        velocities[index] = { x: 0, y: 0 };
+        return;
+      }
+      forces[index].x += (TOPOLOGY_CENTER.x - point.x) * 0.0018;
+      forces[index].y += (TOPOLOGY_CENTER.y - point.y) * 0.0018;
+      velocities[index].x = (velocities[index].x + Math.max(-8, Math.min(8, forces[index].x))) * 0.68;
+      velocities[index].y = (velocities[index].y + Math.max(-8, Math.min(8, forces[index].y))) * 0.68;
+      point.x += velocities[index].x;
+      point.y += velocities[index].y;
+    });
+  }
+
+  for (let pass = 0; pass < 100; pass += 1) {
+    let moved = false;
+    for (let left = 0; left < points.length; left += 1) {
+      for (let right = left + 1; right < points.length; right += 1) {
+        let dx = points[right].x - points[left].x;
+        let dy = points[right].y - points[left].y;
+        let distance = Math.hypot(dx, dy);
+        if (distance >= 150) continue;
+        if (distance < 0.01) {
+          const angle = (topologyHash(`${ordered[right].identifier}:${pass}`) % 6283) / 1000;
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          distance = 1;
+        }
+        const overlap = 150 - distance + 0.5;
+        const leftShare = left === rootIndex ? 0 : right === rootIndex ? 1 : 0.5;
+        const rightShare = right === rootIndex ? 0 : left === rootIndex ? 1 : 0.5;
+        points[left].x -= dx / distance * overlap * leftShare;
+        points[left].y -= dy / distance * overlap * leftShare;
+        points[right].x += dx / distance * overlap * rightShare;
+        points[right].y += dy / distance * overlap * rightShare;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  return Object.fromEntries(ordered.map((node, index) => [String(node.identifier), {
+    x: Math.round(points[index].x * 10) / 10,
+    y: Math.round(points[index].y * 10) / 10,
+  }]));
+}
+
+function placeNewTopologyNodes(rootId, nodes, edges, positions) {
+  const adjacency = topologyAdjacency(nodes, edges);
+  const missing = nodes.filter(node => !positions[String(node.identifier)])
+    .sort((left, right) => (adjacency.get(String(right.identifier))?.size || 0) - (adjacency.get(String(left.identifier))?.size || 0));
+  missing.forEach(node => {
+    const identifier = String(node.identifier);
+    const neighbors = Array.from(adjacency.get(identifier) || [])
+      .map(neighbor => positions[neighbor])
+      .filter(Boolean);
+    const anchor = neighbors.length ? {
+      x: neighbors.reduce((sum, point) => sum + point.x, 0) / neighbors.length,
+      y: neighbors.reduce((sum, point) => sum + point.y, 0) / neighbors.length,
+    } : TOPOLOGY_CENTER;
+    const baseAngle = (topologyHash(identifier) % 6283) / 1000;
+    let selected = null;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      const angle = baseAngle + attempt * 2.399963;
+      const radius = 165 + Math.floor(attempt / 10) * 48;
+      const candidate = {
+        x: anchor.x + Math.cos(angle) * radius,
+        y: anchor.y + Math.sin(angle) * radius,
+      };
+      const clear = Object.values(positions).every(point => Math.hypot(candidate.x - point.x, candidate.y - point.y) >= 150);
+      if (clear) {
+        selected = candidate;
+        break;
+      }
+    }
+    positions[identifier] = selected || {
+      x: anchor.x + Math.cos(baseAngle) * 600,
+      y: anchor.y + Math.sin(baseAngle) * 600,
+    };
+  });
+}
+
+function ensureTopologyLayout(rootId, nodes, edges) {
+  const positions = topologyPositions[rootId] || {};
+  if (!positions[rootId]) topologyPositions[rootId] = forceTopologyLayout(rootId, nodes, edges);
+  else placeNewTopologyNodes(rootId, nodes, edges, positions);
+  saveTopologyPositions();
+}
+
+function topologyCanvas(nodes, rootId) {
+  const positions = nodes.map(node => topologyPositions[rootId]?.[String(node.identifier)]).filter(Boolean);
+  if (!positions.length) return { x: 0, y: 0, width: 900, height: 600 };
+  const minX = Math.min(...positions.map(position => position.x));
+  const maxX = Math.max(...positions.map(position => position.x));
+  const minY = Math.min(...positions.map(position => position.y));
+  const maxY = Math.max(...positions.map(position => position.y));
+  const padding = 320;
+  return {
+    x: minX - padding,
+    y: minY - padding,
+    width: Math.max(900, maxX - minX + padding * 2),
+    height: Math.max(600, maxY - minY + padding * 2),
   };
-  topologyPositions[rootId][node.identifier] = position;
-  return position;
 }
 
 function topologyView(rootId) {
@@ -427,11 +592,12 @@ function renderTopology() {
   }
   const { root, nodes, edges: reportedEdges, graph } = mergedTopology(item);
   const rootId = root.identifier;
+  ensureTopologyLayout(rootId, nodes, reportedEdges);
   const canvas = topologyCanvas(nodes, rootId);
   const view = topologyView(rootId);
   const positions = new Map(nodes.map(node => [
     node.identifier,
-    initialTopologyPosition(rootId, node, nodes, canvas),
+    topologyPositions[rootId][node.identifier],
   ]));
   const nodesById = new Map(nodes.map(node => [node.identifier, node]));
   const edges = reportedEdges.filter(edge => positions.has(String(edge.source)) && positions.has(String(edge.target))).map(edge => {
@@ -708,8 +874,11 @@ document.querySelector('#topology-fit').addEventListener('click', fitTopologyVie
 document.querySelector('#topology-reset-positions').addEventListener('click', () => {
   const item = topologyFavorite();
   if (!item) return;
-  delete topologyPositions[String(item.target_identifier)];
+  const rootId = String(item.target_identifier);
+  delete topologyPositions[rootId];
+  delete topologyViews[rootId];
   saveTopologyPositions();
+  saveTopologyViews();
   renderTopology();
   requestAnimationFrame(fitTopologyView);
 });

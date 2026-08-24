@@ -157,4 +157,9 @@ def test_dashboard_has_dockable_draggable_live_network_map() -> None:
     assert "pointercancel" in script
     assert "event.preventDefault()" in script
     assert "topologyInteractionActive" in script
+    assert "forceTopologyLayout" in script
+    assert "topologyAdjacency" in script
+    assert "placeNewTopologyNodes" in script
+    assert "distance < 150" in script
+    assert "Auto layout" in template
     assert "user-select: none" in stylesheet
