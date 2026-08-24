@@ -108,13 +108,19 @@ def test_faster_whisper_passes_live_decode_options(monkeypatch, tmp_path) -> Non
     engine = FasterWhisperEngine(hotwords="KM7GHS", beam_size=5, vad_filter=True)
 
     engine.transcribe(
-        str(target), beam_size=1, vad_filter=False, condition_on_previous_text=False
+        str(target),
+        beam_size=1,
+        vad_filter=False,
+        condition_on_previous_text=False,
+        use_hotwords=False,
     )
+    engine.transcribe(str(target))
 
     assert calls[0]["beam_size"] == 1
     assert calls[0]["vad_filter"] is False
     assert calls[0]["condition_on_previous_text"] is False
-    assert calls[0]["hotwords"] == "KM7GHS"
+    assert calls[0]["hotwords"] is None
+    assert calls[1]["hotwords"] == "KM7GHS"
 
 
 def test_faster_whisper_does_not_force_decode_when_vad_finds_no_speech(

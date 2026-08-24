@@ -60,6 +60,7 @@ class FasterWhisperEngine:
         beam_size: int | None = None,
         vad_filter: bool | None = None,
         condition_on_previous_text: bool | None = None,
+        use_hotwords: bool = True,
     ) -> TranscriptResult:
         if WhisperModel is None:
             raise RuntimeError("faster-whisper is not installed")
@@ -68,6 +69,7 @@ class FasterWhisperEngine:
         model = self._get_model()
         selected_beam_size = self.beam_size if beam_size is None else beam_size
         selected_vad_filter = self.vad_filter if vad_filter is None else vad_filter
+        selected_hotwords = self.hotwords if use_hotwords else None
         selected_conditioning = (
             self.condition_on_previous_text
             if condition_on_previous_text is None
@@ -86,7 +88,7 @@ class FasterWhisperEngine:
                 beam_size=selected_beam_size,
                 vad_filter=active_vad_filter,
                 initial_prompt=self.initial_prompt,
-                hotwords=self.hotwords,
+                hotwords=selected_hotwords,
                 word_timestamps=self.word_timestamps,
                 condition_on_previous_text=selected_conditioning,
             )
@@ -141,7 +143,7 @@ class FasterWhisperEngine:
                 "vad_filter": selected_vad_filter,
                 "word_timestamps": self.word_timestamps,
                 "condition_on_previous_text": selected_conditioning,
-                "hotwords": self.hotwords,
+                "hotwords": selected_hotwords,
                 "workers": self.workers,
             },
         )

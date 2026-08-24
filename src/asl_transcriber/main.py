@@ -161,6 +161,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             beam_size=settings.live_beam_size,
             vad_filter=False,
             condition_on_previous_text=False,
+            use_hotwords=False,
         ),
         min_file_bytes=settings.live_min_file_bytes,
     )
