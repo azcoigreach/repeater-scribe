@@ -58,3 +58,23 @@ def test_dashboard_waits_for_snapshot_confirmation_after_control() -> None:
     assert "waiting for node state to confirm" in script
     assert "state confirmation was not received" in script
     assert "confirmPendingControl(connections)" in script
+
+
+def test_favicon_tracks_transcription_and_keyed_states() -> None:
+    template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
+    script = Path("src/asl_transcriber/static/dashboard.js").read_text()
+
+    assert '<link rel="icon" id="favicon"' in template
+    assert "/static/repeater-scribe-state0-256px.png" in template
+    for state in range(4):
+        assert f"/static/repeater-scribe-state{state}-256px.png" in script
+    assert "const state = (transcriptionActive ? 1 : 0) + (nodeKeyed ? 2 : 0);" in script
+    assert "transcriptionActive = processing > 0;" in script
+    assert "nodeKeyed = talkers.length > 0" in script
+
+
+def test_favicon_state_images_are_served() -> None:
+    static_dir = Path("src/asl_transcriber/static")
+
+    for state in range(4):
+        assert (static_dir / f"repeater-scribe-state{state}-256px.png").is_file()
