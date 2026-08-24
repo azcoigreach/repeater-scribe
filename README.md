@@ -101,14 +101,23 @@ transmit time begin accumulating after this version is deployed; they are not
 reconstructed from historical recordings.
 
 For public numeric favorites, the backend also polls the AllStarLink statistics
-API while the favorite is disconnected. It caches reported keyups, transmit
-time, uptime, kerchunks, activity state, and downstream link metadata in the
-Docker-mounted database. The dashboard uses that cache for its Favorites table
-and interactive Network map window, and marks old reports stale instead of erasing
-them during an upstream outage. The map is dockable, merges live AMI state into
-the cached AllStar topology, keeps manually dragged bubble positions, and opens
-current metadata and connection controls when a bubble is selected. Requests are paced at one every three seconds
-to remain below the service's 30-request-per-minute limit. Set
+API while the favorite is disconnected. A persistent breadth-first crawler
+follows public numeric downstream nodes to build the full observable connected
+component, while caching node reports, crawl queues, metadata, and one- or
+two-sided edges in the Docker-mounted database. Container restarts therefore
+resume discovery instead of starting over. The dashboard uses that cache for
+its Favorites table and dockable Network map, streams progressive graph updates,
+merges live AMI state, keeps manually dragged bubble positions, and opens current
+metadata and connection controls when a bubble is selected.
+
+All AllStar traffic passes through one scheduler paced at one request every
+three seconds (20/minute), below the service's discussed 30-request-per-minute
+limit. Recent reports are reused across favorite crawls so a node is not fetched
+twice, while favorite roots retain a 15-second priority refresh so activity and
+key totals stay responsive during a long crawl. A crawl defaults to 200 nodes and 12 levels and clearly reports a safety
+limit instead of silently claiming the graph is complete. Configure those bounds
+with `ASLT_TOPOLOGY_MAX_NODES` and `ASLT_TOPOLOGY_MAX_DEPTH`; completed components
+are revisited after `ASLT_TOPOLOGY_REFRESH_SECONDS` (15 minutes by default). Set
 `ASLT_FAVORITE_STATS_ENABLED=false` to opt out; private nodes and nonnumeric
 client identifiers continue to use locally observed AMI history only.
 

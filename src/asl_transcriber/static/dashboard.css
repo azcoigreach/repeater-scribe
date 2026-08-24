@@ -218,6 +218,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .topology-chart svg { display: block; width: 100%; height: 100%; min-height: 320px; }
 .topology-edge { stroke: var(--line); stroke-width: 1.5; }
 .topology-edge.live { stroke: var(--green); stroke-width: 2.5; }
+.topology-edge.provisional { stroke-dasharray: 7 5; }
+.topology-edge.stale { opacity: .35; }
 .topology-node { cursor: grab; outline: none; }
 .topology-node:active { cursor: grabbing; }
 .topology-node:focus .topology-bubble, .topology-node.selected .topology-bubble { stroke-width: 4; filter: drop-shadow(0 0 6px rgba(116,199,255,.35)); }
