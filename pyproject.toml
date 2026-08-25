@@ -9,7 +9,7 @@ description = "AllStarLink node control, network mapping, and local transcriptio
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "ASL Transcriber Contributors" }]
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 keywords = ["allstarlink", "radio", "transcription", "fastapi"]
 dependencies = [
   "fastapi>=0.115.0",
