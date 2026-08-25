@@ -411,4 +411,4 @@ uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE).
+Licensed under the [MIT License](LICENSE).
