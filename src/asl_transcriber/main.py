@@ -216,17 +216,38 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             cache_seconds=settings.topology_node_cache_seconds,
             viewer_ttl_seconds=settings.topology_viewer_ttl_seconds,
             max_requests_per_minute=settings.allstar_max_requests_per_minute,
+            home_nodes=[item.strip() for item in settings.ami_node_id.split(",") if item.strip()]
+            or [settings.ami_node_id],
         )
         if settings.favorite_stats_enabled
         else None
-    )
-    topology_watcher = (
-        asyncio.create_task(topology_service.run()) if topology_service is not None else None
     )
     node_monitor = (
         NodeStateService(settings, transition_callback=persist_key_transition)
         if settings.ami_enabled and settings.ami_secret
         else None
+    )
+    if topology_service is not None and node_monitor is not None:
+
+        def apply_home_directory(home: str, directory: dict[str, str | None]) -> None:
+            assert node_monitor is not None
+            changed = node_monitor.set_directory(
+                home,
+                callsign=directory.get("callsign"),
+                location=directory.get("location"),
+            )
+            if changed:
+                asyncio.create_task(node_monitor.publish_directory(home))
+
+        topology_service.directory_callback = apply_home_directory
+        for home, directory in topology_service.hydrate_home_directories().items():
+            node_monitor.set_directory(
+                home,
+                callsign=directory.get("callsign"),
+                location=directory.get("location"),
+            )
+    topology_watcher = (
+        asyncio.create_task(topology_service.run()) if topology_service is not None else None
     )
     if node_monitor is not None:
         await node_monitor.start()
@@ -393,9 +414,7 @@ def create_favorite_record(
         description=request.description.strip() if request.description else None,
         location=request.location.strip() if request.location else None,
     )
-    return next(
-        item for item in favorite_items(db, home) if item["target_identifier"] == target
-    )
+    return next(item for item in favorite_items(db, home) if item["target_identifier"] == target)
 
 
 def update_favorite_record(
@@ -504,8 +523,6 @@ def topology_graph(
 ) -> dict[str, object]:
     home = validate_node_identifier(home, label="home node")
     root = validate_node_identifier(root, label="topology root")
-    if topology_service is not None:
-        topology_service.mark_viewer(home, root)
     return serialize_topology(
         db,
         home,
@@ -534,7 +551,6 @@ def ui_start_topology_crawl(
     )
     if favorite is None:
         raise HTTPException(status_code=404, detail="Topology root must be a favorite node")
-    topology_service.mark_viewer(home, root)
     try:
         ensure_topology_crawl(
             db,
@@ -561,7 +577,6 @@ async def topology_events(home: str, root: str) -> StreamingResponse:
         raise HTTPException(status_code=503, detail="AllStar topology crawling is disabled")
     home = validate_node_identifier(home, label="home node")
     root = validate_node_identifier(root, label="topology root")
-    service.mark_viewer(home, root)
 
     async def stream() -> AsyncIterator[str]:
         yield "retry: 3000\n\n"

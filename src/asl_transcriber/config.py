@@ -72,15 +72,13 @@ class Settings(BaseSettings):
     ami_control_enabled: bool = Field(default=False)
     api_key: str = Field(default="")
     favorite_stats_enabled: bool = Field(default=True)
-    favorite_stats_base_url: str = Field(
-        default="http://stats.allstarlink.org/api/stats"
-    )
+    favorite_stats_base_url: str = Field(default="http://stats.allstarlink.org/api/stats")
     favorite_stats_request_interval_seconds: float = Field(default=3.0, ge=2.1)
     favorite_stats_timeout_seconds: float = Field(default=20.0, gt=0)
     favorite_stats_refresh_seconds: int = Field(default=15, ge=3)
     favorite_stats_stale_seconds: int = Field(default=300, gt=0)
     favorite_stats_recent_activity_seconds: int = Field(default=120, gt=0)
-    allstar_max_requests_per_minute: int = Field(default=90, ge=1, le=600)
+    allstar_max_requests_per_minute: int = Field(default=30, ge=1, le=600)
     topology_max_nodes: int = Field(default=200, ge=2, le=2_000)
     topology_max_depth: int = Field(default=12, ge=1, le=50)
     topology_refresh_seconds: int = Field(default=900, ge=60)

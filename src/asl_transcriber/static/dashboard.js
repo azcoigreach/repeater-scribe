@@ -117,6 +117,7 @@ let favoriteItems = [];
 let currentConnections = [];
 function renderNodeSnapshot(data) {
   const state = document.querySelector('#node-state');
+  const directory = document.querySelector('#node-directory');
   const dot = document.querySelector('#node-status-dot');
   const connections = Array.isArray(data.connections)
     ? data.connections
@@ -128,6 +129,10 @@ function renderNodeSnapshot(data) {
   state.textContent = data.stale ? 'AMI state stale' : data.ami_connected ? 'AMI connected' : 'Node unavailable';
   state.className = data.ami_connected && !data.stale ? 'status' : 'status processing';
   dot.className = `status-dot ${talkers.length ? 'talking' : data.ami_connected ? 'idle' : 'offline'}`;
+  if (directory) {
+    const parts = [data.callsign, data.location, 'Virtual node', 'live AMI connection'].filter(Boolean);
+    directory.textContent = parts.join(' · ');
+  }
   document.querySelector('#connected-nodes').textContent = connections.length
     ? connections.map(connection => connection.display_name || connection.identifier).join(', ')
     : 'None';

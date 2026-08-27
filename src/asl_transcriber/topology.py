@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from collections import Counter, deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -21,12 +21,17 @@ from asl_transcriber.allstar_stats import (
 )
 from asl_transcriber.models import (
     Favorite,
+    FavoriteStatsSnapshot,
     TopologyCrawl,
     TopologyEdgeSnapshot,
     TopologyNodeSnapshot,
 )
 
 logger = logging.getLogger(__name__)
+
+# Keep most of the constrained request budget on favorite metadata while guaranteeing
+# that a visible map cannot be starved by a large favorite list.
+METADATA_REQUESTS_PER_ACTIVE_CRAWL = 2
 
 
 def _utc(value: datetime) -> datetime:
@@ -169,7 +174,10 @@ def next_crawl_work(
     crawls = session.scalars(select(TopologyCrawl).order_by(TopologyCrawl.updated_at)).all()
     for crawl in crawls:
         # Maps nobody is looking at stay parked so open maps keep the API budget.
-        if active_roots is not None and (crawl.home_node, crawl.root_identifier) not in active_roots:
+        if (
+            active_roots is not None
+            and (crawl.home_node, crawl.root_identifier) not in active_roots
+        ):
             continue
         if (
             crawl.status in {"complete", "limited"}
@@ -245,9 +253,7 @@ def cached_topology_values(
         "link_count": len(neighbors),
         "source_reported_at": node.source_reported_at,
         "fetched_at": node.fetched_at,
-        "topology_json": _dump(
-            {"root": metadata, "links": neighbors}
-        ),
+        "topology_json": _dump({"root": metadata, "links": neighbors}),
     }
 
 
@@ -362,7 +368,11 @@ def apply_topology_snapshot(
     seen = {str(item) for item in _list(crawl.seen_json)}
     processed = {str(item) for item in _list(crawl.processed_json)}
     processed.add(work.identifier)
-    queue = [item for item in _list(crawl.queue_json) if isinstance(item, dict)]
+    queue = [
+        item
+        for item in _list(crawl.queue_json)
+        if isinstance(item, dict) and str(item.get("identifier")) != work.identifier
+    ]
     queued_ids = {str(item.get("identifier")) for item in queue}
     limited = False
     for identifier in current_neighbors:
@@ -393,7 +403,11 @@ def apply_topology_snapshot(
     crawl.processed_json = _dump(sorted(processed))
     crawl.updated_at = timestamp
     crawl.last_error = None
-    if not queue:
+    if queue:
+        crawl.status = "crawling"
+        crawl.completed_at = None
+        crawl.next_refresh_at = None
+    else:
         if len(seen) >= crawl.max_nodes and crawl.limit_reason is None:
             crawl.limit_reason = "max_nodes"
         crawl.status = "limited" if limited or crawl.limit_reason else "complete"
@@ -572,7 +586,8 @@ class TopologyService:
         refresh_seconds: int,
         cache_seconds: int,
         viewer_ttl_seconds: float = 90.0,
-        max_requests_per_minute: int = 90,
+        max_requests_per_minute: int = 30,
+        home_nodes: Sequence[str] = (),
         fetcher: Callable[..., dict[str, object]] = fetch_allstar_stats,
     ) -> None:
         self.session_factory = session_factory
@@ -586,16 +601,24 @@ class TopologyService:
         self.cache_seconds = cache_seconds
         self.viewer_ttl_seconds = viewer_ttl_seconds
         self.max_requests_per_minute = max_requests_per_minute
+        self.home_nodes = [
+            str(item).strip() for item in home_nodes if is_public_node(str(item).strip())
+        ]
         self.fetcher = fetcher
         self._favorite_attempted_at: dict[tuple[str, str], datetime] = {}
+        self._home_attempted_at: dict[str, datetime] = {}
         self._subscribers: set[tuple[asyncio.Queue[dict[str, object]], tuple[str, str] | None]] = (
             set()
         )
         self._viewer_seen_at: dict[tuple[str, str], datetime] = {}
         self._viewer_streams: Counter[tuple[str, str]] = Counter()
         self._request_times: deque[float] = deque()
+        self._metadata_requests_since_crawl = 0
+        self.directory_callback: Callable[[str, dict[str, str | None]], None] | None = None
 
-    def mark_viewer(self, home_node: str, root_identifier: str, *, now: datetime | None = None) -> None:
+    def mark_viewer(
+        self, home_node: str, root_identifier: str, *, now: datetime | None = None
+    ) -> None:
         self._viewer_seen_at[(home_node, root_identifier)] = now or datetime.now(UTC)
 
     def active_roots(self, *, now: datetime | None = None) -> set[tuple[str, str]]:
@@ -603,7 +626,9 @@ class TopologyService:
         for key, seen in tuple(self._viewer_seen_at.items()):
             if seen < cutoff:
                 del self._viewer_seen_at[key]
-        return set(self._viewer_seen_at) | {key for key, count in self._viewer_streams.items() if count}
+        return set(self._viewer_seen_at) | {
+            key for key, count in self._viewer_streams.items() if count
+        }
 
     async def _reserve_request_slot(self) -> None:
         if self.max_requests_per_minute <= 0:
@@ -654,17 +679,93 @@ class TopologyService:
         self._favorite_attempted_at[(home_node, target)] = timestamp
         return CrawlWork(crawl.id, home_node, target, target, 0, 0, favorite_refresh=True)
 
+    def _take_home_directory_refresh(self) -> str | None:
+        timestamp = datetime.now(UTC)
+        # The home node's callsign/location are directory data, not rapidly changing
+        # activity data. Refresh them on the topology cadence so they cannot crowd out
+        # favorites or a visible map.
+        due_before = timestamp - timedelta(seconds=self.refresh_seconds)
+        candidates: list[tuple[datetime, str]] = []
+        with self.session_factory() as session:
+            for home in self.home_nodes:
+                snapshot = session.scalar(
+                    select(FavoriteStatsSnapshot).where(
+                        FavoriteStatsSnapshot.home_node == home,
+                        FavoriteStatsSnapshot.remote_identifier == home,
+                    )
+                )
+                last_attempt = self._home_attempted_at.get(home)
+                last_fetch = _utc(snapshot.fetched_at) if snapshot and snapshot.fetched_at else None
+                latest = max(
+                    (value for value in (last_attempt, last_fetch) if value is not None),
+                    default=datetime.min.replace(tzinfo=UTC),
+                )
+                if latest <= due_before:
+                    candidates.append((latest, home))
+        if not candidates:
+            return None
+        _, home = min(candidates)
+        self._home_attempted_at[home] = timestamp
+        return home
+
+    def _store_home_directory(self, home: str, values: dict[str, object]) -> dict[str, str | None]:
+        with self.session_factory() as session:
+            store_allstar_snapshot(session, [home], values)
+            session.commit()
+        callsign = values.get("callsign")
+        location = values.get("location")
+        return {
+            "callsign": callsign if isinstance(callsign, str) else None,
+            "location": location if isinstance(location, str) else None,
+        }
+
+    def hydrate_home_directories(self) -> dict[str, dict[str, str | None]]:
+        """Load cached AllStar directory fields for configured home nodes."""
+        result: dict[str, dict[str, str | None]] = {}
+        with self.session_factory() as session:
+            for home in self.home_nodes:
+                snapshot = session.scalar(
+                    select(FavoriteStatsSnapshot).where(
+                        FavoriteStatsSnapshot.home_node == home,
+                        FavoriteStatsSnapshot.remote_identifier == home,
+                    )
+                )
+                if snapshot is None:
+                    continue
+                result[home] = {
+                    "callsign": snapshot.callsign,
+                    "location": snapshot.location,
+                }
+        return result
+
     def _seed_and_take(self) -> CrawlWork | None:
         with self.session_factory() as session:
             seed_favorite_crawls(session, max_nodes=self.max_nodes, max_depth=self.max_depth)
+            active_roots = self.active_roots()
+            if (
+                active_roots
+                and self._metadata_requests_since_crawl >= METADATA_REQUESTS_PER_ACTIVE_CRAWL
+            ):
+                crawl_work = next_crawl_work(
+                    session,
+                    refresh_seconds=self.refresh_seconds,
+                    active_roots=active_roots,
+                )
+                if crawl_work is not None:
+                    self._metadata_requests_since_crawl = 0
+                    return crawl_work
             favorite_work = self._favorite_work(session)
             if favorite_work is not None:
+                self._metadata_requests_since_crawl += 1
                 return favorite_work
-            return next_crawl_work(
+            crawl_work = next_crawl_work(
                 session,
                 refresh_seconds=self.refresh_seconds,
-                active_roots=self.active_roots(),
+                active_roots=active_roots,
             )
+            if crawl_work is not None:
+                self._metadata_requests_since_crawl = 0
+            return crawl_work
 
     def _cached(self, work: CrawlWork) -> dict[str, object] | None:
         if work.favorite_refresh:
@@ -688,7 +789,10 @@ class TopologyService:
                 values,
                 refresh_seconds=self.refresh_seconds,
                 queried=queried,
-                advance_crawl=not work.favorite_refresh,
+                # A favorite response already contains its direct links. Seeding those
+                # links costs no additional request; the queued neighbors remain parked
+                # until this root has an active map viewer.
+                advance_crawl=True,
             )
 
     def _fail(self, work: CrawlWork, error: str) -> None:
@@ -719,6 +823,26 @@ class TopologyService:
 
     async def run(self) -> None:
         while True:
+            home = await asyncio.to_thread(self._take_home_directory_refresh)
+            if home is not None:
+                self._metadata_requests_since_crawl += 1
+                await self._reserve_request_slot()
+                try:
+                    values = await asyncio.to_thread(
+                        self.fetcher,
+                        home,
+                        base_url=self.base_url,
+                        timeout_seconds=self.timeout_seconds,
+                    )
+                    directory = await asyncio.to_thread(self._store_home_directory, home, values)
+                    if self.directory_callback is not None:
+                        self.directory_callback(home, directory)
+                except AllStarStatsError as error:
+                    logger.warning("Home node directory fetch failed for %s: %s", home, error)
+                except Exception:
+                    logger.exception("Home node directory refresh failed for %s", home)
+                await asyncio.sleep(self.request_interval_seconds)
+                continue
             work = await asyncio.to_thread(self._seed_and_take)
             if work is None:
                 await asyncio.sleep(min(self.request_interval_seconds, 2.0))
@@ -773,4 +897,6 @@ class TopologyService:
                 self._viewer_streams[scope] -= 1
                 if self._viewer_streams[scope] <= 0:
                     del self._viewer_streams[scope]
-                    self.mark_viewer(*scope)
+                    # Closing/tabbing away from the map immediately parks its queued
+                    # neighbor work. A future stream or explicit viewer mark reopens it.
+                    self._viewer_seen_at.pop(scope, None)
