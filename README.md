@@ -271,12 +271,13 @@ The full transcription setting reference is in
 | `ASLT_TOPOLOGY_MAX_NODES` | Maximum nodes in one connected-component crawl. |
 | `ASLT_TOPOLOGY_MAX_DEPTH` | Maximum traversal depth from the favorite root. |
 | `ASLT_TOPOLOGY_REFRESH_SECONDS` | Delay before a completed component is revisited. |
-| `ASLT_TOPOLOGY_VIEWER_TTL_SECONDS` | How long a map stays "viewed" after its dashboard panel closes. |
+| `ASLT_TOPOLOGY_VIEWER_TTL_SECONDS` | Fallback lifetime for non-streaming map-viewer registrations. |
 
-Lookups are prioritized so the limited AllStar request budget is spent where it
-matters: favorite roots refresh first, then the maps a dashboard viewer
-currently has open. Maps that nobody is watching stop walking their connections
-until their panel is focused again.
+Favorite responses refresh their metadata and seed their direct links without
+extra requests. With a network map open, two metadata refreshes are followed by
+one lookup from that focused map so a long favorites list cannot starve topology
+discovery. Maps that nobody is watching park all queued neighbor lookups until
+their panel is focused again.
 
 ## Data, network, and privacy boundaries
 
