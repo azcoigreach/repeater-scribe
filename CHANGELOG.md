@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-27
+
 ### Fixed
 
 - The default public API ceiling now matches the documented 30 requests per
