@@ -20,7 +20,9 @@ from asl_transcriber.topology import (
 )
 
 
-def snapshot(identifier: str, links: list[tuple[str, str]], fetched_at: datetime) -> dict[str, object]:
+def snapshot(
+    identifier: str, links: list[tuple[str, str]], fetched_at: datetime
+) -> dict[str, object]:
     return {
         "remote_identifier": identifier,
         "callsign": f"N{identifier}",
@@ -147,9 +149,7 @@ def test_topology_reports_configured_safety_limit(tmp_path) -> None:
     timestamp = datetime(2026, 8, 24, 3, tzinfo=UTC)
 
     with sessions() as session:
-        ensure_topology_crawl(
-            session, "100000", "674982", max_nodes=2, max_depth=12, now=timestamp
-        )
+        ensure_topology_crawl(session, "100000", "674982", max_nodes=2, max_depth=12, now=timestamp)
         root = next_crawl_work(session, refresh_seconds=900, now=timestamp)
         assert root is not None
         apply_topology_snapshot(
@@ -175,7 +175,9 @@ def test_topology_reports_configured_safety_limit(tmp_path) -> None:
     assert graph["progress"]["discovered"] == 2
 
 
-def test_favorite_priority_refresh_does_not_reset_or_advance_crawl(tmp_path) -> None:
+def test_favorite_priority_refresh_updates_root_without_consuming_neighbor_work(
+    tmp_path,
+) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'favorite-priority.db'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine, future=True)
@@ -221,8 +223,117 @@ def test_favorite_priority_refresh_does_not_reset_or_advance_crawl(tmp_path) -> 
     with sessions() as session:
         graph = serialize_topology(session, "100000", "674982")
 
-    assert graph["progress"]["queried"] == 1
+    assert graph["progress"]["queried"] == 2
     assert graph["progress"]["queued"] == 1
+
+
+def test_closed_map_refresh_discovers_direct_links_but_parks_neighbor_queries(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'closed-map.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, future=True)
+
+    with sessions() as session:
+        create_favorite(
+            session,
+            home_node="100000",
+            target_identifier="674982",
+            label="Favorite hub",
+        )
+
+    service = TopologyService(
+        sessions,
+        base_url="http://example.invalid/api/stats",
+        request_interval_seconds=3,
+        timeout_seconds=1,
+        favorite_refresh_seconds=15,
+        max_nodes=200,
+        max_depth=12,
+        refresh_seconds=900,
+        cache_seconds=300,
+    )
+    favorite_work = service._seed_and_take()
+    assert favorite_work is not None and favorite_work.favorite_refresh is True
+    service._store(
+        favorite_work,
+        snapshot("674982", [("63573", "KI5KUD")], datetime.now(UTC)),
+        queried=True,
+    )
+
+    with sessions() as session:
+        graph = serialize_topology(session, "100000", "674982")
+
+    assert graph["progress"]["discovered"] == 2
+    assert graph["progress"]["queued"] == 1
+    assert service._seed_and_take() is None
+
+
+def test_due_favorites_cannot_starve_a_visible_map(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'fair-scheduling.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, future=True)
+    timestamp = datetime.now(UTC) - timedelta(minutes=10)
+
+    with sessions() as session:
+        for target in ("674982", "63573", "55553", "55554", "55555", "55556"):
+            create_favorite(
+                session,
+                home_node="100000",
+                target_identifier=target,
+                label=f"Node {target}",
+            )
+            ensure_topology_crawl(session, "100000", target, now=timestamp)
+
+    service = TopologyService(
+        sessions,
+        base_url="http://example.invalid/api/stats",
+        request_interval_seconds=3,
+        timeout_seconds=1,
+        favorite_refresh_seconds=15,
+        max_nodes=200,
+        max_depth=12,
+        refresh_seconds=900,
+        cache_seconds=300,
+    )
+    service.mark_viewer("100000", "674982")
+
+    first = service._seed_and_take()
+    second = service._seed_and_take()
+    focused = service._seed_and_take()
+
+    assert first is not None and first.favorite_refresh is True
+    assert second is not None and second.favorite_refresh is True
+    assert focused is not None and focused.favorite_refresh is False
+    assert focused.root_identifier == "674982"
+
+
+def test_closing_viewer_stream_immediately_parks_map(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'stream-viewer.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, future=True)
+    service = TopologyService(
+        sessions,
+        base_url="http://example.invalid/api/stats",
+        request_interval_seconds=3,
+        timeout_seconds=1,
+        favorite_refresh_seconds=15,
+        max_nodes=200,
+        max_depth=12,
+        refresh_seconds=900,
+        cache_seconds=300,
+    )
+
+    async def open_then_close() -> None:
+        stream = service.events(
+            0.001,
+            home_node="100000",
+            root_identifier="674982",
+        )
+        assert await anext(stream) == {"heartbeat": True}
+        assert service.active_roots() == {("100000", "674982")}
+        await stream.aclose()
+
+    asyncio.run(open_then_close())
+    assert service.active_roots() == set()
 
 
 def test_unviewed_maps_stop_walking_until_a_viewer_opens_them(tmp_path) -> None:
@@ -250,10 +361,7 @@ def test_unviewed_maps_stop_walking_until_a_viewer_opens_them(tmp_path) -> None:
             )
 
         assert (
-            next_crawl_work(
-                session, refresh_seconds=900, active_roots=set(), now=timestamp
-            )
-            is None
+            next_crawl_work(session, refresh_seconds=900, active_roots=set(), now=timestamp) is None
         )
 
         service = TopologyService(
@@ -327,3 +435,37 @@ def test_lookup_budget_holds_requests_at_the_per_minute_limit() -> None:
     asyncio.run(asyncio.wait_for(reserve(3), timeout=1))
     with pytest.raises(TimeoutError):
         asyncio.run(asyncio.wait_for(reserve(1), timeout=0.2))
+
+
+def test_home_node_directory_refresh_persists_and_hydrates(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'home-directory.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, future=True)
+    fetched = datetime.now(UTC)
+
+    service = TopologyService(
+        sessions,
+        base_url="http://example.invalid/api/stats",
+        request_interval_seconds=3,
+        timeout_seconds=1,
+        favorite_refresh_seconds=15,
+        max_nodes=200,
+        max_depth=12,
+        refresh_seconds=900,
+        cache_seconds=300,
+        home_nodes=["668390", "1999"],
+    )
+
+    assert service._take_home_directory_refresh() == "668390"
+    directory = service._store_home_directory(
+        "668390",
+        snapshot("668390", [("KM7GHS", "KM7GHS")], fetched)
+        | {"callsign": "KM7GHS", "location": "Goodyear, AZ"},
+    )
+
+    assert directory == {"callsign": "KM7GHS", "location": "Goodyear, AZ"}
+    assert service.hydrate_home_directories() == {
+        "668390": {"callsign": "KM7GHS", "location": "Goodyear, AZ"}
+    }
+    assert "1999" not in service.home_nodes
+    assert service._take_home_directory_refresh() is None

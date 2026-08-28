@@ -56,6 +56,9 @@ class NodeStateService:
         self._repair_task: asyncio.Task[None] | None = None
         self._keyed_started: dict[tuple[str, str], datetime] = {}
         self.transitions: list[RemoteKeyTransition] = []
+        self.directory: dict[str, dict[str, str | None]] = {
+            home: {"callsign": None, "location": None} for home in self.home_nodes
+        }
         self._running = False
 
     @property
@@ -390,14 +393,32 @@ class NodeStateService:
             "source": link.source,
         }
 
-    @classmethod
-    def serialize(cls, state: NodeState) -> dict[str, object]:
+    def set_directory(
+        self, home: str, *, callsign: str | None = None, location: str | None = None
+    ) -> bool:
+        """Cache AllStar directory fields for a home node. Returns True when values change."""
+        next_values = {
+            "callsign": callsign.strip() if isinstance(callsign, str) and callsign.strip() else None,
+            "location": location.strip() if isinstance(location, str) and location.strip() else None,
+        }
+        if self.directory.get(home) == next_values:
+            return False
+        self.directory[home] = next_values
+        return True
+
+    async def publish_directory(self, home: str) -> None:
+        await self._publish_state("directory", self.state(home))
+
+    def serialize(self, state: NodeState) -> dict[str, object]:
         ordered_links = sorted(state.links.values(), key=lambda item: item.identifier)
-        links = [cls.serialize_link(link) for link in ordered_links]
+        links = [self.serialize_link(link) for link in ordered_links]
         connected_nodes = [link.identifier for link in ordered_links]
         talkers = [link.identifier for link in state.links.values() if link.keyed is True]
+        directory = self.directory.get(state.home_node, {})
         return {
             "home_node": state.home_node,
+            "callsign": directory.get("callsign"),
+            "location": directory.get("location"),
             "links": links,
             "connections": links,
             "topology": state.topology,

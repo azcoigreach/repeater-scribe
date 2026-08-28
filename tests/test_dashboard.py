@@ -28,11 +28,23 @@ def test_dashboard_renders_normalized_callsign_rows_from_sse() -> None:
     assert "connection.identifier" in script
     assert "connection.callsign" in script
     assert "node-state" in script
+    assert "node-directory" in script
+    assert "data.callsign" in script
+    assert "data.location" in script
+    assert "Virtual node" in script
     assert "setInterval(loadNodeStatus, 5000)" not in script
     assert "enableNodeRestFallback" in script
     assert "No connected nodes." in script
     assert "Array.isArray(data.connections)" in script
     assert "Array.isArray(data.links) ? data.links : currentConnections" in script
+
+
+def test_dashboard_node_window_exposes_directory_placeholder() -> None:
+    html = Path("src/asl_transcriber/templates/dashboard.html").read_text()
+
+    assert 'id="node-directory"' in html
+    assert "Virtual node" in html
+    assert "live AMI connection" in html
 
 
 def test_queue_summary_uses_database_totals() -> None:

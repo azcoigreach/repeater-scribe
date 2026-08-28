@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-27
+
+### Fixed
+
+- The default public API ceiling now matches the documented 30 requests per
+  minute.
+- Due favorite and home-node metadata refreshes can no longer indefinitely
+  starve an open network map's queued discovery work.
+- Favorite refreshes now expose their direct links without spending requests on
+  neighbor nodes while the network map is closed.
+- Closing or tabbing away from the network map immediately parks deeper crawl
+  work once its event stream disconnects.
+
 ## [0.5.2] - 2026-08-24
 
 ### Added
