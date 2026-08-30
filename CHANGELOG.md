@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-30
+
+### Added
+
+- A dockable last-heard callsign window that extracts unique callsigns from live
+  and finalized conversations and orders them by their most recent appearance.
+- Optional QRZ XML Logbook Data integration for operator names, locations,
+  primary profile photos, and links to QRZ callsign pages.
+- Server-side QRZ session reuse, automatic re-login, configurable lookup caching,
+  result limits, timeouts, and graceful photo and service-error fallbacks.
+- QRZ configuration through `ASLT_QRZ_USERNAME`, `ASLT_QRZ_PASSWORD`,
+  `ASLT_QRZ_BASE_URL`, `ASLT_QRZ_TIMEOUT_SECONDS`, `ASLT_QRZ_CACHE_SECONDS`, and
+  `ASLT_QRZ_LAST_HEARD_LIMIT`.
+
+### Security
+
+- QRZ credentials and session keys remain server-side. Only extracted callsigns
+  are sent to QRZ; transcript text and audio remain local.
+
 ## [0.5.3] - 2026-08-27
 
 ### Fixed

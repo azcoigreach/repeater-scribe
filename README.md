@@ -13,7 +13,7 @@ It runs alongside an ASL3 node rather than replacing it. The recording archive
 is always mounted read-only. Node commands are optional and travel through a
 separately enabled Asterisk Manager Interface (AMI) connection.
 
-Version `0.5.1` is local-first: audio transcription uses `faster-whisper` on the
+Version `0.6.0` is local-first: audio transcription uses `faster-whisper` on the
 machine running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
 
@@ -300,7 +300,7 @@ their panel is focused again.
   QRZ.com. QRZ credentials and session keys remain server-side; profile images are
   loaded in the browser from the HTTPS URL returned by QRZ.
 - No OpenAI token is read and no remote transcription request is made in version
-  `0.5.1`.
+  `0.6.0`.
 
 ## Security warning
 
