@@ -41,7 +41,11 @@ from asl_transcriber.topology import (
     ensure_topology_crawl,
     serialize_topology,
 )
-from asl_transcriber.transcription.callsigns import CallsignResolver, extract_callsigns
+from asl_transcriber.transcription.callsigns import (
+    CallsignResolver,
+    extract_callsigns,
+    normalize_callsigns,
+)
 from asl_transcriber.transcription.context import DatabaseCallsignProvider
 from asl_transcriber.transcription.faster_whisper import FasterWhisperEngine
 from asl_transcriber.transcription.live import FfmpegSnapshotter, LiveTranscriptionService
@@ -164,6 +168,14 @@ def build_local_transcription_engine() -> FasterWhisperEngine:
         cache_seconds=settings.callsign_context_cache_seconds,
         max_candidates=settings.callsign_max_candidates,
     )
+
+    def callsign_candidates() -> tuple[str, ...]:
+        client = current_qrz_client()
+        qrz_callsigns = client.cached_callsigns() if client is not None else ()
+        return normalize_callsigns(
+            qrz_callsigns + tuple(candidate_provider())
+        )[: settings.callsign_max_candidates]
+
     return FasterWhisperEngine(
         model_size=settings.whisper_model,
         device=settings.whisper_device,
@@ -176,7 +188,7 @@ def build_local_transcription_engine() -> FasterWhisperEngine:
         workers=settings.worker_concurrency,
         model_dir=settings.whisper_model_dir,
         callsign_resolver=resolver,
-        callsign_provider=candidate_provider,
+        callsign_provider=callsign_candidates,
         callsign_hotword_limit=settings.callsign_hotword_limit,
     )
 
@@ -965,6 +977,9 @@ def recordings(
                 ),
                 "timestamp": recording_timestamp(source_path),
                 "audio_url": f"/api/v1/audio?path={quote(source_path)}",
+                "callsigns": (
+                    list(extract_callsigns(live_result.display_text)) if live_result else []
+                ),
             }
         )
     all_items: list[dict[str, object]] = waiting_items + [
@@ -974,6 +989,11 @@ def recordings(
             "status": job.status.value,
             "timestamp": recording_timestamp(job.source_path),
             "audio_url": f"/api/v1/audio?path={quote(job.source_path)}",
+            "callsigns": (
+                list(extract_callsigns(result.display_text))
+                if (result := active_runtime.results.get(job.id)) is not None
+                else []
+            ),
             "transcript": (
                 {
                     "raw_text": result.raw_text,
@@ -1038,6 +1058,7 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
                 heard[callsign] = {
                     "callsign": callsign,
                     "last_heard_at": recording_timestamp(source_path),
+                    "source_path": source_path,
                 }
 
     result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))

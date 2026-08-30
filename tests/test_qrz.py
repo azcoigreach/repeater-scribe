@@ -37,6 +37,7 @@ def test_qrz_client_logs_in_once_parses_location_and_caches_lookup() -> None:
     assert first.location == "Mesa, AZ, United States"
     assert first.image_url == "https://files.qrz.com/k/km7ghs/photo.jpg"
     assert first.profile_url == "https://www.qrz.com/db/KM7GHS"
+    assert client.cached_callsigns() == ("KM7GHS",)
     assert len(requests) == 2
     assert requests[0]["password"] == ["secret"]
 

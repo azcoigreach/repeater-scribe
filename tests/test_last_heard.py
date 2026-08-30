@@ -30,6 +30,7 @@ def test_last_heard_callsigns_are_extracted_and_enriched(monkeypatch) -> None:
         {
             "callsign": "KM7GHS",
             "last_heard_at": "2026-08-30T12:30:45+00:00",
+            "source_path": "100000/2026083012304500-call.wav",
             "name": None,
             "location": "Mesa, AZ, United States",
             "image_url": "https://files.qrz.com/KM7GHS.jpg",

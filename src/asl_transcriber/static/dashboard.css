@@ -200,6 +200,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .play-button { margin-top: 10px; border: 1px solid var(--green); border-radius: 6px; background: transparent; color: var(--green); padding: 7px 10px; cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .play-button:hover { background: var(--green); color: var(--panel); }
 .transcript { margin: 8px 0 0; color: var(--ink); font-size: 14px; line-height: 1.45; }
+.transcript-callsign { display: inline; margin: 0; border: 0; border-bottom: 1px dashed currentColor; padding: 0; background: transparent; color: var(--green); cursor: pointer; font: inherit; font-weight: 700; }
+.transcript-callsign:hover { border-bottom-style: solid; }
 .empty { padding: 20px 0; color: var(--muted); font-size: 13px; }
 
 /* Last heard callsigns */
@@ -215,6 +217,9 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .callsign-details p { margin: 3px 0; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .callsign-details .callsign-name { color: var(--ink); }
 .callsign-details time { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.callsign-evidence { margin-top: 8px; border: 0; border-bottom: 1px dashed var(--green); padding: 0; background: transparent; color: var(--green); cursor: pointer; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+.linked-highlight { animation: linked-highlight 2.2s ease-out; }
+@keyframes linked-highlight { 0%, 35% { outline: 2px solid var(--green); outline-offset: 3px; } 100% { outline: 2px solid transparent; outline-offset: 8px; } }
 
 /* Activity */
 .activity-item { padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; }

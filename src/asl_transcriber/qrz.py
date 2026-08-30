@@ -100,6 +100,15 @@ class QrzClient:
                 self._session_key = session_key
             return record
 
+    def cached_callsigns(self) -> tuple[str, ...]:
+        """Return successfully validated callsigns without performing network requests."""
+        with self._lock:
+            return tuple(
+                callsign
+                for callsign, (_, record) in self._cache.items()
+                if record.status == "found"
+            )
+
     def _login(self) -> None:
         root = self._request(
             {"username": self.username, "password": self.password, "agent": self.agent}

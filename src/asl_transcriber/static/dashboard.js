@@ -7,6 +7,19 @@ function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
+function escRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function linkedTranscript(text, callsigns = []) {
+  const normalized = new Set(callsigns.map(callsign => String(callsign).toUpperCase()));
+  if (!normalized.size) return esc(text);
+  const pattern = new RegExp(`\\b(${Array.from(normalized).sort((a, b) => b.length - a.length).map(escRegex).join('|')})\\b`, 'gi');
+  return String(text).split(pattern).map(part => normalized.has(part.toUpperCase())
+    ? `<button class="transcript-callsign" type="button" data-callsign="${esc(part.toUpperCase())}" title="Show ${esc(part.toUpperCase())} in last heard callsigns">${esc(part)}</button>`
+    : esc(part)).join('');
+}
+
 // Activity states: 0 idle, 1 transcribing, 2 node keyed, 3 both.
 const ACTIVITY_STATE_ICONS = [
   '/static/repeater-scribe-state0-256px.png',
@@ -53,12 +66,13 @@ function renderJobs(items, databaseTotals = {}) {
     return;
   }
   recordings.innerHTML = items.map(item => `
-    <article class="recording">
+    <article class="recording" data-source-path="${esc(item.source_path)}">
       <div class="recording-meta"><span class="recording-path">${esc(item.source_path)}</span><span class="recording-date">${item.timestamp ? esc(new Date(item.timestamp).toLocaleString()) : 'Timestamp unavailable'}</span><span class="status ${item.status}">${esc(item.status)}</span></div>
       <button class="play-button" type="button" data-audio-url="${esc(item.audio_url)}" aria-label="Play ${esc(item.source_path)}">▶ Play audio</button>
-      <p class="transcript">${item.transcript ? `${esc(item.transcript.display_text)}${item.transcript.provisional ? ' <span style="color:var(--muted)">(provisional)</span>' : ''}` : '<span style="color:var(--muted)">Awaiting local transcription</span>'}</p>
+      <p class="transcript">${item.transcript ? `${linkedTranscript(item.transcript.display_text, item.callsigns)}${item.transcript.provisional ? ' <span style="color:var(--muted)">(provisional)</span>' : ''}` : '<span style="color:var(--muted)">Awaiting local transcription</span>'}</p>
     </article>`).join('');
   recordings.querySelectorAll('.play-button').forEach(button => button.addEventListener('click', () => playAudio(button)));
+  recordings.querySelectorAll('.transcript-callsign').forEach(button => button.addEventListener('click', () => revealCallsign(button.dataset.callsign)));
 }
 
 const player = new Audio();
@@ -124,11 +138,12 @@ async function loadCallsigns() {
       ? `<a href="${esc(item.profile_url)}" target="_blank" rel="noopener noreferrer">${esc(item.callsign)}</a>`
       : esc(item.callsign);
     const detail = item.status === 'not_found' ? 'Not found on QRZ.com' : item.status === 'error' ? 'QRZ lookup unavailable' : (item.location || 'Location not listed');
-    return `<article class="callsign-card"><div class="callsign-photo">${photo}</div><div class="callsign-details"><h3>${call}</h3>${item.name ? `<p class="callsign-name">${esc(item.name)}</p>` : ''}<p>${esc(detail)}</p><time>Last heard ${esc(heard)}</time></div></article>`;
+    return `<article class="callsign-card" data-callsign="${esc(item.callsign)}"><div class="callsign-photo">${photo}</div><div class="callsign-details"><h3>${call}</h3>${item.name ? `<p class="callsign-name">${esc(item.name)}</p>` : ''}<p>${esc(detail)}</p><time>Last heard ${esc(heard)}</time>${item.source_path ? `<button class="callsign-evidence" type="button" data-source-path="${esc(item.source_path)}">Show transcript</button>` : ''}</div></article>`;
   }).join('');
   callsignCards.querySelectorAll('img').forEach(image => image.addEventListener('error', () => {
     image.replaceWith(Object.assign(document.createElement('span'), { textContent: image.alt.split(' ').at(-1).slice(0, 2) }));
   }));
+  callsignCards.querySelectorAll('.callsign-evidence').forEach(button => button.addEventListener('click', () => revealTranscript(button.dataset.sourcePath)));
 }
 
 async function loadNodeStatus() {
@@ -1535,6 +1550,57 @@ function setPanelVisible(panelId, visible) {
   }
   renderAll();
   persist();
+}
+
+function activatePanel(panelId) {
+  state.hidden = state.hidden.filter(id => id !== panelId);
+  if (state.floating[panelId]) {
+    state.floating[panelId].collapsed = false;
+  } else {
+    let group = findGroupWithPanel(state.tree, panelId);
+    if (!group) {
+      dockPanelDefault(panelId);
+      group = findGroupWithPanel(state.tree, panelId);
+    }
+    if (group) group.active = panelId;
+  }
+  renderAll();
+  persist();
+  const win = document.querySelector(`.win[data-win="${panelId}"]`);
+  if (win?.classList.contains('floating')) bringToFront(win);
+}
+
+function emphasize(element) {
+  if (!element) return;
+  element.classList.remove('linked-highlight');
+  void element.offsetWidth;
+  element.classList.add('linked-highlight');
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function revealCallsign(callsign) {
+  activatePanel('callsigns');
+  let card = Array.from(callsignCards.querySelectorAll('.callsign-card'))
+    .find(item => item.dataset.callsign === callsign);
+  if (!card) {
+    await loadCallsigns();
+    card = Array.from(callsignCards.querySelectorAll('.callsign-card'))
+      .find(item => item.dataset.callsign === callsign);
+  }
+  emphasize(card);
+}
+
+async function revealTranscript(sourcePath) {
+  activatePanel('transcripts');
+  let recording = Array.from(recordings.querySelectorAll('.recording'))
+    .find(item => item.dataset.sourcePath === sourcePath);
+  if (!recording) {
+    searchInput.value = sourcePath;
+    await loadJobs();
+    recording = Array.from(recordings.querySelectorAll('.recording'))
+      .find(item => item.dataset.sourcePath === sourcePath);
+  }
+  emphasize(recording);
 }
 const DROP_CLASSES = ['drop-center', 'drop-left', 'drop-right', 'drop-top', 'drop-bottom'];
 let activeDrop = null;

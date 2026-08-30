@@ -53,6 +53,11 @@ is implemented in this release.
   number-slot mistakes, and locally relevant near-matches.
 - Extracts callsigns from recent conversations and, when a QRZ XML account is
   configured, shows their QRZ location and primary profile photo in a last-heard panel.
+- Recognizes international and portable callsign forms, repeated phonetics,
+  accented number words, and small phonetic misspellings; QRZ-validated calls
+  become local correction candidates for later transmissions.
+- Links callsign mentions in transcripts to their QRZ cards and links each card
+  back to the source transcript.
 - Searches completed and provisional transcripts, streams updates through SSE,
   and plays the original archive audio from the dashboard.
 

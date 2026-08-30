@@ -4,6 +4,7 @@ from asl_transcriber.transcription.callsigns import (
     CallsignResolver,
     callsign_hotwords,
     extract_callsigns,
+    normalize_callsigns,
 )
 
 
@@ -27,6 +28,48 @@ def test_hotwords_include_written_and_spoken_callsign() -> None:
 
 def test_extract_callsigns_preserves_first_mention_order_and_removes_duplicates() -> None:
     assert extract_callsigns("K7ABC called km7ghs, then K7ABC again.") == ("K7ABC", "KM7GHS")
+
+
+def test_international_and_portable_callsigns_are_normalized_and_extracted() -> None:
+    assert normalize_callsigns(("3DA0RS", "9A1A", "K7ABC/P", "F/AB1C")) == (
+        "3DA0RS",
+        "9A1A",
+        "K7ABC",
+        "AB1C",
+    )
+    assert extract_callsigns("3DA0RS, 9A1A, K7ABC/P and VK2ABC") == (
+        "3DA0RS",
+        "9A1A",
+        "K7ABC",
+        "VK2ABC",
+    )
+
+
+def test_resolver_handles_international_phonetics_and_accented_numbers() -> None:
+    resolver = CallsignResolver()
+
+    assert resolver.resolve("Three Delta Alpha Zero Romeo Sierra checking in") == (
+        "3DA0RS checking in"
+    )
+    assert resolver.resolve("Nine Alpha One Alpha calling") == "9A1A calling"
+    assert resolver.resolve("Kilo Mike Tree Golf Hotel Sierra") == "KM3GHS"
+    assert resolver.resolve("K7ABC/P portable") == "K7ABC/P portable"
+
+
+def test_resolver_collapses_multiple_doubled_phonetic_symbols() -> None:
+    result = CallsignResolver().resolve_detailed(
+        "Kilo Kilo Mike Mike Seven Seven Golf Golf Hotel Hotel Sierra Sierra"
+    )
+
+    assert result.text == "KM7GHS"
+    assert result.corrections[0].confidence == "medium"
+    assert result.corrections[0].reason == "repeated-symbol collapse"
+
+
+def test_resolver_tolerates_fillers_and_one_character_phonetic_misspellings() -> None:
+    resolver = CallsignResolver()
+
+    assert resolver.resolve("Kilo uh Mike Seven Golf Hotel Siera") == "KM7GHS"
 
 
 def test_resolver_repairs_observed_fast_speech_errors_from_local_candidates() -> None:

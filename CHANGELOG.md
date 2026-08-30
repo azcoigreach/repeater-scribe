@@ -12,6 +12,11 @@ All notable changes to this project will be documented in this file.
   and finalized conversations and orders them by their most recent appearance.
 - Optional QRZ XML Logbook Data integration for operator names, locations,
   primary profile photos, and links to QRZ callsign pages.
+- International and portable callsign recognition, repeated-symbol recovery,
+  accented number variants, conservative phonetic typo handling, and reuse of
+  QRZ-validated calls as local correction candidates.
+- Bidirectional links between callsign mentions in transcripts and their
+  last-heard QRZ cards, including source-recording highlighting.
 - Server-side QRZ session reuse, automatic re-login, configurable lookup caching,
   result limits, timeouts, and graceful photo and service-error fallbacks.
 - QRZ configuration through `ASLT_QRZ_USERNAME`, `ASLT_QRZ_PASSWORD`,

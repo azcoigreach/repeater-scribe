@@ -20,13 +20,20 @@ def test_recordings_endpoint_filters_transcript_text(monkeypatch, tmp_path) -> N
         active_runtime.results[active_runtime.jobs()[0].id] = type(
             "Result",
             (),
-            {"raw_text": "weather check", "display_text": "Weather check", "language": "en"},
+            {
+                "raw_text": "weather check from km7ghs",
+                "display_text": "Weather check from KM7GHS",
+                "language": "en",
+            },
         )()
         response = client.get("/api/v1/recordings?q=weather")
 
     assert response.status_code == 200
     assert response.json()["total"] == 1
-    assert response.json()["items"][0]["transcript"]["display_text"] == "Weather check"
+    assert response.json()["items"][0]["transcript"]["display_text"] == (
+        "Weather check from KM7GHS"
+    )
+    assert response.json()["items"][0]["callsigns"] == ["KM7GHS"]
 
 
 def test_recordings_total_is_not_truncated_by_limit(monkeypatch, tmp_path) -> None:

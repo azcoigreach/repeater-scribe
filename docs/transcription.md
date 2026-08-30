@@ -112,10 +112,21 @@ cached set from:
 The resolver then:
 
 - converts NATO and common amateur-radio phonetic words into symbols,
+- accepts international prefix/digit/suffix formats such as `3DA0RS`, `9A1A`,
+  and `VK2ABC`, while reducing portable forms such as `K7ABC/P` to their base call,
 - joins split callsign pieces,
+- tolerates short fillers, accented number forms such as `tree`, `fife`, and
+  `niner`, and unique one-character misspellings of NATO phonetics,
+- collapses multiple repeated symbols caused by doubled audio or speech only
+  when the uncollapsed text is not already a valid callsign,
 - repairs likely digit-slot errors such as `KDIDJ` to `KD1DJ`, and
 - uses conservative weighted matching against locally relevant candidates for
   errors such as `AM7 VHS` to `KM7GHS`.
+
+Successful QRZ lookups are also kept as high-relevance in-memory candidates.
+This means that once a station has been identified and validated, later mumbled
+or accented versions of that same call can be repaired locally without another
+QRZ request. The normal QRZ result cache still controls remote lookup frequency.
 
 Ambiguous matches are left unchanged. Candidate order is used only to break a
 fuzzy tie when one callsign has a substantially stronger local prior. The
@@ -126,6 +137,12 @@ stored as `display_text`. This makes every correction reviewable.
 `ASLT_CALLSIGN_CONTEXT_CACHE_SECONDS` controls how often database context is
 refreshed. Add stable club and operator calls to `ASLT_KNOWN_CALLSIGNS`; active
 network calls are discovered automatically.
+
+The dashboard renders recognized callsigns as links inside each display
+transcript. Selecting one opens and highlights its last-heard QRZ card. Each
+card has a **Show transcript** action that returns to and highlights the source
+recording, applying a source-path search if that recording is outside the
+currently rendered transcript page.
 
 ### Prompts and hotwords
 
@@ -216,6 +233,10 @@ show an improvement.
 - Provisional overlap merging is word-based and can duplicate or omit text.
 - Callsign correction is probabilistic. Raw text is retained because corrected
   display text is not authoritative evidence of identity.
+- A first-ever callsign that the speech model renders without enough phonetic or
+  callsign structure cannot be recovered reliably from text alone. Add repeat
+  stations to `ASLT_KNOWN_CALLSIGNS` and retain representative audio for corpus
+  testing rather than enabling broad speculative substitutions.
 - Segment timestamps and correction evidence exist in the in-process result but
   are not currently persisted in the transcript table.
 - No remote or OpenAI transcription backend is implemented yet.
