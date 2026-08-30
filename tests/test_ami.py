@@ -100,6 +100,7 @@ def test_persistent_client_routes_concurrent_actions_and_events() -> None:
             )
             await writer.drain()
             writer.close()
+            await writer.wait_closed()
 
         async def on_event(_frame) -> None:
             received_event.set()
@@ -161,6 +162,8 @@ def test_persistent_client_demultiplexes_action_events_from_unsolicited_events()
                 ).encode()
             )
             await writer.drain()
+            writer.close()
+            await writer.wait_closed()
 
         async def on_event(frame) -> None:
             unsolicited.append(frame.event or "")
@@ -212,6 +215,8 @@ def test_persistent_client_reconnects_and_forces_authenticated_callback() -> Non
                 await writer.wait_closed()
             else:
                 await reader.read()
+                writer.close()
+                await writer.wait_closed()
 
         async def after_authentication() -> None:
             if authenticated_count >= 2:

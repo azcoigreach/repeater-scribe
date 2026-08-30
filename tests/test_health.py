@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from asl_transcriber import __version__
 from asl_transcriber.main import app
 
 
@@ -11,7 +12,7 @@ def test_health_endpoint_returns_ok() -> None:
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["service"] == "repeater-scribe"
-    assert payload["version"] == "0.5.3"
+    assert payload["version"] == __version__
 
 
 def test_system_info_reports_local_transcription_profile() -> None:
