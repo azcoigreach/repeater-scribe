@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from asl_transcriber.transcription.callsigns import CallsignResolver, callsign_hotwords
+from asl_transcriber.transcription.callsigns import (
+    CallsignResolver,
+    callsign_hotwords,
+    extract_callsigns,
+)
 
 
 def test_resolver_converts_exact_and_nearby_known_phonetic_callsign() -> None:
@@ -19,6 +23,10 @@ def test_hotwords_include_written_and_spoken_callsign() -> None:
     assert "KM7GHS" in result
     assert "Kilo Mike Seven Golf Hotel Sierra" in result
     assert "AllStar, Arizona" in result
+
+
+def test_extract_callsigns_preserves_first_mention_order_and_removes_duplicates() -> None:
+    assert extract_callsigns("K7ABC called km7ghs, then K7ABC again.") == ("K7ABC", "KM7GHS")
 
 
 def test_resolver_repairs_observed_fast_speech_errors_from_local_candidates() -> None:

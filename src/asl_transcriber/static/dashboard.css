@@ -183,6 +183,7 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .confirm-label { display: flex !important; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .control-button { width: fit-content; border: 1px solid var(--green); border-radius: 6px; padding: 8px 12px; background: transparent; color: var(--green); cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .control-button:hover, .control-button.primary { background: var(--green); color: var(--panel); }
+.control-button.compact { padding: 5px 8px; font-size: 9px; }
 .control-button.danger { border-color: #ff7a63; color: #ff7a63; }
 .control-button.danger:hover { background: #ff7a63; color: var(--panel); }
 .control-result { display: block; min-height: 18px; color: var(--green); font-size: 12px; }
@@ -200,6 +201,20 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .play-button:hover { background: var(--green); color: var(--panel); }
 .transcript { margin: 8px 0 0; color: var(--ink); font-size: 14px; line-height: 1.45; }
 .empty { padding: 20px 0; color: var(--muted); font-size: 13px; }
+
+/* Last heard callsigns */
+.callsigns-source { margin: 0 0 12px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.callsign-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.callsign-card { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+.callsign-photo { display: grid; place-items: center; width: 78px; height: 78px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--mint); color: var(--green); font-weight: 700; }
+.callsign-photo img { width: 100%; height: 100%; object-fit: cover; }
+.callsign-details { min-width: 0; }
+.callsign-details h3 { margin: 0 0 5px; font-size: 18px; }
+.callsign-details h3 a { color: var(--green); text-decoration: none; }
+.callsign-details h3 a:hover { text-decoration: underline; }
+.callsign-details p { margin: 3px 0; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.callsign-details .callsign-name { color: var(--ink); }
+.callsign-details time { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; line-height: 1.35; }
 
 /* Activity */
 .activity-item { padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; }

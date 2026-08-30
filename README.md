@@ -51,6 +51,8 @@ is implemented in this release.
   and discovered topology data.
 - Decodes phonetic callsigns and conservatively repairs split suffixes,
   number-slot mistakes, and locally relevant near-matches.
+- Extracts callsigns from recent conversations and, when a QRZ XML account is
+  configured, shows their QRZ location and primary profile photo in a last-heard panel.
 - Searches completed and provisional transcripts, streams updates through SSE,
   and plays the original archive audio from the dashboard.
 
@@ -244,6 +246,9 @@ quality; benchmark representative repeater audio before choosing a model.
 | `ASLT_WHISPER_DEVICE` | `cuda` or `cpu`. |
 | `ASLT_WHISPER_COMPUTE_TYPE` | CTranslate2 precision or quantization mode. |
 | `ASLT_KNOWN_CALLSIGNS` | Comma-separated high-priority local callsigns. |
+| `ASLT_QRZ_USERNAME` / `ASLT_QRZ_PASSWORD` | Optional QRZ XML Logbook Data credentials used only by the server. |
+| `ASLT_QRZ_CACHE_SECONDS` | How long to reuse callsign lookup results; defaults to 24 hours. |
+| `ASLT_QRZ_LAST_HEARD_LIMIT` | Maximum recent unique callsigns shown in the dashboard. |
 
 The full transcription setting reference is in
 [docs/transcription.md](docs/transcription.md).
@@ -291,6 +296,9 @@ their panel is focused again.
   network requirement is the initial model download.
 - Enabling favorite statistics sends public numeric node IDs to the configured
   AllStar statistics endpoint and stores the returned public metadata locally.
+- Enabling QRZ lookup sends extracted callsigns (not transcript text or audio) to
+  QRZ.com. QRZ credentials and session keys remain server-side; profile images are
+  loaded in the browser from the HTTPS URL returned by QRZ.
 - No OpenAI token is read and no remote transcription request is made in version
   `0.5.1`.
 
@@ -324,7 +332,7 @@ The main route groups are:
 | Area | Routes |
 | --- | --- |
 | Health/configuration | `GET /health`, `/api/v1/health`, `/api/v1/system/info` |
-| Recordings | `/api/v1/ingestion/*`, `/api/v1/recordings`, `/api/v1/audio`, `/api/v1/activity` |
+| Recordings | `/api/v1/ingestion/*`, `/api/v1/recordings`, `/api/v1/audio`, `/api/v1/activity`, `/api/v1/callsigns/last-heard` |
 | Live archive events | `GET /api/v1/events` |
 | Node state | `GET /api/v1/nodes`, `/api/v1/nodes/{home}/state`, `/links`, `/events` |
 | Node control | `POST`/`DELETE /api/v1/nodes/{home}/links`, `/reconnect`, `/api/v1/node/{id}/command`, `/function` |

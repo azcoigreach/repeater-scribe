@@ -1,6 +1,7 @@
 const recordings = document.querySelector('#recordings');
 const activity = document.querySelector('#activity');
 const searchInput = document.querySelector('#search-input');
+const callsignCards = document.querySelector('#last-heard-callsigns');
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
@@ -95,6 +96,39 @@ async function loadActivity() {
     activity.innerHTML = data.items.slice(-12).reverse().map(item => `
       <div class="activity-item"><time>${esc(new Date(item.timestamp).toLocaleString())}</time><strong>${esc(item.event_type)}</strong>${item.details ? ` <span>${esc(item.details)}</span>` : ''}</div>`).join('');
   }
+}
+
+async function loadCallsigns() {
+  const source = document.querySelector('#callsigns-source');
+  const response = await fetch('/api/v1/callsigns/last-heard', { cache: 'no-store' });
+  if (!response.ok) {
+    source.textContent = 'QRZ lookup is temporarily unavailable.';
+    callsignCards.innerHTML = '<div class="empty">Could not load last heard callsigns.</div>';
+    return;
+  }
+  const data = await response.json();
+  document.querySelector('#callsigns-count').textContent = data.total;
+  source.textContent = data.configured
+    ? 'Location and primary photos supplied by QRZ.com.'
+    : 'Add ASLT_QRZ_USERNAME and ASLT_QRZ_PASSWORD to enable QRZ.com details.';
+  if (!data.items.length) {
+    callsignCards.innerHTML = '<div class="empty">No callsigns have been heard in transcripts yet.</div>';
+    return;
+  }
+  callsignCards.innerHTML = data.items.map(item => {
+    const heard = item.last_heard_at ? new Date(item.last_heard_at).toLocaleString() : 'Time unavailable';
+    const photo = item.image_url
+      ? `<img src="${esc(item.image_url)}" alt="QRZ profile image for ${esc(item.callsign)}" loading="lazy" referrerpolicy="no-referrer">`
+      : `<span aria-hidden="true">${esc(item.callsign.slice(0, 2))}</span>`;
+    const call = item.profile_url
+      ? `<a href="${esc(item.profile_url)}" target="_blank" rel="noopener noreferrer">${esc(item.callsign)}</a>`
+      : esc(item.callsign);
+    const detail = item.status === 'not_found' ? 'Not found on QRZ.com' : item.status === 'error' ? 'QRZ lookup unavailable' : (item.location || 'Location not listed');
+    return `<article class="callsign-card"><div class="callsign-photo">${photo}</div><div class="callsign-details"><h3>${call}</h3>${item.name ? `<p class="callsign-name">${esc(item.name)}</p>` : ''}<p>${esc(detail)}</p><time>Last heard ${esc(heard)}</time></div></article>`;
+  }).join('');
+  callsignCards.querySelectorAll('img').forEach(image => image.addEventListener('error', () => {
+    image.replaceWith(Object.assign(document.createElement('span'), { textContent: image.alt.split(' ').at(-1).slice(0, 2) }));
+  }));
 }
 
 async function loadNodeStatus() {
@@ -1166,7 +1200,10 @@ document.querySelector('#run-function').addEventListener('click', async () => {
 searchInput.addEventListener('input', loadJobs);
 loadJobs();
 loadActivity();
+loadCallsigns();
 setInterval(loadActivity, 5000);
+setInterval(loadCallsigns, 60000);
+document.querySelector('#refresh-callsigns').addEventListener('click', loadCallsigns);
 let nodeFallbackTimer = null;
 function enableNodeRestFallback() {
   if (nodeFallbackTimer !== null) return;
@@ -1192,7 +1229,7 @@ loadFavorites();
 setInterval(loadFavorites, 10000);
 const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
-stream.addEventListener('job', () => { loadJobs(); });
+stream.addEventListener('job', () => { loadJobs(); loadCallsigns(); });
 stream.addEventListener('error', () => { document.querySelector('#connection-label').textContent = 'Reconnecting to archive'; });
 
 /* Menu tree: top-right button opens a panel with Windows / Layout submenus and a Settings item */
@@ -1320,6 +1357,7 @@ const PANEL_TITLES = {
   topology: 'Network map',
   controls: 'Node controls',
   transcripts: 'Transcripts',
+  callsigns: 'Last heard callsigns',
   activity: 'Activity log',
   functions: 'Functions',
   status: 'Status',
@@ -1339,7 +1377,7 @@ function defaultTree() {
         makeGroup('queue'), makeGroup('node'), makeGroup('controls'),
       ] },
       { type: 'split', direction: 'row', sizes: [0.6, 0.4], children: [
-        makeGroup('transcripts'),
+        makeGroup('transcripts', 'callsigns'),
         { type: 'split', direction: 'column', sizes: [0.4, 0.3, 0.3], children: [makeGroup('stations', 'favorites'), makeGroup('activity'), makeGroup('functions')] },
       ] },
     ],
@@ -1386,6 +1424,12 @@ if (!findGroupWithPanel(state.tree, 'favorites') && !state.floating.favorites) {
   if (stationsGroup) stationsGroup.panels.push('favorites');
   else dockPanelDefault('favorites');
   state.hidden = state.hidden.filter(panelId => panelId !== 'favorites');
+}
+if (!findGroupWithPanel(state.tree, 'callsigns') && !state.floating.callsigns && !state.hidden.includes('callsigns')) {
+  const transcriptsGroup = findGroupWithPanel(state.tree, 'transcripts');
+  if (transcriptsGroup) transcriptsGroup.panels.push('callsigns');
+  else dockPanelDefault('callsigns');
+  state.hidden = state.hidden.filter(panelId => panelId !== 'callsigns');
 }
 
 /* Tree helpers */

@@ -88,6 +88,9 @@ _NATO = {
     "9": "Nine",
 }
 _CALLSIGN = re.compile(r"^[A-Z]{1,2}\d[A-Z]{1,4}$")
+_CALLSIGN_IN_TEXT = re.compile(
+    r"(?<![A-Z0-9])([A-Z]{1,2}\d[A-Z]{1,4})(?![A-Z0-9])", re.IGNORECASE
+)
 _US_CALLSIGN = re.compile(r"^(?:[KNW][A-Z]?|A[A-L])\d[A-Z]{1,3}$")
 _WORD = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)?|\d")
 _DIGIT_LIKE = {"I": "1", "L": "1", "O": "0"}
@@ -111,6 +114,11 @@ def normalize_callsigns(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
             normalized.append(candidate)
             seen.add(candidate)
     return tuple(normalized)
+
+
+def extract_callsigns(text: str) -> tuple[str, ...]:
+    """Return unique, normalized callsigns already present in transcript text."""
+    return normalize_callsigns([match.group(1) for match in _CALLSIGN_IN_TEXT.finditer(text)])
 
 
 def callsign_hotwords(callsigns: list[str] | tuple[str, ...], extra: str | None = None) -> str:

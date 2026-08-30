@@ -6,7 +6,7 @@
   <title>REPEATER SCRIBE</title>
   <link rel="icon" id="favicon" type="image/png" sizes="256x256" href="/static/repeater-scribe-state0-256px.png">
   <link rel="apple-touch-icon" href="/static/repeater-scribe-state0-256px.png">
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260824-2">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260830-1">
 </head>
 <body>
   <header class="topbar">
@@ -31,6 +31,7 @@
               <label><input type="checkbox" data-toggle-win="topology"> Network map</label>
               <label><input type="checkbox" data-toggle-win="controls" checked> Node controls</label>
               <label><input type="checkbox" data-toggle-win="transcripts" checked> Transcripts</label>
+              <label><input type="checkbox" data-toggle-win="callsigns" checked> Last heard callsigns</label>
               <label><input type="checkbox" data-toggle-win="activity" checked> Activity log</label>
               <label><input type="checkbox" id="toggle-functions" data-toggle-win="functions" checked> Functions</label>
               <label><input type="checkbox" id="toggle-status" data-toggle-win="status"> Status</label>
@@ -204,6 +205,19 @@
       <div class="win-body"><div id="recordings" class="recordings" aria-live="polite"><div class="empty">Loading recordings...</div></div></div>
     </section>
 
+    <section class="win" data-win="callsigns" data-title="Last heard callsigns">
+      <header class="win-titlebar">
+        <span class="win-title">Last heard callsigns</span>
+        <span id="callsigns-count" class="count">0</span>
+        <button id="refresh-callsigns" class="control-button compact" type="button">Refresh</button>
+        <div class="win-actions"><button class="win-collapse" type="button" aria-label="Collapse window">&minus;</button><button class="win-dock" type="button" aria-label="Dock window">&#8600;</button><button class="win-close" type="button" aria-label="Close window">&times;</button></div>
+      </header>
+      <div class="win-body">
+        <p id="callsigns-source" class="callsigns-source">Reading callsigns from transcripts...</p>
+        <div id="last-heard-callsigns" class="callsign-cards" aria-live="polite"><div class="empty">Loading callsigns...</div></div>
+      </div>
+    </section>
+
     <section class="win" data-win="activity" data-title="Activity log">
       <header class="win-titlebar">
         <span class="win-title">Activity log</span>
@@ -287,6 +301,6 @@
     </form>
   </div>
 
-  <script src="/static/dashboard.js?v=20260824-5"></script>
+  <script src="/static/dashboard.js?v=20260830-1"></script>
 </body>
 </html>

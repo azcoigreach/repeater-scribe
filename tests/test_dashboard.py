@@ -55,6 +55,17 @@ def test_queue_summary_uses_database_totals() -> None:
     assert "renderJobs(data.items, data.database_totals)" in script
 
 
+def test_dashboard_has_dockable_last_heard_callsign_window() -> None:
+    template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
+    script = Path("src/asl_transcriber/static/dashboard.js").read_text()
+
+    assert 'data-win="callsigns"' in template
+    assert 'id="last-heard-callsigns"' in template
+    assert "/api/v1/callsigns/last-heard" in script
+    assert "callsigns: 'Last heard callsigns'" in script
+    assert "Location and primary photos supplied by QRZ.com." in script
+
+
 def test_connected_node_columns_have_stable_layout() -> None:
     template = Path("src/asl_transcriber/templates/dashboard.html").read_text()
     styles = Path("src/asl_transcriber/static/dashboard.css").read_text()

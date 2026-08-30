@@ -34,13 +34,14 @@ from asl_transcriber.favorites import (
 from asl_transcriber.models import Favorite
 from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
+from asl_transcriber.qrz import QrzClient, QrzError
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.topology import (
     TopologyService,
     ensure_topology_crawl,
     serialize_topology,
 )
-from asl_transcriber.transcription.callsigns import CallsignResolver
+from asl_transcriber.transcription.callsigns import CallsignResolver, extract_callsigns
 from asl_transcriber.transcription.context import DatabaseCallsignProvider
 from asl_transcriber.transcription.faster_whisper import FasterWhisperEngine
 from asl_transcriber.transcription.live import FfmpegSnapshotter, LiveTranscriptionService
@@ -53,6 +54,8 @@ runtime = ArchiveRuntime(
 node_monitor: NodeStateService | None = None
 topology_service: TopologyService | None = None
 transcription_engine: FasterWhisperEngine | None = None
+qrz_client: QrzClient | None = None
+qrz_client_credentials: tuple[str, str, str, float, float] | None = None
 
 NODE_COMMANDS = [
     {"name": "Announce", "template": "rpt cmd {node} status 11", "target": False},
@@ -112,6 +115,30 @@ def recording_timestamp(source_path: str) -> str | None:
         tzinfo=UTC, microsecond=int(match.group(2)) * 10000
     )
     return timestamp.isoformat()
+
+
+def current_qrz_client() -> QrzClient | None:
+    global qrz_client, qrz_client_credentials
+    if not settings.qrz_username or not settings.qrz_password:
+        return None
+    credentials = (
+        settings.qrz_username,
+        settings.qrz_password,
+        settings.qrz_base_url,
+        settings.qrz_timeout_seconds,
+        settings.qrz_cache_seconds,
+    )
+    if qrz_client is None or qrz_client_credentials != credentials:
+        qrz_client = QrzClient(
+            settings.qrz_username,
+            settings.qrz_password,
+            base_url=settings.qrz_base_url,
+            timeout_seconds=settings.qrz_timeout_seconds,
+            cache_seconds=settings.qrz_cache_seconds,
+            agent=f"repeater-scribe/{__version__}",
+        )
+        qrz_client_credentials = credentials
+    return qrz_client
 
 
 def current_runtime() -> ArchiveRuntime:
@@ -987,6 +1014,52 @@ def audio(path: str) -> FileResponse:
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Audio recording not found") from error
     return FileResponse(source, media_type="audio/wav", filename=source.name)
+
+
+@app.get("/api/v1/callsigns/last-heard")
+def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
+    active_runtime = current_runtime()
+    heard: dict[str, dict[str, str | None]] = {}
+    sources: list[tuple[str, str]] = []
+    sources.extend(
+        (source_path, result.display_text)
+        for source_path, result in active_runtime.live_results.items()
+    )
+    sources.extend(
+        (job.source_path, active_runtime.results[job.id].display_text)
+        for job in active_runtime.jobs()
+        if job.id in active_runtime.results
+    )
+    for source_path, text in sorted(
+        sources, key=lambda item: recording_timestamp(item[0]) or item[0], reverse=True
+    ):
+        for callsign in extract_callsigns(text):
+            if callsign not in heard:
+                heard[callsign] = {
+                    "callsign": callsign,
+                    "last_heard_at": recording_timestamp(source_path),
+                }
+
+    result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
+    recent = list(heard.values())[:result_limit]
+    client = current_qrz_client()
+    if client is None:
+        return {"configured": False, "total": len(heard), "items": recent}
+
+    items: list[dict[str, object]] = []
+    lookup_error: str | None = None
+    for item in recent:
+        if lookup_error is not None:
+            items.append({**item, "status": "error", "error": lookup_error})
+            continue
+        try:
+            details = client.lookup(str(item["callsign"])).serialize()
+            items.append({**item, **details})
+        except QrzError as error:
+            logger.warning("QRZ lookup failed for %s: %s", item["callsign"], error)
+            lookup_error = str(error)
+            items.append({**item, "status": "error", "error": lookup_error})
+    return {"configured": True, "total": len(heard), "items": items}
 
 
 @app.get("/api/v1/events")
