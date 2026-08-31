@@ -65,6 +65,8 @@ def test_dashboard_has_dockable_last_heard_callsign_window() -> None:
     assert "callsigns: 'Last heard callsigns'" in script
     assert "Location and primary photos supplied by QRZ.com." in script
     assert 'class="transcript-callsign"' in script
+    assert "confirmedCallsigns" in script
+    assert "unconfirmed transcript fragment" in script
     assert "Show transcript" in script
     assert "revealCallsign" in script
     assert "revealTranscript" in script

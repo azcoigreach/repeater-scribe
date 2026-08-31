@@ -109,3 +109,17 @@ def test_resolver_does_not_guess_between_equally_close_candidates() -> None:
     resolver = CallsignResolver(("K7ABC", "K7ABD"))
 
     assert resolver.resolve("K7ABX testing") == "K7ABX testing"
+
+
+def test_us_shaped_fragments_must_follow_us_callsign_structure() -> None:
+    assert extract_callsigns("KTW4LKT K04VAP AI4DQPK, but W3UW and AI4DQP") == (
+        "W3UW",
+        "AI4DQP",
+    )
+
+
+def test_resolver_recovers_confirmed_calls_from_run_together_decodes() -> None:
+    resolver = CallsignResolver(("W3UW", "N5AQM"))
+
+    assert resolver.resolve("W3UWUW3UW calling") == "W3UW calling"
+    assert resolver.resolve("MN5AQMM in Chandler") == "N5AQM in Chandler"

@@ -16,6 +16,16 @@ class FakeQrzClient:
             profile_url=f"https://www.qrz.com/db/{callsign}",
         )
 
+    def cached_status(self, callsign: str) -> str | None:
+        return "found" if callsign == "KM7GHS" else None
+
+
+class FilteringQrzClient(FakeQrzClient):
+    def lookup(self, callsign: str) -> QrzCallsign:
+        if callsign == "W3UWU":
+            return QrzCallsign(callsign=callsign, status="not_found")
+        return super().lookup(callsign)
+
 
 def test_last_heard_callsigns_are_extracted_and_enriched(monkeypatch) -> None:
     job = SimpleNamespace(id="job-1", source_path="100000/2026083012304500-call.wav")
@@ -73,3 +83,19 @@ def test_last_heard_uses_each_callsigns_latest_segment_time(monkeypatch) -> None
             "source_path": "100000/2026083012304500-call.wav",
         },
     ]
+
+
+def test_last_heard_omits_candidates_not_found_by_qrz(monkeypatch) -> None:
+    job = SimpleNamespace(id="job-1", source_path="100000/2026083012304500-call.wav")
+    result = SimpleNamespace(display_text="W3UWU then KM7GHS", callsign_mentions=[])
+    runtime = SimpleNamespace(live_results={}, results={job.id: result}, jobs=lambda: [job])
+    monkeypatch.setattr("asl_transcriber.main.current_runtime", lambda: runtime)
+    monkeypatch.setattr(
+        "asl_transcriber.main.current_qrz_client", lambda: FilteringQrzClient()
+    )
+
+    response = last_heard_callsigns()
+
+    assert response["total"] == 1
+    assert response["rejected"] == 1
+    assert [item["callsign"] for item in response["items"]] == ["KM7GHS"]

@@ -977,9 +977,9 @@ def recordings(
                 ),
                 "timestamp": recording_timestamp(source_path),
                 "audio_url": f"/api/v1/audio?path={quote(source_path)}",
-                "callsigns": (
-                    list(extract_callsigns(live_result.display_text)) if live_result else []
-                ),
+                "callsigns": list(extract_callsigns(live_result.display_text))
+                if live_result
+                else [],
             }
         )
     all_items: list[dict[str, object]] = waiting_items + [
@@ -1094,30 +1094,42 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
             heard_times[callsign] = last_heard_at
 
     result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
-    recent = sorted(
+    sorted_heard = sorted(
         heard.values(),
         key=lambda item: heard_times[str(item["callsign"])]
         or datetime.min.replace(tzinfo=UTC),
         reverse=True,
-    )[:result_limit]
+    )
     client = current_qrz_client()
     if client is None:
+        recent = sorted_heard[:result_limit]
         return {"configured": False, "total": len(heard), "items": recent}
 
     items: list[dict[str, object]] = []
+    rejected = 0
     lookup_error: str | None = None
-    for item in recent:
+    for item in sorted_heard[:100]:
+        if len(items) >= result_limit:
+            break
         if lookup_error is not None:
             items.append({**item, "status": "error", "error": lookup_error})
             continue
         try:
             details = client.lookup(str(item["callsign"])).serialize()
+            if details["status"] == "not_found":
+                rejected += 1
+                continue
             items.append({**item, **details})
         except QrzError as error:
             logger.warning("QRZ lookup failed for %s: %s", item["callsign"], error)
             lookup_error = str(error)
             items.append({**item, "status": "error", "error": lookup_error})
-    return {"configured": True, "total": len(heard), "items": items}
+    return {
+        "configured": True,
+        "total": len(items),
+        "rejected": rejected,
+        "items": items,
+    }
 
 
 @app.get("/api/v1/events")

@@ -2,6 +2,7 @@ const recordings = document.querySelector('#recordings');
 const activity = document.querySelector('#activity');
 const searchInput = document.querySelector('#search-input');
 const callsignCards = document.querySelector('#last-heard-callsigns');
+let confirmedCallsigns = null;
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
@@ -12,7 +13,9 @@ function escRegex(value) {
 }
 
 function linkedTranscript(text, callsigns = []) {
-  const normalized = new Set(callsigns.map(callsign => String(callsign).toUpperCase()));
+  const normalized = new Set(callsigns
+    .map(callsign => String(callsign).toUpperCase())
+    .filter(callsign => confirmedCallsigns === null || confirmedCallsigns.has(callsign)));
   if (!normalized.size) return esc(text);
   const pattern = new RegExp(`\\b(${Array.from(normalized).sort((a, b) => b.length - a.length).map(escRegex).join('|')})\\b`, 'gi');
   return String(text).split(pattern).map(part => normalized.has(part.toUpperCase())
@@ -105,6 +108,9 @@ async function loadActivity() {
   const response = await fetch('/api/v1/activity', { cache: 'no-store' });
   if (!response.ok) return;
   const data = await response.json();
+  confirmedCallsigns = data.configured && !data.items.some(item => item.status === 'error')
+    ? new Set(data.items.filter(item => item.status === 'found').map(item => String(item.callsign).toUpperCase()))
+    : null;
   document.querySelector('#activity-count').textContent = data.total;
   if (data.total) {
     activity.innerHTML = data.items.slice(-12).reverse().map(item => `
@@ -123,7 +129,7 @@ async function loadCallsigns() {
   const data = await response.json();
   document.querySelector('#callsigns-count').textContent = data.total;
   source.textContent = data.configured
-    ? 'Location and primary photos supplied by QRZ.com.'
+    ? `Location and primary photos supplied by QRZ.com.${data.rejected ? ` ${data.rejected} unconfirmed transcript fragment${data.rejected === 1 ? '' : 's'} hidden.` : ''}`
     : 'Add ASLT_QRZ_USERNAME and ASLT_QRZ_PASSWORD to enable QRZ.com details.';
   if (!data.items.length) {
     callsignCards.innerHTML = '<div class="empty">No callsigns have been heard in transcripts yet.</div>';
@@ -144,6 +150,7 @@ async function loadCallsigns() {
     image.replaceWith(Object.assign(document.createElement('span'), { textContent: image.alt.split(' ').at(-1).slice(0, 2) }));
   }));
   callsignCards.querySelectorAll('.callsign-evidence').forEach(button => button.addEventListener('click', () => revealTranscript(button.dataset.sourcePath)));
+  if (data.configured) loadJobs();
 }
 
 async function loadNodeStatus() {
