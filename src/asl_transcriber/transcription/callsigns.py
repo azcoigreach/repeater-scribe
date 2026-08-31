@@ -230,7 +230,12 @@ class CallsignResolver:
                 if match is None:
                     continue
                 quality = (match.tier, match.score, -len(observed))
-                if best is None or quality < best[0]:
+                extends_best = (
+                    best is not None
+                    and match.callsign != best[2].callsign
+                    and match.callsign.startswith(best[2].callsign)
+                )
+                if best is None or quality < best[0] or extends_best:
                     best = (quality, end, match)
             if best is None:
                 index += 1
@@ -263,11 +268,25 @@ class CallsignResolver:
         if known_match is not None:
             return known_match
 
+        structural = self._structural_callsign(observed)
+        extends_known = any(
+            observed.startswith(candidate) and observed != candidate
+            for candidate in self.known_callsigns
+        )
+        if structural is not None and extends_known:
+            callsign, changed_digit = structural
+            return _CandidateMatch(
+                callsign=callsign,
+                tier=2 if changed_digit else 3,
+                score=0.0,
+                confidence="medium" if changed_digit else "high",
+                reason="numeric-slot normalization" if changed_digit else "callsign formatting",
+            )
+
         embedded_match = self._embedded_known_match(observed)
         if embedded_match is not None:
             return embedded_match
 
-        structural = self._structural_callsign(observed)
         if structural is not None:
             callsign, changed_digit = structural
             return _CandidateMatch(
@@ -326,6 +345,13 @@ class CallsignResolver:
         if observed in self.known_callsigns:
             return _CandidateMatch(observed, 0, 0.0, "high", "exact local candidate")
         if not self.known_callsigns or len(observed) < 4:
+            return None
+        if _is_callsign(observed) and any(
+            observed.startswith(candidate) and observed != candidate
+            for candidate in self.known_callsigns
+        ):
+            # A confirmed shorter call must not consume the leading portion of a
+            # longer, structurally complete observation.
             return None
 
         ranked = sorted(

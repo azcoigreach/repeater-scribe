@@ -129,3 +129,10 @@ def test_resolver_recovers_confirmed_calls_from_run_together_decodes() -> None:
 
     assert resolver.resolve("W3UWUW3UW calling") == "W3UW calling"
     assert resolver.resolve("MN5AQMM in Chandler") == "N5AQM in Chandler"
+
+
+def test_confirmed_prefix_does_not_consume_a_longer_complete_callsign() -> None:
+    resolver = CallsignResolver(("KM7GH",))
+
+    assert resolver.resolve("Kilo Mike Seven Golf Hotel Sierra") == "KM7GHS"
+    assert resolver.resolve("KM7GHS checking in") == "KM7GHS checking in"

@@ -104,3 +104,22 @@ def test_confidence_increases_with_independent_evidence_and_qrz() -> None:
     assert single < repeated < independent < qrz_confirmed
     assert callsign_confidence_label(single) == "Tentative"
     assert callsign_confidence_label(qrz_confirmed) == "High confidence"
+
+
+def test_later_confirmed_extension_supersedes_valid_qrz_prefix(monkeypatch) -> None:
+    job = SimpleNamespace(id="job-1", source_path="100000/2026083012304500-call.wav")
+    result = SimpleNamespace(
+        display_text="KM7GH corrected later to KM7GHS",
+        callsign_mentions=[
+            TranscriptCallsignMention("KM7GH", 2.0, 3.0, confidence=0.91),
+            TranscriptCallsignMention("KM7GHS", 8.0, 9.0, confidence=0.82),
+        ],
+    )
+    runtime = SimpleNamespace(live_results={}, results={job.id: result}, jobs=lambda: [job])
+    monkeypatch.setattr("asl_transcriber.main.current_runtime", lambda: runtime)
+    monkeypatch.setattr("asl_transcriber.main.current_qrz_client", lambda: FakeQrzClient())
+
+    response = last_heard_callsigns()
+
+    assert response["superseded"] == 1
+    assert [item["callsign"] for item in response["items"]] == ["KM7GHS"]

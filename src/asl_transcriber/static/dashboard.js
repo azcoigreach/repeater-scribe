@@ -132,7 +132,7 @@ async function loadCallsigns() {
   const data = await response.json();
   document.querySelector('#callsigns-count').textContent = data.total;
   source.textContent = data.configured
-    ? `Location and primary photos supplied by QRZ.com.${data.rejected ? ` ${data.rejected} unconfirmed transcript fragment${data.rejected === 1 ? '' : 's'} hidden.` : ''}`
+    ? `Location and primary photos supplied by QRZ.com.${data.rejected ? ` ${data.rejected} unconfirmed transcript fragment${data.rejected === 1 ? '' : 's'} hidden.` : ''}${data.superseded ? ` ${data.superseded} partial callsign${data.superseded === 1 ? '' : 's'} superseded by later audio.` : ''}`
     : 'Add ASLT_QRZ_USERNAME and ASLT_QRZ_PASSWORD to enable QRZ.com details.';
   if (!data.items.length) {
     callsignCards.innerHTML = '<div class="empty">No callsigns have been heard in transcripts yet.</div>';

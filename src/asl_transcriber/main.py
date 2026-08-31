@@ -1183,6 +1183,38 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
             }
         )
 
+    possible_extensions: dict[str, list[str]] = {}
+    for shorter, item in heard.items():
+        extensions = [
+            longer
+            for longer in heard
+            if longer != shorter
+            and longer.startswith(shorter)
+            and len(longer) - len(shorter) <= 2
+            and recording_sources[shorter] & recording_sources[longer]
+        ]
+        if not extensions:
+            continue
+        possible_extensions[shorter] = sorted(extensions, key=len, reverse=True)
+        raw_confidence = item["confidence"]
+        raw_evidence = item["evidence"]
+        assert isinstance(raw_confidence, (float, int))
+        assert isinstance(raw_evidence, list)
+        partial_score = min(float(raw_confidence), 0.59)
+        item.update(
+            {
+                "confidence": round(partial_score, 3),
+                "confidence_percent": round(partial_score * 100),
+                "confidence_label": "Possible partial",
+                "needs_review": True,
+                "possible_extension": possible_extensions[shorter][0],
+                "evidence": [
+                    f"Later audio may extend this to {possible_extensions[shorter][0]}",
+                    *raw_evidence,
+                ][:6],
+            }
+        )
+
     result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
     sorted_heard = sorted(
         heard.values(),
@@ -1200,9 +1232,19 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
     items: list[dict[str, object]] = []
     rejected = 0
     lookup_error: str | None = None
-    for item in sorted_heard[:100]:
-        if len(items) >= result_limit:
-            break
+    selected_callsigns = {
+        str(item["callsign"]) for item in sorted_heard[:result_limit]
+    }
+    selected_callsigns.update(
+        extension
+        for callsign in tuple(selected_callsigns)
+        for extension in possible_extensions.get(callsign, [])
+    )
+    for item in (
+        candidate
+        for candidate in sorted_heard[:100]
+        if str(candidate["callsign"]) in selected_callsigns
+    ):
         if lookup_error is not None:
             item.pop("_best_observation", None)
             items.append({**item, "status": "error", "error": lookup_error})
@@ -1226,6 +1268,8 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
                 recording_value,
                 qrz_confirmed=True,
             )
+            if item.get("needs_review") is True:
+                score = min(score, 0.59)
             evidence = [str(value) for value in raw_evidence]
             evidence.insert(0, "QRZ confirms this callsign exists")
             items.append(
@@ -1243,10 +1287,34 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
             lookup_error = str(error)
             item.pop("_best_observation", None)
             items.append({**item, "status": "error", "error": lookup_error})
+    confirmed_callsigns = {
+        str(item["callsign"]) for item in items if item.get("status") == "found"
+    }
+    superseded = sum(
+        1
+        for item in items
+        if item.get("status") == "found"
+        and any(
+            extension in confirmed_callsigns
+            for extension in possible_extensions.get(str(item["callsign"]), [])
+        )
+    )
+    items = [
+        item
+        for item in items
+        if not (
+            item.get("status") == "found"
+            and any(
+                extension in confirmed_callsigns
+                for extension in possible_extensions.get(str(item["callsign"]), [])
+            )
+        )
+    ][:result_limit]
     return {
         "configured": True,
         "total": len(items),
         "rejected": rejected,
+        "superseded": superseded,
         "items": items,
     }
 

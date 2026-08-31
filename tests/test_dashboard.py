@@ -67,6 +67,7 @@ def test_dashboard_has_dockable_last_heard_callsign_window() -> None:
     assert 'class="transcript-callsign"' in script
     assert "confirmedCallsigns" in script
     assert "unconfirmed transcript fragment" in script
+    assert "superseded by later audio" in script
     assert 'class="callsign-confidence"' in script
     assert 'class="confidence-meter"' in script
     assert "Why this score" in script

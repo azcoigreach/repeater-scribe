@@ -16,6 +16,9 @@ All notable changes to this project will be documented in this file.
 
 - Expanded callsign scoring evidence now remains open while live and scheduled
   dashboard refreshes rebuild the callsign cards.
+- A QRZ-valid callsign prefix no longer prevents later phonetics from extending
+  it; confirmed longer observations supersede partial callsign cards instead of
+  allowing QRZ validity to lock in the incomplete result.
 - Last-heard callsigns now use each callsign's final Whisper segment timestamp,
   so multiple callsigns in one recording are ordered by when they were actually
   heard instead of all inheriting the recording start time.
