@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -1039,30 +1039,67 @@ def audio(path: str) -> FileResponse:
 @app.get("/api/v1/callsigns/last-heard")
 def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
     active_runtime = current_runtime()
-    heard: dict[str, dict[str, str | None]] = {}
-    sources: list[tuple[str, str]] = []
+    heard: dict[str, dict[str, object]] = {}
+    heard_times: dict[str, datetime | None] = {}
+    sources: list[tuple[str, object]] = []
     sources.extend(
-        (source_path, result.display_text)
+        (source_path, result)
         for source_path, result in active_runtime.live_results.items()
     )
     sources.extend(
-        (job.source_path, active_runtime.results[job.id].display_text)
+        (job.source_path, active_runtime.results[job.id])
         for job in active_runtime.jobs()
         if job.id in active_runtime.results
     )
-    for source_path, text in sorted(
-        sources, key=lambda item: recording_timestamp(item[0]) or item[0], reverse=True
-    ):
-        for callsign in extract_callsigns(text):
-            if callsign not in heard:
-                heard[callsign] = {
-                    "callsign": callsign,
-                    "last_heard_at": recording_timestamp(source_path),
-                    "source_path": source_path,
-                }
+
+    for source_path, result in sources:
+        started_at_value = recording_timestamp(source_path)
+        started_at = datetime.fromisoformat(started_at_value) if started_at_value else None
+        mentions = getattr(result, "callsign_mentions", None) or []
+        candidates: list[tuple[str, datetime | None, float | None, str]] = []
+        if mentions:
+            candidates.extend(
+                (
+                    mention.callsign,
+                    started_at + timedelta(seconds=max(0.0, mention.end))
+                    if started_at
+                    else None,
+                    max(0.0, mention.end),
+                    "segment",
+                )
+                for mention in mentions
+            )
+        else:
+            candidates.extend(
+                (callsign, started_at, None, "recording")
+                for callsign in extract_callsigns(str(getattr(result, "display_text", "")))
+            )
+
+        for callsign, last_heard_at, offset, precision in candidates:
+            current_time = heard_times.get(callsign)
+            if callsign in heard and (
+                current_time is not None
+                and (last_heard_at is None or current_time >= last_heard_at)
+            ):
+                continue
+            item: dict[str, object] = {
+                "callsign": callsign,
+                "last_heard_at": last_heard_at.isoformat() if last_heard_at else None,
+                "source_path": source_path,
+            }
+            if offset is not None:
+                item["heard_offset_seconds"] = offset
+                item["time_precision"] = precision
+            heard[callsign] = item
+            heard_times[callsign] = last_heard_at
 
     result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
-    recent = list(heard.values())[:result_limit]
+    recent = sorted(
+        heard.values(),
+        key=lambda item: heard_times[str(item["callsign"])]
+        or datetime.min.replace(tzinfo=UTC),
+        reverse=True,
+    )[:result_limit]
     client = current_qrz_client()
     if client is None:
         return {"configured": False, "total": len(heard), "items": recent}

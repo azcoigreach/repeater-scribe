@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Last-heard callsigns now use each callsign's final Whisper segment timestamp,
+  so multiple callsigns in one recording are ordered by when they were actually
+  heard instead of all inheriting the recording start time.
+
 ## [0.6.0] - 2026-08-30
 
 ### Added

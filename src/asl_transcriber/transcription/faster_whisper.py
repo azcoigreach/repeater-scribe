@@ -6,8 +6,16 @@ from threading import Lock
 from time import perf_counter
 from typing import Any
 
-from asl_transcriber.transcription.base import TranscriptResult, TranscriptSegment
-from asl_transcriber.transcription.callsigns import CallsignResolver, callsign_hotwords
+from asl_transcriber.transcription.base import (
+    TranscriptCallsignMention,
+    TranscriptResult,
+    TranscriptSegment,
+)
+from asl_transcriber.transcription.callsigns import (
+    CallsignResolver,
+    callsign_hotwords,
+    extract_callsigns,
+)
 
 WhisperModel: Any | None = None
 try:
@@ -126,6 +134,13 @@ class FasterWhisperEngine:
         transcript_text = " ".join(segment.text for segment in segments).strip()
         resolution = resolver.resolve_detailed(transcript_text) if resolver else None
         display_text = resolution.text if resolution else transcript_text
+        callsign_mentions = [
+            TranscriptCallsignMention(callsign=callsign, start=segment.start, end=segment.end)
+            for segment in segments
+            for callsign in extract_callsigns(
+                resolver.resolve(segment.text) if resolver else segment.text
+            )
+        ]
         duration = perf_counter() - start
 
         def info_value(key: str) -> Any:
@@ -140,6 +155,7 @@ class FasterWhisperEngine:
             language_probability=info_value("language_probability"),
             confidence=None,
             segments=segments,
+            callsign_mentions=callsign_mentions,
             engine_name="faster-whisper",
             engine_version=getattr(WhisperModel, "__version__", "unknown"),
             model_name=self.model_size,

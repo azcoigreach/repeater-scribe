@@ -5,6 +5,7 @@ from pathlib import Path
 
 from asl_transcriber.audio.probe import AudioProbeResult, probe_audio
 from asl_transcriber.transcription.base import (
+    TranscriptCallsignMention,
     TranscriptionEngine,
     TranscriptResult,
     TranscriptSegment,
@@ -187,4 +188,7 @@ def test_faster_whisper_uses_dynamic_callsigns_for_prompt_and_correction(
             "confidence": "medium",
             "reason": "local candidate weighted distance 1.40",
         }
+    ]
+    assert result.callsign_mentions == [
+        TranscriptCallsignMention(callsign="KM7GHS", start=0.0, end=1.0)
     ]
