@@ -4,28 +4,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
-
-- Callsign cards now show an estimated confidence percentage, confidence band,
-  acoustic quality, observation and recording counts, and expandable scoring
-  evidence.
-- Callsign confidence now improves as independent evidence accumulates from
-  clearer audio, repeated hearings, additional recordings, and QRZ validation.
-
-### Fixed
-
-- Expanded callsign scoring evidence now remains open while live and scheduled
-  dashboard refreshes rebuild the callsign cards.
-- A QRZ-valid callsign prefix no longer prevents later phonetics from extending
-  it; confirmed longer observations supersede partial callsign cards instead of
-  allowing QRZ validity to lock in the incomplete result.
-- Last-heard callsigns now use each callsign's final Whisper segment timestamp,
-  so multiple callsigns in one recording are ordered by when they were actually
-  heard instead of all inheriting the recording start time.
-- QRZ-rejected transcript fragments are no longer presented as callsigns, and
-  confirmed callsigns can be recovered from duplicated or run-together live
-  decoder output on later passes.
-
 ## [0.6.0] - 2026-08-30
 
 ### Added

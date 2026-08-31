@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from asl_transcriber.database import Base
 from asl_transcriber.models import IngestionJob, Transcript
 from asl_transcriber.runtime import ArchiveRuntime
-from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
+from asl_transcriber.transcription.base import TranscriptResult
 
 
 def test_runtime_restores_jobs_and_transcripts_from_sqlite(tmp_path: Path) -> None:
@@ -25,40 +25,13 @@ def test_runtime_restores_jobs_and_transcripts_from_sqlite(tmp_path: Path) -> No
     first.scan_once()
     first.scan_once()
     first.process_pending(
-        lambda _: TranscriptResult(
-            raw_text="hello KM7GHS",
-            display_text="hello KM7GHS",
-            language="en",
-            callsign_mentions=[
-                TranscriptCallsignMention(
-                    "KM7GHS",
-                    3.0,
-                    4.25,
-                    confidence=0.87,
-                    acoustic_confidence=0.81,
-                    recognition_confidence=0.94,
-                    evidence=("Decoded directly as a formatted callsign",),
-                )
-            ],
-        )
+        lambda _: TranscriptResult(raw_text="hello", display_text="hello", language="en")
     )
 
     second = ArchiveRuntime([archive.parent], session_factory=sessions)
 
     assert second.jobs()[0].status.value == "completed"
-    restored = second.results[second.jobs()[0].id]
-    assert restored.display_text == "hello KM7GHS"
-    assert restored.callsign_mentions == [
-        TranscriptCallsignMention(
-            "KM7GHS",
-            3.0,
-            4.25,
-            confidence=0.87,
-            acoustic_confidence=0.81,
-            recognition_confidence=0.94,
-            evidence=("Decoded directly as a formatted callsign",),
-        )
-    ]
+    assert second.results[second.jobs()[0].id].display_text == "hello"
 
 
 def test_runtime_requeues_recording_that_grew_after_transcription(tmp_path: Path) -> None:

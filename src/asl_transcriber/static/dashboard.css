@@ -206,7 +206,7 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 
 /* Last heard callsigns */
 .callsigns-source { margin: 0 0 12px; color: var(--muted); font-size: 11px; line-height: 1.45; }
-.callsign-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.callsign-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .callsign-card { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
 .callsign-photo { display: grid; place-items: center; width: 78px; height: 78px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--mint); color: var(--green); font-weight: 700; }
 .callsign-photo img { width: 100%; height: 100%; object-fit: cover; }
@@ -216,15 +216,6 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .callsign-details h3 a:hover { text-decoration: underline; }
 .callsign-details p { margin: 3px 0; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .callsign-details .callsign-name { color: var(--ink); }
-.callsign-confidence { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 9px; color: var(--green); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-.callsign-confidence strong { font-size: 15px; }
-.confidence-meter { height: 5px; margin-top: 4px; overflow: hidden; border-radius: 999px; background: var(--mint); }
-.confidence-meter span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
-.callsign-details .confidence-observations { margin-top: 5px; font-size: 9px; }
-.confidence-evidence { margin-top: 7px; color: var(--muted); font-size: 9px; }
-.confidence-evidence summary { color: var(--green); cursor: pointer; }
-.confidence-evidence ul { margin: 5px 0 0; padding-left: 16px; }
-.confidence-evidence li { margin: 3px 0; line-height: 1.35; }
 .callsign-details time { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; line-height: 1.35; }
 .callsign-evidence { margin-top: 8px; border: 0; border-bottom: 1px dashed var(--green); padding: 0; background: transparent; color: var(--green); cursor: pointer; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
 .linked-highlight { animation: linked-highlight 2.2s ease-out; }
