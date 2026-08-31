@@ -4,13 +4,12 @@ import logging
 import subprocess
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from asl_transcriber.audio.probe import probe_audio
 from asl_transcriber.runtime import ArchiveRuntime
-from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
+from asl_transcriber.transcription.base import TranscriptResult
 
 logger = logging.getLogger(__name__)
 
@@ -126,16 +125,12 @@ class LiveTranscriptionService:
     min_file_bytes: int = 4096
     _last_sizes: dict[str, int] = field(default_factory=dict, init=False)
     _texts: dict[str, str] = field(default_factory=dict, init=False)
-    _mentions: dict[str, dict[str, TranscriptCallsignMention]] = field(
-        default_factory=dict, init=False
-    )
 
     def process_once(self, runtime: ArchiveRuntime) -> int:
         waiting = set(runtime.waiting_sources())
         for stale in set(self._last_sizes) - waiting:
             self._last_sizes.pop(stale, None)
             self._texts.pop(stale, None)
-            self._mentions.pop(stale, None)
             runtime.clear_live_result(stale)
 
         processed = 0
@@ -161,23 +156,6 @@ class LiveTranscriptionService:
 
             merged = merge_overlapping_text(self._texts.get(source_path, ""), result.display_text)
             self._texts[source_path] = merged
-            try:
-                source_duration = probe_audio(source).duration_seconds
-                window_seconds = float(getattr(self.snapshotter, "window_seconds", 12.0))
-                window_offset = max(0.0, source_duration - window_seconds)
-            except (OSError, RuntimeError, ValueError):
-                window_offset = 0.0
-            source_mentions = self._mentions.setdefault(source_path, {})
-            for mention in result.callsign_mentions:
-                absolute_mention = replace(
-                    mention,
-                    start=window_offset + mention.start,
-                    end=window_offset + mention.end,
-                )
-                previous = source_mentions.get(mention.callsign)
-                if previous is None or absolute_mention.end > previous.end:
-                    source_mentions[mention.callsign] = absolute_mention
-            result.callsign_mentions = list(source_mentions.values())
             runtime.set_live_result(source_path, result, display_text=merged)
             processed += 1
         return processed
