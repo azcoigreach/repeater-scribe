@@ -70,6 +70,8 @@ def test_dashboard_has_dockable_last_heard_callsign_window() -> None:
     assert 'class="callsign-confidence"' in script
     assert 'class="confidence-meter"' in script
     assert "Why this score" in script
+    assert "expandedEvidence" in script
+    assert ".confidence-evidence[open]" in script
     assert "Show transcript" in script
     assert "revealCallsign" in script
     assert "revealTranscript" in script

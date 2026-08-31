@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Expanded callsign scoring evidence now remains open while live and scheduled
+  dashboard refreshes rebuild the callsign cards.
 - Last-heard callsigns now use each callsign's final Whisper segment timestamp,
   so multiple callsigns in one recording are ordered by when they were actually
   heard instead of all inheriting the recording start time.
