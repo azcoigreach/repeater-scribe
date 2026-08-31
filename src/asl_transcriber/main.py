@@ -41,6 +41,7 @@ from asl_transcriber.topology import (
     ensure_topology_crawl,
     serialize_topology,
 )
+from asl_transcriber.transcription.base import TranscriptCallsignMention
 from asl_transcriber.transcription.callsigns import (
     CallsignResolver,
     extract_callsigns,
@@ -119,6 +120,33 @@ def recording_timestamp(source_path: str) -> str | None:
         tzinfo=UTC, microsecond=int(match.group(2)) * 10000
     )
     return timestamp.isoformat()
+
+
+def callsign_confidence_score(
+    best_observation: float,
+    observation_count: int,
+    recording_count: int,
+    *,
+    qrz_confirmed: bool = False,
+) -> float:
+    """Combine independent evidence into an explainable, bounded estimate."""
+    score = max(0.05, min(0.98, best_observation))
+    score = 1.0 - (
+        (1.0 - score)
+        * (0.9 ** min(max(0, observation_count - 1), 5))
+        * (0.8 ** min(max(0, recording_count - 1), 3))
+    )
+    if qrz_confirmed:
+        score = 1.0 - ((1.0 - score) * 0.65)
+    return min(0.99, score)
+
+
+def callsign_confidence_label(score: float) -> str:
+    if score >= 0.88:
+        return "High confidence"
+    if score >= 0.75:
+        return "Probable"
+    return "Tentative"
 
 
 def current_qrz_client() -> QrzClient | None:
@@ -1041,6 +1069,8 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
     active_runtime = current_runtime()
     heard: dict[str, dict[str, object]] = {}
     heard_times: dict[str, datetime | None] = {}
+    observations: dict[str, list[TranscriptCallsignMention | None]] = {}
+    recording_sources: dict[str, set[str]] = {}
     sources: list[tuple[str, object]] = []
     sources.extend(
         (source_path, result)
@@ -1056,7 +1086,15 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
         started_at_value = recording_timestamp(source_path)
         started_at = datetime.fromisoformat(started_at_value) if started_at_value else None
         mentions = getattr(result, "callsign_mentions", None) or []
-        candidates: list[tuple[str, datetime | None, float | None, str]] = []
+        candidates: list[
+            tuple[
+                str,
+                datetime | None,
+                float | None,
+                str,
+                TranscriptCallsignMention | None,
+            ]
+        ] = []
         if mentions:
             candidates.extend(
                 (
@@ -1066,16 +1104,19 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
                     else None,
                     max(0.0, mention.end),
                     "segment",
+                    mention,
                 )
                 for mention in mentions
             )
         else:
             candidates.extend(
-                (callsign, started_at, None, "recording")
+                (callsign, started_at, None, "recording", None)
                 for callsign in extract_callsigns(str(getattr(result, "display_text", "")))
             )
 
-        for callsign, last_heard_at, offset, precision in candidates:
+        for callsign, last_heard_at, offset, precision, mention in candidates:
+            observations.setdefault(callsign, []).append(mention)
+            recording_sources.setdefault(callsign, set()).add(source_path)
             current_time = heard_times.get(callsign)
             if callsign in heard and (
                 current_time is not None
@@ -1093,6 +1134,55 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
             heard[callsign] = item
             heard_times[callsign] = last_heard_at
 
+    for callsign, item in heard.items():
+        mentions = observations[callsign]
+        timed_mentions = [mention for mention in mentions if mention is not None]
+        best_observation = max(
+            (mention.confidence for mention in timed_mentions), default=0.45
+        )
+        observation_count = len(mentions)
+        recording_count = len(recording_sources[callsign])
+        score = callsign_confidence_score(
+            best_observation,
+            observation_count,
+            recording_count,
+        )
+        evidence = list(
+            dict.fromkeys(
+                detail
+                for mention in sorted(
+                    timed_mentions, key=lambda value: value.confidence, reverse=True
+                )
+                for detail in mention.evidence
+            )
+        )
+        if observation_count > 1:
+            evidence.append(
+                f"Heard {observation_count} times across {recording_count} recording"
+                f"{'s' if recording_count != 1 else ''}"
+            )
+        if not timed_mentions:
+            evidence.append("Older transcript without saved acoustic evidence")
+        acoustic_values = [
+            mention.acoustic_confidence
+            for mention in timed_mentions
+            if mention.acoustic_confidence is not None
+        ]
+        item.update(
+            {
+                "confidence": round(score, 3),
+                "confidence_percent": round(score * 100),
+                "confidence_label": callsign_confidence_label(score),
+                "observation_count": observation_count,
+                "recording_count": recording_count,
+                "acoustic_quality_percent": (
+                    round(max(acoustic_values) * 100) if acoustic_values else None
+                ),
+                "evidence": evidence[:6],
+                "_best_observation": best_observation,
+            }
+        )
+
     result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
     sorted_heard = sorted(
         heard.values(),
@@ -1103,6 +1193,8 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
     client = current_qrz_client()
     if client is None:
         recent = sorted_heard[:result_limit]
+        for item in recent:
+            item.pop("_best_observation", None)
         return {"configured": False, "total": len(heard), "items": recent}
 
     items: list[dict[str, object]] = []
@@ -1112,6 +1204,7 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
         if len(items) >= result_limit:
             break
         if lookup_error is not None:
+            item.pop("_best_observation", None)
             items.append({**item, "status": "error", "error": lookup_error})
             continue
         try:
@@ -1119,10 +1212,36 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
             if details["status"] == "not_found":
                 rejected += 1
                 continue
-            items.append({**item, **details})
+            best_value = item.pop("_best_observation")
+            observation_value = item["observation_count"]
+            recording_value = item["recording_count"]
+            raw_evidence = item["evidence"]
+            assert isinstance(best_value, (float, int))
+            assert isinstance(observation_value, int)
+            assert isinstance(recording_value, int)
+            assert isinstance(raw_evidence, list)
+            score = callsign_confidence_score(
+                float(best_value),
+                observation_value,
+                recording_value,
+                qrz_confirmed=True,
+            )
+            evidence = [str(value) for value in raw_evidence]
+            evidence.insert(0, "QRZ confirms this callsign exists")
+            items.append(
+                {
+                    **item,
+                    **details,
+                    "confidence": round(score, 3),
+                    "confidence_percent": round(score * 100),
+                    "confidence_label": callsign_confidence_label(score),
+                    "evidence": evidence[:6],
+                }
+            )
         except QrzError as error:
             logger.warning("QRZ lookup failed for %s: %s", item["callsign"], error)
             lookup_error = str(error)
+            item.pop("_best_observation", None)
             items.append({**item, "status": "error", "error": lookup_error})
     return {
         "configured": True,

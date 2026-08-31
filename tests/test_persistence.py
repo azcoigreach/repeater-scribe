@@ -29,7 +29,17 @@ def test_runtime_restores_jobs_and_transcripts_from_sqlite(tmp_path: Path) -> No
             raw_text="hello KM7GHS",
             display_text="hello KM7GHS",
             language="en",
-            callsign_mentions=[TranscriptCallsignMention("KM7GHS", 3.0, 4.25)],
+            callsign_mentions=[
+                TranscriptCallsignMention(
+                    "KM7GHS",
+                    3.0,
+                    4.25,
+                    confidence=0.87,
+                    acoustic_confidence=0.81,
+                    recognition_confidence=0.94,
+                    evidence=("Decoded directly as a formatted callsign",),
+                )
+            ],
         )
     )
 
@@ -39,7 +49,15 @@ def test_runtime_restores_jobs_and_transcripts_from_sqlite(tmp_path: Path) -> No
     restored = second.results[second.jobs()[0].id]
     assert restored.display_text == "hello KM7GHS"
     assert restored.callsign_mentions == [
-        TranscriptCallsignMention("KM7GHS", 3.0, 4.25)
+        TranscriptCallsignMention(
+            "KM7GHS",
+            3.0,
+            4.25,
+            confidence=0.87,
+            acoustic_confidence=0.81,
+            recognition_confidence=0.94,
+            evidence=("Decoded directly as a formatted callsign",),
+        )
     ]
 
 

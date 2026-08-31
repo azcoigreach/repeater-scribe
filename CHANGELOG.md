@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Callsign cards now show an estimated confidence percentage, confidence band,
+  acoustic quality, observation and recording counts, and expandable scoring
+  evidence.
+- Callsign confidence now improves as independent evidence accumulates from
+  clearer audio, repeated hearings, additional recordings, and QRZ validation.
+
 ### Fixed
 
 - Last-heard callsigns now use each callsign's final Whisper segment timestamp,

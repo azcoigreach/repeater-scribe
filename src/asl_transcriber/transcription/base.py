@@ -18,6 +18,10 @@ class TranscriptCallsignMention:
     callsign: str
     start: float
     end: float
+    confidence: float = 0.5
+    acoustic_confidence: float | None = None
+    recognition_confidence: float = 0.5
+    evidence: tuple[str, ...] = ()
 
 
 @dataclass

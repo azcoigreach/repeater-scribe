@@ -144,7 +144,12 @@ async function loadCallsigns() {
       ? `<a href="${esc(item.profile_url)}" target="_blank" rel="noopener noreferrer">${esc(item.callsign)}</a>`
       : esc(item.callsign);
     const detail = item.status === 'not_found' ? 'Not found on QRZ.com' : item.status === 'error' ? 'QRZ lookup unavailable' : (item.location || 'Location not listed');
-    return `<article class="callsign-card" data-callsign="${esc(item.callsign)}"><div class="callsign-photo">${photo}</div><div class="callsign-details"><h3>${call}</h3>${item.name ? `<p class="callsign-name">${esc(item.name)}</p>` : ''}<p>${esc(detail)}</p><time>Last heard ${esc(heard)}</time>${item.source_path ? `<button class="callsign-evidence" type="button" data-source-path="${esc(item.source_path)}">Show transcript</button>` : ''}</div></article>`;
+    const confidence = Math.max(0, Math.min(100, Number(item.confidence_percent ?? 0)));
+    const observations = `${item.observation_count ?? 1} observation${item.observation_count === 1 ? '' : 's'} across ${item.recording_count ?? 1} recording${item.recording_count === 1 ? '' : 's'}`;
+    const evidence = Array.isArray(item.evidence) && item.evidence.length
+      ? `<details class="confidence-evidence"><summary>Why this score</summary><ul>${item.evidence.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>`
+      : '';
+    return `<article class="callsign-card" data-callsign="${esc(item.callsign)}"><div class="callsign-photo">${photo}</div><div class="callsign-details"><h3>${call}</h3>${item.name ? `<p class="callsign-name">${esc(item.name)}</p>` : ''}<p>${esc(detail)}</p><div class="callsign-confidence"><span>${esc(item.confidence_label || 'Tentative')}</span><strong>${esc(confidence)}%</strong></div><div class="confidence-meter" role="meter" aria-label="Estimated callsign confidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${esc(confidence)}"><span style="width:${esc(confidence)}%"></span></div><p class="confidence-observations">${esc(observations)}${item.acoustic_quality_percent !== null && item.acoustic_quality_percent !== undefined ? ` · Best audio ${esc(item.acoustic_quality_percent)}%` : ''}</p>${evidence}<time>Last heard ${esc(heard)}</time>${item.source_path ? `<button class="callsign-evidence" type="button" data-source-path="${esc(item.source_path)}">Show transcript</button>` : ''}</div></article>`;
   }).join('');
   callsignCards.querySelectorAll('img').forEach(image => image.addEventListener('error', () => {
     image.replaceWith(Object.assign(document.createElement('span'), { textContent: image.alt.split(' ').at(-1).slice(0, 2) }));

@@ -4,7 +4,7 @@ import logging
 import subprocess
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -169,8 +169,8 @@ class LiveTranscriptionService:
                 window_offset = 0.0
             source_mentions = self._mentions.setdefault(source_path, {})
             for mention in result.callsign_mentions:
-                absolute_mention = TranscriptCallsignMention(
-                    callsign=mention.callsign,
+                absolute_mention = replace(
+                    mention,
                     start=window_offset + mention.start,
                     end=window_offset + mention.end,
                 )

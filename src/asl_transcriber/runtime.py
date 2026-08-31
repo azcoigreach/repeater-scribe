@@ -290,6 +290,10 @@ class ArchiveRuntime:
                         "callsign": mention.callsign,
                         "start": mention.start,
                         "end": mention.end,
+                        "confidence": mention.confidence,
+                        "acoustic_confidence": mention.acoustic_confidence,
+                        "recognition_confidence": mention.recognition_confidence,
+                        "evidence": list(mention.evidence),
                     }
                     for mention in (result.callsign_mentions or [])
                 ]
@@ -305,6 +309,16 @@ class ArchiveRuntime:
                     callsign=str(item["callsign"]),
                     start=float(item["start"]),
                     end=float(item["end"]),
+                    confidence=float(item.get("confidence", 0.5)),
+                    acoustic_confidence=(
+                        float(item["acoustic_confidence"])
+                        if item.get("acoustic_confidence") is not None
+                        else None
+                    ),
+                    recognition_confidence=float(
+                        item.get("recognition_confidence", 0.5)
+                    ),
+                    evidence=tuple(str(value) for value in item.get("evidence", [])),
                 )
                 for item in items
             ]

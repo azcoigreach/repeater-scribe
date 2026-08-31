@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import Lock
 from time import perf_counter
 from typing import Any
@@ -14,7 +16,7 @@ from asl_transcriber.transcription.base import (
 from asl_transcriber.transcription.callsigns import (
     CallsignResolver,
     callsign_hotwords,
-    extract_callsigns,
+    find_callsigns,
 )
 
 WhisperModel: Any | None = None
@@ -134,12 +136,71 @@ class FasterWhisperEngine:
         transcript_text = " ".join(segment.text for segment in segments).strip()
         resolution = resolver.resolve_detailed(transcript_text) if resolver else None
         display_text = resolution.text if resolution else transcript_text
-        callsign_mentions = [
-            TranscriptCallsignMention(callsign=callsign, start=segment.start, end=segment.end)
-            for segment in segments
-            for callsign in extract_callsigns(
-                resolver.resolve(segment.text) if resolver else segment.text
+        callsign_mentions: list[TranscriptCallsignMention] = []
+        for segment in segments:
+            segment_resolution = resolver.resolve_detailed(segment.text) if resolver else None
+            resolved_segment = segment_resolution.text if segment_resolution else segment.text
+            raw_callsigns = find_callsigns(segment.text)
+            acoustic_confidence = (
+                max(0.05, min(0.98, math.exp(segment.confidence)))
+                if segment.confidence is not None
+                else 0.65
             )
+            for callsign in find_callsigns(resolved_segment):
+                corrections = [
+                    correction
+                    for correction in (segment_resolution.corrections if segment_resolution else ())
+                    if correction.corrected == callsign
+                ]
+                evidence: list[str] = []
+                if corrections:
+                    correction = corrections[-1]
+                    recognition_confidence = (
+                        0.84 if correction.confidence == "high" else 0.7
+                    )
+                    evidence.append(f'Recovered from "{correction.original}"')
+                    evidence.append(correction.reason)
+                elif callsign in raw_callsigns:
+                    recognition_confidence = 0.92
+                    evidence.append("Decoded directly as a formatted callsign")
+                else:
+                    recognition_confidence = 0.78
+                    evidence.append("Recovered by callsign grammar")
+                if resolver and callsign in resolver.known_callsigns:
+                    recognition_confidence = min(0.96, recognition_confidence + 0.04)
+                    evidence.append("Matched previously known callsign")
+                confidence = (acoustic_confidence * 0.55) + (
+                    recognition_confidence * 0.45
+                )
+                callsign_mentions.append(
+                    TranscriptCallsignMention(
+                        callsign=callsign,
+                        start=segment.start,
+                        end=segment.end,
+                        confidence=confidence,
+                        acoustic_confidence=acoustic_confidence,
+                        recognition_confidence=recognition_confidence,
+                        evidence=tuple(evidence),
+                    )
+                )
+
+        mention_counts = Counter(mention.callsign for mention in callsign_mentions)
+        callsign_mentions = [
+            replace(
+                mention,
+                confidence=min(
+                    0.98,
+                    mention.confidence
+                    + min(0.1, max(0, mention_counts[mention.callsign] - 1) * 0.035),
+                ),
+                evidence=mention.evidence
+                + (
+                    (f"Repeated {mention_counts[mention.callsign]} times in this recording",)
+                    if mention_counts[mention.callsign] > 1
+                    else ()
+                ),
+            )
+            for mention in callsign_mentions
         ]
         duration = perf_counter() - start
 

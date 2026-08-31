@@ -4,6 +4,7 @@ from asl_transcriber.transcription.callsigns import (
     CallsignResolver,
     callsign_hotwords,
     extract_callsigns,
+    find_callsigns,
     normalize_callsigns,
 )
 
@@ -28,6 +29,11 @@ def test_hotwords_include_written_and_spoken_callsign() -> None:
 
 def test_extract_callsigns_preserves_first_mention_order_and_removes_duplicates() -> None:
     assert extract_callsigns("K7ABC called km7ghs, then K7ABC again.") == ("K7ABC", "KM7GHS")
+    assert find_callsigns("K7ABC called KM7GHS, then K7ABC again.") == (
+        "K7ABC",
+        "KM7GHS",
+        "K7ABC",
+    )
 
 
 def test_international_and_portable_callsigns_are_normalized_and_extracted() -> None:

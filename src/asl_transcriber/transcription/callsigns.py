@@ -144,7 +144,17 @@ def _is_callsign(candidate: str) -> bool:
 
 def extract_callsigns(text: str) -> tuple[str, ...]:
     """Return unique, normalized callsigns already present in transcript text."""
-    return normalize_callsigns([match.group(1) for match in _CALLSIGN_IN_TEXT.finditer(text)])
+    return normalize_callsigns(find_callsigns(text))
+
+
+def find_callsigns(text: str) -> tuple[str, ...]:
+    """Return normalized callsign occurrences, retaining repetitions as evidence."""
+    callsigns: list[str] = []
+    for match in _CALLSIGN_IN_TEXT.finditer(text):
+        normalized = normalize_callsigns((match.group(1),))
+        if normalized:
+            callsigns.append(normalized[0])
+    return tuple(callsigns)
 
 
 def callsign_hotwords(callsigns: list[str] | tuple[str, ...], extra: str | None = None) -> str:
