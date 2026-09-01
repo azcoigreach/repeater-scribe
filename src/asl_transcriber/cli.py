@@ -118,7 +118,7 @@ def main() -> None:
         from asl_transcriber.auth import revoke_api_token
 
         revoked = revoke_api_token(args.name.strip())
-        print(json.dumps({"revoked": revoked}))
+        print("token revoked" if revoked else "token not found")
         return
 
     if args.command == "backup-db":
