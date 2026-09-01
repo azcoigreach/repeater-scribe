@@ -236,16 +236,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             use_hotwords=False,
         ),
         min_file_bytes=settings.live_min_file_bytes,
-        max_files_per_cycle=settings.live_max_files_per_cycle,
     )
 
     async def poll_archive() -> None:
         while True:
             active_runtime = current_runtime()
             await asyncio.to_thread(active_runtime.scan_once)
-            # Growing recordings are handled by the live service. Keep the GPU
-            # available for them and finalize completed files during quiet gaps.
-            if settings.auto_process and not active_runtime.waiting_sources():
+            if settings.auto_process:
                 try:
                     await asyncio.to_thread(
                         active_runtime.process_pending,

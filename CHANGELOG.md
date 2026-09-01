@@ -39,6 +39,10 @@ All notable changes to this project will be documented in this file.
 - Kept archive discovery and token verification off the event loop.
 - Prioritized the newest growing recording and limited background final passes so
   live transcription can keep pace under sustained traffic.
+- Restored overlapping live and final transcription scheduling instead of
+  withholding final passes until every growing recording had stopped.
+- Exempted authenticated dashboard reads from generic HTTP throttling, separated
+  OIDC login limits from anonymous API traffic, and raised the multi-tab SSE ceiling.
 
 ## [0.6.0] - 2026-08-30
 

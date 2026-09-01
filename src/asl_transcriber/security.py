@@ -141,19 +141,31 @@ class SecurityMiddleware:
             else authenticate_request(request)
         )
         identity = principal.subject if principal is not None else self._client_ip(scope)
-        if path.startswith(
+        safe_method = request.method in {"GET", "HEAD", "OPTIONS"}
+        limit: int | None = None
+        bucket = "request"
+        if path in {"/health", "/api/v1/health"}:
+            pass
+        elif path.startswith("/auth/"):
+            limit = settings.anonymous_rate_per_minute
+            bucket = "auth"
+        elif path.startswith(
             ("/api/v1/node", "/api/v1/nodes", "/ui/node", "/ui/nodes")
-        ) and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        ) and not safe_method:
             limit = settings.control_rate_per_minute
             bucket = "control"
-        else:
-            limit = (
-                settings.request_rate_per_minute
-                if principal is not None
-                else settings.anonymous_rate_per_minute
-            )
+        elif principal is None:
+            limit = settings.anonymous_rate_per_minute
+            bucket = "anonymous"
+        elif not safe_method:
+            limit = settings.request_rate_per_minute
             bucket = "request"
-        if not self.limiter.allow(f"{bucket}:{identity}", limit):
+        else:
+            # Authenticated reads include dashboard refreshes and SSE handshakes.
+            # Authorization still protects their data; throttling them makes a
+            # busy local node look stale without reducing control-plane risk.
+            pass
+        if limit is not None and not self.limiter.allow(f"{bucket}:{identity}", limit):
             audit_event(
                 actor=principal.identity if principal else "anonymous",
                 auth_source=principal.auth_source if principal else "none",

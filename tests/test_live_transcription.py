@@ -81,7 +81,7 @@ def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Pa
     assert service.process_once(runtime) == 0
 
 
-def test_live_service_prioritizes_newest_growing_file(tmp_path: Path) -> None:
+def test_live_service_processes_all_growing_files_newest_first(tmp_path: Path) -> None:
     archive = tmp_path / "archive"
     older = archive / "100000" / "older.wav"
     newer = archive / "100000" / "newer.wav"
@@ -104,10 +104,9 @@ def test_live_service_prioritizes_newest_growing_file(tmp_path: Path) -> None:
     service = LiveTranscriptionService(
         snapshotter=Snapshotter(),  # type: ignore[arg-type]
         transcribe=lambda _: TranscriptResult(raw_text="live", display_text="live"),
-        max_files_per_cycle=1,
     )
 
-    assert service.process_once(runtime) == 1
-    assert processed == ["newer.wav"]
+    assert service.process_once(runtime) == 2
+    assert processed == ["newer.wav", "older.wav"]
     assert "100000/newer.wav" in runtime.live_results
-    assert "100000/older.wav" not in runtime.live_results
+    assert "100000/older.wav" in runtime.live_results

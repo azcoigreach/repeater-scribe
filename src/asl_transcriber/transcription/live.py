@@ -123,7 +123,6 @@ class LiveTranscriptionService:
     snapshotter: FfmpegSnapshotter
     transcribe: Callable[[str], TranscriptResult]
     min_file_bytes: int = 4096
-    max_files_per_cycle: int = 1
     _last_sizes: dict[str, int] = field(default_factory=dict, init=False)
     _texts: dict[str, str] = field(default_factory=dict, init=False)
 
@@ -147,9 +146,7 @@ class LiveTranscriptionService:
             candidates.append((source_stat.st_mtime_ns, source_path, source, size))
 
         processed = 0
-        for _, source_path, source, size in sorted(candidates, reverse=True)[
-            : self.max_files_per_cycle
-        ]:
+        for _, source_path, source, size in sorted(candidates, reverse=True):
             self._last_sizes[source_path] = size
             snapshot: Path | None = None
             try:

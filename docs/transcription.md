@@ -183,7 +183,6 @@ These are the environment variables read by the current transcription path:
 | `ASLT_LIVE_WINDOW_SECONDS` | `12` | Tail duration copied into each temporary snapshot |
 | `ASLT_LIVE_BEAM_SIZE` | `1` | Provisional decode search width |
 | `ASLT_LIVE_MIN_FILE_BYTES` | `4096` | Minimum growing-file size before a live attempt |
-| `ASLT_LIVE_MAX_FILES_PER_CYCLE` | `1` | Newest growing files decoded per live cycle; keep at one to protect real-time priority |
 | `ASLT_FFMPEG_BINARY` | `ffmpeg` | Snapshot executable |
 | `ASLT_TMP_DIR` | `/tmp` | Parent for ephemeral live snapshot files |
 

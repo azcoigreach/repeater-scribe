@@ -1251,7 +1251,18 @@ loadFavorites();
 setInterval(loadFavorites, 10000);
 const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
-stream.addEventListener('job', () => { loadJobs(); loadCallsigns(); });
+let archiveRefreshTimer = null;
+let callsignRefreshTimer = null;
+stream.addEventListener('job', event => {
+  let payload = {};
+  try { payload = JSON.parse(event.data); } catch (_) { /* refresh jobs below */ }
+  clearTimeout(archiveRefreshTimer);
+  archiveRefreshTimer = setTimeout(loadJobs, 100);
+  if (payload.status === 'completed') {
+    clearTimeout(callsignRefreshTimer);
+    callsignRefreshTimer = setTimeout(loadCallsigns, 500);
+  }
+});
 stream.addEventListener('error', () => { document.querySelector('#connection-label').textContent = 'Reconnecting to archive'; });
 
 /* Menu tree: top-right button opens a panel with Windows / Layout submenus and a Settings item */
