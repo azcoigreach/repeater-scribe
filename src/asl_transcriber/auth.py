@@ -35,10 +35,16 @@ class Principal:
 
 
 def token_digest(value: str) -> str:
-    """Return a keyed digest for a high-entropy authentication token."""
+    """Return a secret-salted identifier for a high-entropy authentication token."""
     message = b"repeater-scribe-token-v1\0" + value.encode("utf-8")
-    digest = hmac.digest(settings.resolved_session_secret.encode("utf-8"), message, "sha256")
-    return digest.hex()
+    return hashlib.scrypt(
+        message,
+        salt=settings.resolved_session_secret.encode("utf-8"),
+        n=2**12,
+        r=8,
+        p=1,
+        dklen=32,
+    ).hex()
 
 
 def _utc(value: datetime) -> datetime:

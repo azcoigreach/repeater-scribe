@@ -72,11 +72,11 @@ repin deliberately when upgrading.
 ## Machine API tokens
 
 Create a token inside the application container. Its secret is printed once to
-the controlling terminal, never to standard output, and only an HMAC-SHA-256
-digest is stored. The digest key is derived from the session secret, so rotating
-that secret also invalidates every browser session, pending OIDC login, and named
-API token. Create replacement machine tokens after a planned rotation. Do not add
-`-T` to this command.
+the controlling terminal, never to standard output, and only a scrypt-derived
+identifier is stored. The derivation is salted with the session secret, so
+rotating that secret also invalidates every browser session, pending OIDC login,
+and named API token. Create replacement machine tokens after a planned rotation.
+Do not add `-T` to this command.
 
 ```bash
 docker compose exec repeater-scribe \
