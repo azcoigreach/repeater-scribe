@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -86,23 +87,38 @@ def main() -> None:
         return
 
     if args.command == "create-api-token":
-        from asl_transcriber.auth import create_api_token
+        from asl_transcriber.auth import create_api_token, revoke_api_token
 
         if not args.name.strip() or len(args.name) > 128:
             parser.error("token name must contain 1 to 128 characters")
-        token = create_api_token(args.name.strip(), args.role)
-        # The operator explicitly requested this one-time token; stdout is its delivery channel.
-        # codeql[py/clear-text-logging-sensitive-data]
-        print(json.dumps({"name": args.name.strip(), "role": args.role, "token": token}))
+        try:
+            terminal_fd = os.open("/dev/tty", os.O_WRONLY | os.O_NOCTTY)
+        except OSError:
+            parser.error("create-api-token requires a controlling terminal; do not use exec -T")
+        name = args.name.strip()
+        try:
+            token = create_api_token(name, args.role)
+            try:
+                pending = (json.dumps({"name": name, "role": args.role, "token": token}) + "\n").encode(
+                    "utf-8"
+                )
+                while pending:
+                    written = os.write(terminal_fd, pending)
+                    if written <= 0:
+                        raise OSError("terminal write made no progress")
+                    pending = pending[written:]
+            except OSError:
+                revoke_api_token(name)
+                parser.error("could not deliver the token to the controlling terminal")
+        finally:
+            os.close(terminal_fd)
         return
 
     if args.command == "revoke-api-token":
         from asl_transcriber.auth import revoke_api_token
 
         revoked = revoke_api_token(args.name.strip())
-        # Token names are non-secret identifiers, and revocation returns no token material.
-        # codeql[py/clear-text-logging-sensitive-data]
-        print(json.dumps({"name": args.name.strip(), "revoked": revoked}))
+        print(json.dumps({"revoked": revoked}))
         return
 
     if args.command == "backup-db":

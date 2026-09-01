@@ -37,8 +37,13 @@ class Principal:
 def token_digest(value: str) -> str:
     """Return a keyed digest for a high-entropy authentication token."""
     message = b"repeater-scribe-token-v1\0" + value.encode("utf-8")
-    return hmac.new(
-        settings.resolved_session_secret.encode("utf-8"), message, hashlib.sha256
+    key = hashlib.blake2b(
+        settings.resolved_session_secret.encode("utf-8"),
+        digest_size=64,
+        person=b"aslt-key-v1",
+    ).digest()
+    return hashlib.blake2b(
+        message, key=key, digest_size=32, person=b"aslt-token-v1"
     ).hexdigest()
 
 
