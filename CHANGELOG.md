@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-31
+
+### Added
+
+- Fail-closed internet deployment mode with OIDC Authorization Code + PKCE,
+  opaque server-side sessions, viewer/operator/admin roles, scoped hashed API
+  tokens, CSRF and exact-Origin checks, security headers, request/rate/SSE
+  limits, and security audit records.
+- Configurable transcript/audio visibility retention with derived-data cleanup.
+- Hardened Caddy/Compose profile using a private application network,
+  file-mounted secrets, read-only filesystems, dropped capabilities,
+  `no-new-privileges`, and process limits.
+- Verified online SQLite backup and restore-check CLI commands.
+- CodeQL, dependency auditing, Dependabot updates, container scanning, SBOMs,
+  provenance attestations, and tagged GHCR releases.
+- A reusable Repeater Scribe security skill covering deployment, OIDC bootstrap,
+  incident response, migration compatibility, and production verification.
+- Internet deployment, backup/restore, secret rotation, release verification,
+  and incident-response documentation.
+
+### Security
+
+- Audio, transcripts, node status, topology, SSE streams, controls, ingestion,
+  and diagnostics now require explicit role authorization in internet mode.
+- Raw AllStar functions now require a separate default-off setting.
+- System diagnostics no longer return archive or database paths.
+- The AllStar statistics default now uses HTTPS.
+
 ## [0.6.0] - 2026-08-30
 
 ### Added

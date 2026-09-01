@@ -41,7 +41,7 @@ class NodeStateService:
                 settings.ami_host,
                 settings.ami_port,
                 settings.ami_username,
-                settings.ami_secret,
+                settings.resolved_ami_secret,
                 timeout=settings.ami_timeout_seconds,
                 state_callback=partial(self._on_connection_state, home),
                 event_callback=partial(self._on_event, home),

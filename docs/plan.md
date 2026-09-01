@@ -50,8 +50,22 @@ remote transcription backend are not implemented. See
 - Next milestones: favorites CRUD, durable transmission aggregation, station
 	enrichment, recording correlation, and persisted statistics.
 
-## Phase 5: Production hardening
+## Phase 5: Production hardening (implemented)
 
-- Add retention, authentication, CSRF, and security policy documents.
-- Harden Docker and container behavior.
-- Finish documentation, release automation, and final operational checks.
+- OIDC Authorization Code + PKCE login with opaque server-side sessions.
+- Viewer, operator, and administrator authorization on every dashboard, API,
+  audio, control, and event-stream route.
+- Scoped, hashed API tokens with a one-time-secret CLI and a legacy API-key
+  migration path.
+- Session-bound CSRF tokens, exact-origin checks, strict Host validation,
+  restrictive browser security headers, request limits, rate limits, and SSE
+  connection budgets.
+- Security audit records for authentication, authorization, throttling, and
+  state-changing requests.
+- Retention enforcement that expires derived transcripts and audio visibility
+  without modifying the read-only ASL3 archive.
+- A fail-closed internet deployment mode with HTTPS/OIDC configuration
+  validation, Caddy TLS termination, file-mounted secrets, and a hardened
+  non-root/read-only container profile.
+- Security regression tests, dependency scanning, deployment guidance, backup
+  and recovery checks, and release-time operational validation.

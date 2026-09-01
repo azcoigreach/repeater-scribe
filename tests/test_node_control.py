@@ -17,6 +17,7 @@ def test_announce_functions_use_app_rpt_status_commands() -> None:
 
 def test_node_function_requires_control_enablement_and_api_key(monkeypatch) -> None:
     monkeypatch.setattr("asl_transcriber.main.settings.ami_control_enabled", True)
+    monkeypatch.setattr("asl_transcriber.main.settings.ami_raw_function_enabled", True)
     monkeypatch.setattr("asl_transcriber.main.settings.api_key", "test-key")
 
     with TestClient(app) as client:

@@ -32,6 +32,27 @@ the transcription boundary:
 No cloud transcription adapter is currently implemented. The engine interface
 leaves room for an explicitly configured backend in the future.
 
+## Internet security boundary
+
+Internet mode is explicitly enabled with `ASLT_DEPLOYMENT_MODE=internet` and
+fails startup unless HTTPS, OIDC, a strong session secret, and an explicit Host
+allowlist are configured. Caddy is the only public listener in the reference
+deployment; the FastAPI container remains on the private Compose network.
+
+OIDC uses Authorization Code flow with PKCE, issuer discovery, signed ID-token
+verification, nonce/state validation, and optional subject allowlisting. The
+browser receives only an opaque `Secure`, `HttpOnly`, `SameSite=Lax` session
+cookie. Server-side sessions carry viewer, operator, or administrator authority.
+Cookie-authenticated writes additionally require a session CSRF token and the
+exact configured public Origin. Machine clients use separately generated,
+hashed bearer tokens.
+
+Only minimal health and login/callback routes are anonymous. Audio, transcript,
+node state, topology, SSE, and API resources require a viewer. Favorites and AMI
+controls require an operator. Ingestion and diagnostics require an administrator.
+Raw AllStar functions have a separate default-off control because their meaning
+depends on the local `app_rpt` configuration.
+
 AMI control is disabled by default. Enabling it requires both AMI credentials
 and an application API key; arbitrary AMI actions are never exposed through the
 HTTP API.

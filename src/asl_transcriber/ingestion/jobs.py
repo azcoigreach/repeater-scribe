@@ -45,6 +45,9 @@ class JobStore:
     def list(self) -> list[IngestionJob]:
         return list(self._jobs.values())
 
+    def remove(self, job_id: str) -> None:
+        self._jobs.pop(job_id, None)
+
     def mark_processing(self, job_id: str) -> IngestionJob:
         job = self._jobs[job_id]
         job.status = JobState.PROCESSING

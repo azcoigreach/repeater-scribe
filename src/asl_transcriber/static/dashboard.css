@@ -25,6 +25,8 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .submenu[hidden] { display: none; }
 .menu-action { border: 1px solid var(--green); border-radius: 6px; padding: 7px 10px; background: transparent; color: var(--green); cursor: pointer; font: 700 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
 .menu-action:hover { background: var(--green); color: var(--panel); }
+.menu-identity { padding: 5px 9px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.muted-text { color: var(--muted); }
 .preset-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow: auto; }
 .preset-row { display: flex; align-items: center; gap: 6px; }
 .preset-name { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

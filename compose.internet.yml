@@ -1,0 +1,58 @@
+services:
+  repeater-scribe:
+    environment:
+      ASLT_DEPLOYMENT_MODE: internet
+      ASLT_AUTH_MODE: oidc
+      ASLT_PUBLIC_BASE_URL: https://${ASLT_PUBLIC_HOST:?set ASLT_PUBLIC_HOST}
+      ASLT_ALLOWED_HOSTS: ${ASLT_PUBLIC_HOST},localhost,repeater-scribe
+      ASLT_SESSION_SECRET_FILE: /run/secrets/session_secret
+      ASLT_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc_client_secret
+      ASLT_AMI_SECRET_FILE: /run/secrets/ami_secret
+      FORWARDED_ALLOW_IPS: "*"
+    secrets:
+      - session_secret
+      - oidc_client_secret
+      - ami_secret
+
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:98eb57d882ccd5213d1688764db10c1ca2c58a1ca3a6717a3411ad798f7a423a
+    container_name: repeater-scribe-proxy
+    depends_on:
+      repeater-scribe:
+        condition: service_healthy
+    environment:
+      ASLT_PUBLIC_HOST: ${ASLT_PUBLIC_HOST:?set ASLT_PUBLIC_HOST}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    networks:
+      - default
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+      - /run:size=16m,noexec,nosuid,nodev
+    pids_limit: 128
+
+secrets:
+  session_secret:
+    file: ${ASLT_SESSION_SECRET_PATH:-./secrets/session_secret}
+  oidc_client_secret:
+    file: ${ASLT_OIDC_CLIENT_SECRET_PATH:-./secrets/oidc_client_secret}
+  ami_secret:
+    file: ${ASLT_AMI_SECRET_PATH:-./secrets/ami_secret}
+
+volumes:
+  caddy_data:
+  caddy_config:

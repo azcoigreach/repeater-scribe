@@ -16,12 +16,14 @@ class ArchiveIngestionService:
         job_store: JobStore | None = None,
         require_stable: bool = False,
         stable_seconds: float = 0.0,
+        retention_days: int = 0,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         self.root = Path(root)
         self.job_store = job_store or JobStore()
         self.require_stable = require_stable
         self.stable_seconds = stable_seconds
+        self.retention_days = retention_days
         self.clock = clock
         self._seen_paths: set[str] = set()
         self._snapshots: dict[str, tuple[tuple[int, int], float]] = {}
@@ -30,7 +32,7 @@ class ArchiveIngestionService:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
     def scan_once(self) -> list[IngestionJob]:
-        discovered = ArchiveScanner(self.root).discover()
+        discovered = ArchiveScanner(self.root, retention_days=self.retention_days).discover()
         jobs: list[IngestionJob] = []
         now = self.clock()
 

@@ -13,7 +13,8 @@ It runs alongside an ASL3 node rather than replacing it. The recording archive
 is always mounted read-only. Node commands are optional and travel through a
 separately enabled Asterisk Manager Interface (AMI) connection.
 
-Version `0.6.0` is local-first: audio transcription uses `faster-whisper` on the
+Version `0.7.0` keeps transcription local while adding a fail-closed internet
+deployment profile: audio transcription uses `faster-whisper` on the
 machine running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
 
@@ -305,33 +306,39 @@ their panel is focused again.
   QRZ.com. QRZ credentials and session keys remain server-side; profile images are
   loaded in the browser from the HTTPS URL returned by QRZ.
 - No OpenAI token is read and no remote transcription request is made in version
-  `0.6.0`.
+  `0.7.0`.
 
-## Security warning
+## Security and internet access
 
-Repeater Scribe currently has no built-in user login. Treat port `8088` as a
-trusted-network service:
+The default profile remains a trusted-network service and binds port `8088` to
+loopback. Do not change `ASLT_BIND_ADDRESS` to a public interface while
+`ASLT_AUTH_MODE=off`.
 
-- Do not expose it directly to the public internet.
-- Use a firewall, private LAN/VPN, or an authenticated reverse proxy.
-- Read endpoints, transcript search, archive-audio playback, and manual ingestion
-  triggers are not protected by `ASLT_API_KEY`.
-- Node-control and favorite mutation routes below `/api/v1` require
-  `X-API-Key`, but the browser dashboard uses separate `/ui` write routes while
-  `ASLT_AUTH_MODE=off`.
-- Setting `ASLT_AUTH_MODE` to any other value disables those dashboard write
-  routes; it does not provide a login implementation.
-- `ASLT_AMI_CONTROL_ENABLED=false` is the reliable way to disable node commands
-  while retaining AMI monitoring.
-- A raw DTMF function can activate anything configured behind that function in
-  app_rpt. Restrict network access and AMI permissions accordingly.
+Internet mode adds OIDC Authorization Code + PKCE login, server-side opaque
+sessions, viewer/operator/admin roles, CSRF and Origin validation, strict Host
+validation, security headers, rate/request limits, audit records, and bounded
+SSE connections. The reference profile terminates TLS with Caddy while the app
+container remains private.
+
+Only health and login/callback routes are anonymous. Audio, transcripts, node
+state, topology, and event streams require a viewer. Favorites and AMI controls
+require an operator. Ingestion and diagnostics require an administrator. Raw
+AllStar functions are separately disabled by default.
+
+To deploy publicly, configure OIDC and the secret files described in
+[Internet security and operations](docs/security.md), then run:
+
+```bash
+docker compose -f docker-compose.yml -f compose.internet.yml up -d --build
+```
 
 Keep `.env`, AMI credentials, and API keys out of version control. See
 [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## API
 
-FastAPI exposes interactive OpenAPI documentation at <http://localhost:8088/docs>.
+FastAPI exposes interactive OpenAPI documentation at <http://localhost:8088/docs>
+in local mode. Documentation endpoints are disabled in internet mode.
 The main route groups are:
 
 | Area | Routes |
@@ -344,13 +351,14 @@ The main route groups are:
 | Favorites | `GET`/`POST`/`PATCH`/`DELETE /api/v1/nodes/{home}/favorites` |
 | Topology | `GET /api/v1/nodes/{home}/topology`, `/topology/events` |
 
-Node-control and favorite mutation API requests require the configured key. For
-example, add a favorite with:
+Machine writes use named bearer tokens. Create one with
+`asl-transcriber create-api-token automation --role operator`, then add a
+favorite with:
 
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: replace-with-your-key" \
+  -H "Authorization: Bearer replace-with-generated-token" \
   -d '{"target_identifier":"FAVORITE_NODE","label":"Local repeater"}' \
   http://localhost:8088/api/v1/nodes/YOUR_NODE_ID/favorites
 ```
@@ -369,12 +377,15 @@ docker compose logs --tail 200 repeater-scribe
 docker compose restart repeater-scribe
 
 # Rebuild after an update
+docker compose run --rm repeater-scribe alembic upgrade head
 docker compose up -d --build --force-recreate
 ```
 
-The persistent state is in `./data`. Back it up according to the normal SQLite
-and filesystem practices for the host; do not rely on the container layer for
-durable data.
+The persistent state is in `./data`. Create a consistent online backup with
+`asl-transcriber backup-db /data/backups/snapshot.db` and verify it with
+`asl-transcriber verify-db /data/backups/snapshot.db`; do not copy a live
+database file or rely on the container layer for durable data. See
+[Internet security and operations](docs/security.md).
 
 ## Development
 
@@ -410,6 +421,8 @@ uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
+- [Internet security and operations](docs/security.md)
+- [Reusable security skill](skills/repeater-scribe-security/SKILL.md)
 
 ## Current limitations
 
@@ -419,8 +432,8 @@ uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080
   retained for review.
 - Topology discovery is limited to public numeric nodes visible through the
   configured AllStar statistics API and the configured crawl bounds.
-- Dashboard write controls assume a trusted network; built-in interactive user
-  authentication is not implemented.
+- Internet authentication depends on a separately operated OIDC provider; MFA,
+  account recovery, and identity lifecycle are managed there.
 - OpenAI and other hosted transcription backends are not implemented.
 
 ## License
