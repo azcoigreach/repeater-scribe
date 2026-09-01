@@ -12,6 +12,7 @@
 *.env
 /secrets/
 
+/secrets/
 .venv/
 .ruff_cache/
 .pytest_cache/
