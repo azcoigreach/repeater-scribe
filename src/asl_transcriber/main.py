@@ -220,7 +220,7 @@ def build_local_transcription_engine() -> FasterWhisperEngine:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     global node_monitor, topology_service, transcription_engine
     active_runtime = current_runtime()
-    active_runtime.scan_once()
+    await asyncio.to_thread(active_runtime.scan_once)
     transcription_engine = build_local_transcription_engine()
     live_service = LiveTranscriptionService(
         snapshotter=FfmpegSnapshotter(
@@ -236,16 +236,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             use_hotwords=False,
         ),
         min_file_bytes=settings.live_min_file_bytes,
+        max_files_per_cycle=settings.live_max_files_per_cycle,
     )
 
     async def poll_archive() -> None:
         while True:
             active_runtime = current_runtime()
-            active_runtime.scan_once()
-            if settings.auto_process:
+            await asyncio.to_thread(active_runtime.scan_once)
+            # Growing recordings are handled by the live service. Keep the GPU
+            # available for them and finalize completed files during quiet gaps.
+            if settings.auto_process and not active_runtime.waiting_sources():
                 try:
                     await asyncio.to_thread(
-                        active_runtime.process_pending, transcription_engine.transcribe
+                        active_runtime.process_pending,
+                        transcription_engine.transcribe,
+                        limit=1,
                     )
                 except Exception:
                     logger.exception("Background archive processing cycle failed")
@@ -452,12 +457,12 @@ def auth_me(principal: Viewer) -> dict[str, str | None]:
 
 
 @app.get("/health")
-def root_health() -> dict[str, str]:
+async def root_health() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name}
 
 
 @app.get("/api/v1/health")
-def health() -> dict[str, str | bool]:
+async def health() -> dict[str, str | bool]:
     payload: dict[str, str | bool] = {
         "status": "ok",
         "service": settings.app_name,

@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     live_window_seconds: float = Field(default=12.0, gt=2)
     live_beam_size: int = Field(default=1, ge=1)
     live_min_file_bytes: int = Field(default=4096, ge=44)
+    live_max_files_per_cycle: int = Field(default=1, ge=1, le=8)
     ffmpeg_binary: str = Field(default="ffmpeg")
     file_stabilization_seconds: int = Field(default=5)
     min_duration_seconds: float = Field(default=0.5)

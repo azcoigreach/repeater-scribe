@@ -131,7 +131,10 @@ class ArchiveRuntime:
         return sorted(path for service in self.services for path in service.waiting_paths())
 
     def process_pending(
-        self, transcribe: Callable[[str], TranscriptResult]
+        self,
+        transcribe: Callable[[str], TranscriptResult],
+        *,
+        limit: int | None = None,
     ) -> list[ProcessingResult]:
         def process(source_path: str) -> ProcessingResult:
             source = self._resolve_source(source_path)
@@ -147,9 +150,10 @@ class ArchiveRuntime:
 
         worker = ProcessingWorker(job_store=self.job_store, process_func=process)
         results: list[ProcessingResult] = []
-        for job in list(self.job_store.list()):
-            if job.status.value != "pending":
-                continue
+        pending_jobs = [job for job in self.job_store.list() if job.status == JobState.PENDING]
+        if limit is not None:
+            pending_jobs = pending_jobs[: max(0, limit)]
+        for job in pending_jobs:
             job.status = JobState.PROCESSING
             job.touch()
             self._publish(job)

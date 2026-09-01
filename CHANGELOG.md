@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-08-31
+## [0.6.1] - 2026-09-01
 
 ### Added
 
@@ -31,6 +31,14 @@ All notable changes to this project will be documented in this file.
 - Raw AllStar functions now require a separate default-off setting.
 - System diagnostics no longer return archive or database paths.
 - The AllStar statistics default now uses HTTPS.
+
+### Fixed
+
+- Prevented authenticated dashboard traffic from exhausting SQLite connections
+  and blocking health checks.
+- Kept archive discovery and token verification off the event loop.
+- Prioritized the newest growing recording and limited background final passes so
+  live transcription can keep pace under sustained traffic.
 
 ## [0.6.0] - 2026-08-30
 

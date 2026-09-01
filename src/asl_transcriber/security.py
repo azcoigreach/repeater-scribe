@@ -130,7 +130,16 @@ class SecurityMiddleware:
             )
             return
 
-        principal = authenticate_request(request)
+        has_credentials = bool(
+            request.headers.get("authorization")
+            or request.headers.get("x-api-key")
+            or request.cookies.get(settings.session_cookie_name)
+        )
+        principal = (
+            await asyncio.to_thread(authenticate_request, request)
+            if has_credentials
+            else authenticate_request(request)
+        )
         identity = principal.subject if principal is not None else self._client_ip(scope)
         if path.startswith(
             ("/api/v1/node", "/api/v1/nodes", "/ui/node", "/ui/nodes")
