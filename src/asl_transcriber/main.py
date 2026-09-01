@@ -11,16 +11,34 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from asl_transcriber import __version__
 from asl_transcriber.ami import AmiError, AmiResponse
+from asl_transcriber.auth import (
+    Admin,
+    Viewer,
+    audit_event,
+    authenticate_request,
+    complete_oidc_login,
+    oidc_authorization_url,
+    purge_security_state,
+    require_admin,
+    require_api_admin,
+    require_api_operator,
+    require_ui_operator,
+    require_viewer,
+    revoke_session,
+    verify_csrf,
+)
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal, get_db
 from asl_transcriber.favorites import (
@@ -36,6 +54,7 @@ from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.qrz import QrzClient, QrzError
 from asl_transcriber.runtime import ArchiveRuntime
+from asl_transcriber.security import SecurityMiddleware, sse_connections
 from asl_transcriber.topology import (
     TopologyService,
     ensure_topology_crawl,
@@ -54,6 +73,7 @@ logger = logging.getLogger(__name__)
 runtime = ArchiveRuntime(
     settings.archive_path_list,
     stable_seconds=settings.file_stabilization_seconds,
+    retention_days=settings.retention_days,
 )
 node_monitor: NodeStateService | None = None
 topology_service: TopologyService | None = None
@@ -123,11 +143,12 @@ def recording_timestamp(source_path: str) -> str | None:
 
 def current_qrz_client() -> QrzClient | None:
     global qrz_client, qrz_client_credentials
-    if not settings.qrz_username or not settings.qrz_password:
+    qrz_password = settings.resolved_qrz_password
+    if not settings.qrz_username or not qrz_password:
         return None
     credentials = (
         settings.qrz_username,
-        settings.qrz_password,
+        qrz_password,
         settings.qrz_base_url,
         settings.qrz_timeout_seconds,
         settings.qrz_cache_seconds,
@@ -135,7 +156,7 @@ def current_qrz_client() -> QrzClient | None:
     if qrz_client is None or qrz_client_credentials != credentials:
         qrz_client = QrzClient(
             settings.qrz_username,
-            settings.qrz_password,
+            qrz_password,
             base_url=settings.qrz_base_url,
             timeout_seconds=settings.qrz_timeout_seconds,
             cache_seconds=settings.qrz_cache_seconds,
@@ -151,10 +172,12 @@ def current_runtime() -> ArchiveRuntime:
     if (
         runtime.roots != configured_roots
         or runtime.stable_seconds != settings.file_stabilization_seconds
+        or runtime.retention_days != settings.retention_days
     ):
         runtime = ArchiveRuntime(
             settings.archive_path_list,
             stable_seconds=settings.file_stabilization_seconds,
+            retention_days=settings.retention_days,
         )
     return runtime
 
@@ -172,9 +195,9 @@ def build_local_transcription_engine() -> FasterWhisperEngine:
     def callsign_candidates() -> tuple[str, ...]:
         client = current_qrz_client()
         qrz_callsigns = client.cached_callsigns() if client is not None else ()
-        return normalize_callsigns(
-            qrz_callsigns + tuple(candidate_provider())
-        )[: settings.callsign_max_candidates]
+        return normalize_callsigns(qrz_callsigns + tuple(candidate_provider()))[
+            : settings.callsign_max_candidates
+        ]
 
     return FasterWhisperEngine(
         model_size=settings.whisper_model,
@@ -237,11 +260,31 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                     logger.exception("Live transcription cycle failed")
             await asyncio.sleep(settings.live_poll_seconds)
 
+    async def enforce_retention() -> None:
+        while True:
+            try:
+                purged = await asyncio.to_thread(current_runtime().purge_expired)
+                security_purged = await asyncio.to_thread(purge_security_state)
+                if purged:
+                    audit_event(
+                        actor="system",
+                        auth_source="internal",
+                        action="retention_purge",
+                        outcome="completed",
+                        detail=f"records={purged}",
+                    )
+                if any(security_purged.values()):
+                    logger.info("Purged expired security state: %s", security_purged)
+            except Exception:
+                logger.exception("Retention cycle failed")
+            await asyncio.sleep(86400)
+
     async def persist_key_transition(transition: RemoteKeyTransition) -> None:
         await asyncio.to_thread(record_remote_key_transition, SessionLocal, transition)
 
     watcher = asyncio.create_task(poll_archive())
     live_watcher = asyncio.create_task(transcribe_live_audio())
+    retention_watcher = asyncio.create_task(enforce_retention())
     topology_service = (
         TopologyService(
             SessionLocal,
@@ -263,7 +306,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     )
     node_monitor = (
         NodeStateService(settings, transition_callback=persist_key_transition)
-        if settings.ami_enabled and settings.ami_secret
+        if settings.ami_enabled and settings.resolved_ami_secret
         else None
     )
     if topology_service is not None and node_monitor is not None:
@@ -295,7 +338,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     finally:
         watcher.cancel()
         live_watcher.cancel()
-        tasks = [watcher, live_watcher]
+        retention_watcher.cancel()
+        tasks = [watcher, live_watcher, retention_watcher]
         if topology_watcher is not None:
             topology_watcher.cancel()
             tasks.append(topology_watcher)
@@ -306,13 +350,33 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         topology_service = None
 
 
-app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
+app = FastAPI(
+    title=settings.app_name,
+    version=__version__,
+    lifespan=lifespan,
+    docs_url=None if settings.deployment_mode == "internet" else "/docs",
+    redoc_url=None if settings.deployment_mode == "internet" else "/redoc",
+    openapi_url=None if settings.deployment_mode == "internet" else "/openapi.json",
+)
+if settings.cors_origin_list:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key"],
+    )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_host_list)
+app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 
 
 @app.get("/")
 def dashboard(request: Request):
+    principal = authenticate_request(request)
+    if principal is None:
+        return RedirectResponse(url="/auth/login?next=/", status_code=303)
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -320,8 +384,71 @@ def dashboard(request: Request):
             "app_name": settings.app_name,
             "archive_path": settings.archive_paths,
             "ami_node_id": settings.ami_node_id,
+            "csrf_token": principal.csrf_token or "",
+            "identity": principal.identity,
+            "role": principal.role,
         },
     )
+
+
+@app.get("/auth/login")
+async def auth_login(next: str | None = None) -> RedirectResponse:
+    return RedirectResponse(await oidc_authorization_url(next), status_code=303)
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request, code: str, state: str) -> RedirectResponse:
+    try:
+        raw_session, principal, next_path = await complete_oidc_login(code, state)
+    except HTTPException:
+        audit_event(
+            actor="anonymous",
+            auth_source="oidc",
+            action="login",
+            outcome="denied",
+            request=request,
+        )
+        raise
+    response = RedirectResponse(next_path, status_code=303)
+    response.set_cookie(
+        settings.session_cookie_name,
+        raw_session,
+        max_age=settings.session_absolute_seconds,
+        secure=settings.deployment_mode == "internet",
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    audit_event(
+        actor=principal.identity,
+        auth_source="oidc",
+        action="login",
+        outcome="allowed",
+        request=request,
+        detail=f"role={principal.role}",
+    )
+    return response
+
+
+@app.post("/auth/logout", dependencies=[Depends(require_viewer)])
+def auth_logout(request: Request) -> RedirectResponse:
+    principal = authenticate_request(request)
+    assert principal is not None
+    verify_csrf(request, principal)
+    revoke_session(request.cookies.get(settings.session_cookie_name))
+    response = RedirectResponse("/auth/login", status_code=303)
+    response.delete_cookie(settings.session_cookie_name, path="/")
+    return response
+
+
+@app.get("/api/v1/auth/me")
+def auth_me(principal: Viewer) -> dict[str, str | None]:
+    return {
+        "identity": principal.identity,
+        "role": principal.role,
+        "auth_source": principal.auth_source,
+        "csrf_token": principal.csrf_token,
+    }
 
 
 @app.get("/health")
@@ -331,22 +458,24 @@ def root_health() -> dict[str, str]:
 
 @app.get("/api/v1/health")
 def health() -> dict[str, str | bool]:
-    return {
+    payload: dict[str, str | bool] = {
         "status": "ok",
         "service": settings.app_name,
-        "version": __version__,
         "ready": True,
     }
+    if settings.deployment_mode == "local":
+        payload["version"] = __version__
+    return payload
 
 
 @app.get("/api/v1/system/info")
-def system_info() -> dict[str, object]:
+def system_info(_: Admin) -> dict[str, object]:
     return {
         "service": settings.app_name,
         "environment": settings.app_env,
-        "database_url": settings.database_url,
-        "archive_paths": settings.archive_path_list,
         "api_version": "v1",
+        "deployment_mode": settings.deployment_mode,
+        "authentication": settings.auth_mode,
         "transcription": {
             "backend": "local",
             "model": settings.whisper_model,
@@ -360,7 +489,7 @@ def system_info() -> dict[str, object]:
     }
 
 
-@app.get("/api/v1/node/status")
+@app.get("/api/v1/node/status", dependencies=[Depends(require_viewer)])
 def node_status() -> dict[str, object]:
     monitor = active_node_monitor()
     return monitor.serialize(monitor.state(monitor.home_nodes[0]))
@@ -379,19 +508,19 @@ def validate_node_identifier(value: str, *, label: str = "node") -> str:
     return normalized
 
 
-@app.get("/api/v1/nodes")
+@app.get("/api/v1/nodes", dependencies=[Depends(require_viewer)])
 def nodes() -> dict[str, object]:
     monitor = active_node_monitor()
     return {"items": [monitor.serialize(state) for state in monitor.states.values()]}
 
 
-@app.get("/api/v1/nodes/{home}/state")
+@app.get("/api/v1/nodes/{home}/state", dependencies=[Depends(require_viewer)])
 def node_state(home: str) -> dict[str, object]:
     monitor = active_node_monitor()
     return monitor.serialize(monitor.state(validate_node_identifier(home, label="home node")))
 
 
-@app.get("/api/v1/nodes/{home}/links")
+@app.get("/api/v1/nodes/{home}/links", dependencies=[Depends(require_viewer)])
 def node_links(home: str) -> dict[str, object]:
     monitor = active_node_monitor()
     state = monitor.state(validate_node_identifier(home, label="home node"))
@@ -427,16 +556,6 @@ def favorite_items(db: Session, home: str) -> list[dict[str, object]]:
         public_stale_seconds=settings.favorite_stats_stale_seconds,
         recent_activity_seconds=settings.favorite_stats_recent_activity_seconds,
     )
-
-
-def require_ui_write() -> None:
-    if settings.auth_mode != "off":
-        raise HTTPException(status_code=401, detail="Web authentication is required")
-
-
-def require_api_key(x_api_key: str | None) -> None:
-    if not settings.api_key or x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="A valid API key is required")
 
 
 def create_favorite_record(
@@ -482,79 +601,82 @@ def delete_favorite_record(home: str, favorite_id: str, db: Session) -> dict[str
     return {"deleted": True}
 
 
-@app.get("/api/v1/nodes/{home}/favorites")
+@app.get("/api/v1/nodes/{home}/favorites", dependencies=[Depends(require_viewer)])
 def favorites(home: str, db: Annotated[Session, Depends(get_db)]) -> dict[str, object]:
     home = validate_node_identifier(home, label="home node")
     items = favorite_items(db, home)
     return {"total": len(items), "items": items}
 
 
-@app.post("/api/v1/nodes/{home}/favorites")
+@app.post("/api/v1/nodes/{home}/favorites", dependencies=[Depends(require_api_operator)])
 def api_create_favorite(
     home: str,
     request: FavoriteCreateRequest,
     db: Annotated[Session, Depends(get_db)],
-    x_api_key: str | None = Header(default=None),
 ) -> dict[str, object]:
-    require_api_key(x_api_key)
     return create_favorite_record(home, request, db)
 
 
-@app.patch("/api/v1/nodes/{home}/favorites/{favorite_id}")
+@app.patch(
+    "/api/v1/nodes/{home}/favorites/{favorite_id}",
+    dependencies=[Depends(require_api_operator)],
+)
 def api_update_favorite(
     home: str,
     favorite_id: str,
     request: FavoriteUpdateRequest,
     db: Annotated[Session, Depends(get_db)],
-    x_api_key: str | None = Header(default=None),
 ) -> dict[str, object]:
-    require_api_key(x_api_key)
     return update_favorite_record(home, favorite_id, request, db)
 
 
-@app.delete("/api/v1/nodes/{home}/favorites/{favorite_id}")
+@app.delete(
+    "/api/v1/nodes/{home}/favorites/{favorite_id}",
+    dependencies=[Depends(require_api_operator)],
+)
 def api_delete_favorite(
     home: str,
     favorite_id: str,
     db: Annotated[Session, Depends(get_db)],
-    x_api_key: str | None = Header(default=None),
 ) -> dict[str, bool]:
-    require_api_key(x_api_key)
     return delete_favorite_record(home, favorite_id, db)
 
 
-@app.post("/ui/nodes/{home}/favorites")
+@app.post("/ui/nodes/{home}/favorites", dependencies=[Depends(require_ui_operator)])
 def ui_create_favorite(
     home: str,
     request: FavoriteCreateRequest,
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, object]:
-    require_ui_write()
     return create_favorite_record(home, request, db)
 
 
-@app.patch("/ui/nodes/{home}/favorites/{favorite_id}")
+@app.patch(
+    "/ui/nodes/{home}/favorites/{favorite_id}",
+    dependencies=[Depends(require_ui_operator)],
+)
 def ui_update_favorite(
     home: str,
     favorite_id: str,
     request: FavoriteUpdateRequest,
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, object]:
-    require_ui_write()
     return update_favorite_record(home, favorite_id, request, db)
 
 
-@app.delete("/ui/nodes/{home}/favorites/{favorite_id}")
+@app.delete(
+    "/ui/nodes/{home}/favorites/{favorite_id}",
+    dependencies=[Depends(require_ui_operator)],
+)
 def ui_delete_favorite(
     home: str,
     favorite_id: str,
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, bool]:
-    require_ui_write()
     return delete_favorite_record(home, favorite_id, db)
 
 
-@app.get("/api/v1/nodes/{home}/topology")
+@app.get("/api/v1/nodes/{home}/topology", dependencies=[Depends(require_viewer)])
 def topology_graph(
     home: str,
     root: str,
@@ -570,14 +692,16 @@ def topology_graph(
     )
 
 
-@app.post("/ui/nodes/{home}/topology/{root}/crawl")
+@app.post(
+    "/ui/nodes/{home}/topology/{root}/crawl",
+    dependencies=[Depends(require_ui_operator)],
+)
 def ui_start_topology_crawl(
     home: str,
     root: str,
     db: Annotated[Session, Depends(get_db)],
     restart: bool = False,
 ) -> dict[str, object]:
-    require_ui_write()
     if topology_service is None:
         raise HTTPException(status_code=503, detail="AllStar topology crawling is disabled")
     home = validate_node_identifier(home, label="home node")
@@ -610,24 +734,28 @@ def ui_start_topology_crawl(
 
 
 @app.get("/api/v1/nodes/{home}/topology/events")
-async def topology_events(home: str, root: str) -> StreamingResponse:
+async def topology_events(home: str, root: str, principal: Viewer) -> StreamingResponse:
     service = topology_service
     if service is None:
         raise HTTPException(status_code=503, detail="AllStar topology crawling is disabled")
     home = validate_node_identifier(home, label="home node")
     root = validate_node_identifier(root, label="topology root")
+    await sse_connections.acquire(principal.subject)
 
     async def stream() -> AsyncIterator[str]:
-        yield "retry: 3000\n\n"
-        async for event in service.events(
-            settings.topology_sse_heartbeat_seconds,
-            home_node=home,
-            root_identifier=root,
-        ):
-            if event.get("heartbeat"):
-                yield ": keepalive\n\n"
-            else:
-                yield f"event: topology-update\ndata: {json.dumps(event)}\n\n"
+        try:
+            yield "retry: 3000\n\n"
+            async for event in service.events(
+                settings.topology_sse_heartbeat_seconds,
+                home_node=home,
+                root_identifier=root,
+            ):
+                if event.get("heartbeat"):
+                    yield ": keepalive\n\n"
+                else:
+                    yield f"event: topology-update\ndata: {json.dumps(event)}\n\n"
+        finally:
+            await sse_connections.release(principal.subject)
 
     return StreamingResponse(
         stream(),
@@ -658,11 +786,9 @@ LINK_FUNCTIONS = {
 }
 
 
-def require_control(x_api_key: str | None) -> None:
+def require_control() -> None:
     if not settings.ami_control_enabled:
         raise HTTPException(status_code=503, detail="AMI node control is disabled")
-    if not settings.api_key or x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="A valid API key is required")
 
 
 def ami_action_accepted(response: AmiResponse) -> bool:
@@ -701,11 +827,9 @@ def pending_control_response(
     }
 
 
-@app.post("/api/v1/nodes/{home}/links")
-async def connect_link(
-    home: str, request: LinkControlRequest, x_api_key: str | None = Header(default=None)
-) -> dict[str, object]:
-    require_control(x_api_key)
+@app.post("/api/v1/nodes/{home}/links", dependencies=[Depends(require_api_operator)])
+async def connect_link(home: str, request: LinkControlRequest) -> dict[str, object]:
+    require_control()
     active_node_monitor()
     home = validate_node_identifier(home, label="home node")
     target = validate_node_identifier(request.target, label="target")
@@ -729,11 +853,9 @@ async def connect_link(
     }
 
 
-@app.delete("/api/v1/nodes/{home}/links/{target}")
-async def disconnect_link(
-    home: str, target: str, x_api_key: str | None = Header(default=None)
-) -> dict[str, object]:
-    require_control(x_api_key)
+@app.delete("/api/v1/nodes/{home}/links/{target}", dependencies=[Depends(require_api_operator)])
+async def disconnect_link(home: str, target: str) -> dict[str, object]:
+    require_control()
     active_node_monitor()
     home = validate_node_identifier(home, label="home node")
     target = validate_node_identifier(target, label="target")
@@ -741,22 +863,18 @@ async def disconnect_link(
     return pending_control_response(home, response, target=target, desired_connected=False)
 
 
-@app.delete("/api/v1/nodes/{home}/links")
-async def disconnect_all_links(
-    home: str, x_api_key: str | None = Header(default=None)
-) -> dict[str, object]:
-    require_control(x_api_key)
+@app.delete("/api/v1/nodes/{home}/links", dependencies=[Depends(require_api_operator)])
+async def disconnect_all_links(home: str) -> dict[str, object]:
+    require_control()
     active_node_monitor()
     home = validate_node_identifier(home, label="home node")
     response = await execute_control_command(home, f"rpt cmd {home} ilink 6")
     return pending_control_response(home, response, desired_connected=False)
 
 
-@app.post("/api/v1/nodes/{home}/reconnect")
-async def reconnect_node(
-    home: str, x_api_key: str | None = Header(default=None)
-) -> dict[str, object]:
-    require_control(x_api_key)
+@app.post("/api/v1/nodes/{home}/reconnect", dependencies=[Depends(require_api_operator)])
+async def reconnect_node(home: str) -> dict[str, object]:
+    require_control()
     active_node_monitor()
     home = validate_node_identifier(home, label="home node")
     response = await execute_control_command(home, f"rpt cmd {home} ilink 16")
@@ -764,17 +882,26 @@ async def reconnect_node(
 
 
 @app.get("/api/v1/nodes/{home}/events")
-async def node_events(home: str) -> StreamingResponse:
+async def node_events(home: str, principal: Viewer) -> StreamingResponse:
     monitor = active_node_monitor()
     home = validate_node_identifier(home, label="home node")
+    await sse_connections.acquire(principal.subject)
+
+    async def stream() -> AsyncIterator[str]:
+        try:
+            async for event in monitor.events(home, monitor.subscribe(home)):
+                yield event
+        finally:
+            await sse_connections.release(principal.subject)
+
     return StreamingResponse(
-        monitor.events(home, monitor.subscribe(home)),
+        stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-@app.post("/api/v1/node/ping")
+@app.post("/api/v1/node/ping", dependencies=[Depends(require_api_operator)])
 async def node_ping() -> dict[str, object]:
     monitor = active_node_monitor()
     try:
@@ -784,7 +911,7 @@ async def node_ping() -> dict[str, object]:
     return {"response": response.headers}
 
 
-@app.get("/api/v1/node/{node_id}/commands")
+@app.get("/api/v1/node/{node_id}/commands", dependencies=[Depends(require_viewer)])
 def node_commands(node_id: int) -> dict[str, object]:
     return {
         "node_id": node_id,
@@ -829,21 +956,16 @@ async def execute_named_command(node_id: int, request: NodeCommandRequest) -> di
     }
 
 
-@app.post("/api/v1/node/{node_id}/command")
+@app.post("/api/v1/node/{node_id}/command", dependencies=[Depends(require_api_operator)])
 async def node_command(
     node_id: int,
     request: NodeCommandRequest,
-    x_api_key: str | None = Header(default=None),
 ) -> dict[str, object]:
-    if not settings.api_key or x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="A valid API key is required")
     return await execute_named_command(node_id, request)
 
 
-@app.post("/ui/node/{node_id}/command")
+@app.post("/ui/node/{node_id}/command", dependencies=[Depends(require_ui_operator)])
 async def ui_node_command(node_id: int, request: NodeCommandRequest) -> dict[str, object]:
-    if settings.auth_mode != "off":
-        raise HTTPException(status_code=401, detail="Web authentication is required")
     return await execute_named_command(node_id, request.model_copy(update={"confirmed": True}))
 
 
@@ -854,6 +976,8 @@ class NodeFunctionRequest(BaseModel):
 async def execute_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
     if not settings.ami_control_enabled:
         raise HTTPException(status_code=503, detail="AMI node control is disabled")
+    if not settings.ami_raw_function_enabled:
+        raise HTTPException(status_code=503, detail="Raw AllStar functions are disabled")
     if re.fullmatch(r"[0-9*#A-D]+", request.function.strip().upper()) is None:
         raise HTTPException(status_code=422, detail="Invalid AllStar function code")
     try:
@@ -873,32 +997,27 @@ async def execute_node_function(node_id: int, request: NodeFunctionRequest) -> d
     }
 
 
-@app.post("/api/v1/node/{node_id}/function")
+@app.post("/api/v1/node/{node_id}/function", dependencies=[Depends(require_api_operator)])
 async def node_function(
     node_id: int,
     request: NodeFunctionRequest,
-    x_api_key: str | None = Header(default=None),
 ) -> dict[str, object]:
-    if not settings.api_key or x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="A valid API key is required")
     return await execute_node_function(node_id, request)
 
 
-@app.post("/ui/node/{node_id}/function")
+@app.post("/ui/node/{node_id}/function", dependencies=[Depends(require_ui_operator)])
 async def ui_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
-    if settings.auth_mode != "off":
-        raise HTTPException(status_code=401, detail="Web authentication is required")
     return await execute_node_function(node_id, request)
 
 
-@app.post("/api/v1/ingestion/scan")
+@app.post("/api/v1/ingestion/scan", dependencies=[Depends(require_api_admin)])
 def scan_archive() -> dict[str, int]:
     active_runtime = current_runtime()
     jobs = active_runtime.scan_once()
     return {"created": len(jobs), "total": len(active_runtime.jobs())}
 
 
-@app.get("/api/v1/ingestion/jobs")
+@app.get("/api/v1/ingestion/jobs", dependencies=[Depends(require_admin)])
 def ingestion_jobs() -> dict[str, object]:
     active_runtime = current_runtime()
     items = [
@@ -923,7 +1042,7 @@ def ingestion_jobs() -> dict[str, object]:
     return {"total": len(items), "items": items}
 
 
-@app.post("/api/v1/ingestion/process")
+@app.post("/api/v1/ingestion/process", dependencies=[Depends(require_api_admin)])
 def process_ingestion() -> dict[str, int]:
     global transcription_engine
     active_runtime = current_runtime()
@@ -933,7 +1052,7 @@ def process_ingestion() -> dict[str, int]:
     return {"processed": len(results), "total": len(active_runtime.jobs())}
 
 
-@app.get("/api/v1/activity")
+@app.get("/api/v1/activity", dependencies=[Depends(require_viewer)])
 def activity_events() -> dict[str, object]:
     active_runtime = current_runtime()
     items = [
@@ -949,7 +1068,7 @@ def activity_events() -> dict[str, object]:
     return {"total": len(items), "items": items}
 
 
-@app.get("/api/v1/recordings")
+@app.get("/api/v1/recordings", dependencies=[Depends(require_viewer)])
 def recordings(
     q: str | None = None, status: str | None = None, limit: int = 100
 ) -> dict[str, object]:
@@ -1027,7 +1146,7 @@ def recordings(
     }
 
 
-@app.get("/api/v1/audio")
+@app.get("/api/v1/audio", dependencies=[Depends(require_viewer)])
 def audio(path: str) -> FileResponse:
     try:
         source = current_runtime()._resolve_source(path)
@@ -1036,7 +1155,7 @@ def audio(path: str) -> FileResponse:
     return FileResponse(source, media_type="audio/wav", filename=source.name)
 
 
-@app.get("/api/v1/callsigns/last-heard")
+@app.get("/api/v1/callsigns/last-heard", dependencies=[Depends(require_viewer)])
 def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
     active_runtime = current_runtime()
     heard: dict[str, dict[str, str | None]] = {}
@@ -1084,16 +1203,22 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
 
 
 @app.get("/api/v1/events")
-async def events() -> StreamingResponse:
+async def events(principal: Viewer) -> StreamingResponse:
     active_runtime = current_runtime()
     event_queue = active_runtime.subscribe()
+    await sse_connections.acquire(principal.subject)
 
     async def stream() -> AsyncIterator[str]:
-        yield "event: ready\ndata: {}\n\n"
-        while True:
-            payload = await asyncio.to_thread(event_queue.get)
-            import json
+        try:
+            yield "event: ready\ndata: {}\n\n"
+            while True:
+                payload = await asyncio.to_thread(event_queue.get)
+                yield f"event: job\ndata: {json.dumps(payload)}\n\n"
+        finally:
+            await sse_connections.release(principal.subject)
 
-            yield f"event: job\ndata: {json.dumps(payload)}\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

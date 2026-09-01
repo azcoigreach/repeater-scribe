@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Queue
 
-from sqlalchemy import func, inspect, select, text
+from sqlalchemy import delete, func, inspect, select, text
 from sqlalchemy.engine import Engine
 
 from asl_transcriber.database import SessionLocal
@@ -27,10 +27,12 @@ class ArchiveRuntime:
         roots: Sequence[str | Path],
         session_factory: Callable = SessionLocal,
         stable_seconds: float = 0.0,
+        retention_days: int = 0,
     ) -> None:
         self.roots = [Path(root) for root in roots]
         self.session_factory = session_factory
         self.stable_seconds = stable_seconds
+        self.retention_days = retention_days
         bind = session_factory.kw.get("bind") if hasattr(session_factory, "kw") else None
         if bind is not None:
             ModelBase.metadata.create_all(bind)
@@ -43,6 +45,7 @@ class ArchiveRuntime:
                 self.job_store,
                 require_stable=True,
                 stable_seconds=stable_seconds,
+                retention_days=retention_days,
             )
             for root in self.roots
         ]
@@ -57,7 +60,9 @@ class ArchiveRuntime:
         columns = {column["name"] for column in inspector.get_columns("ingestion_jobs")}
         if "archive_root" not in columns:
             with bind.begin() as connection:  # type: ignore[union-attr]
-                connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN archive_root VARCHAR(1024)"))
+                connection.execute(
+                    text("ALTER TABLE ingestion_jobs ADD COLUMN archive_root VARCHAR(1024)")
+                )
 
     def _backfill_archive_roots(self, bind: Engine) -> None:
         if not self.roots:
@@ -72,15 +77,12 @@ class ArchiveRuntime:
         jobs: list[IngestionJob] = []
         with self.session_factory() as session:
             persisted = {
-                (row.archive_root, row.source_path)
-                for row in session.query(DbIngestionJob).all()
+                (row.archive_root, row.source_path) for row in session.query(DbIngestionJob).all()
             }
         for service in self.services:
             root_key = str(service.root.resolve())
             service._seen_paths.update(
-                source_path
-                for archive_root, source_path in persisted
-                if archive_root == root_key
+                source_path for archive_root, source_path in persisted if archive_root == root_key
             )
             new_jobs = service.scan_once()
             jobs.extend(new_jobs)
@@ -126,9 +128,7 @@ class ArchiveRuntime:
             }
 
     def waiting_sources(self) -> list[str]:
-        return sorted(
-            path for service in self.services for path in service.waiting_paths()
-        )
+        return sorted(path for service in self.services for path in service.waiting_paths())
 
     def process_pending(
         self, transcribe: Callable[[str], TranscriptResult]
@@ -189,7 +189,9 @@ class ArchiveRuntime:
         self.live_results.pop(source_path, None)
 
     @staticmethod
-    def _event_payload(job: IngestionJob, result: ProcessingResult | None = None) -> dict[str, object]:
+    def _event_payload(
+        job: IngestionJob, result: ProcessingResult | None = None
+    ) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": job.id,
             "source_path": job.source_path,
@@ -206,8 +208,42 @@ class ArchiveRuntime:
         for root in self.roots:
             candidate = (root / source_path).resolve()
             if candidate.is_relative_to(root.resolve()) and candidate.is_file():
+                if self.retention_days > 0:
+                    cutoff = datetime.now(UTC) - timedelta(days=self.retention_days)
+                    if candidate.stat().st_mtime < cutoff.timestamp():
+                        continue
                 return candidate
         raise FileNotFoundError(f"Archive recording not found: {source_path}")
+
+    def purge_expired(self) -> int:
+        """Remove derived records that are older than the configured visibility horizon."""
+        if self.retention_days <= 0:
+            return 0
+        cutoff = datetime.now(UTC) - timedelta(days=self.retention_days)
+        expired_ids: list[str] = []
+        with self.session_factory() as session:
+            for stored in session.scalars(select(DbIngestionJob)).all():
+                created_at = stored.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                source_is_old = created_at < cutoff
+                if stored.archive_root:
+                    candidate = (Path(stored.archive_root) / stored.source_path).resolve()
+                    if (
+                        candidate.is_relative_to(Path(stored.archive_root).resolve())
+                        and candidate.is_file()
+                    ):
+                        source_is_old = candidate.stat().st_mtime < cutoff.timestamp()
+                if source_is_old:
+                    expired_ids.append(stored.id)
+            if expired_ids:
+                session.execute(delete(Transcript).where(Transcript.job_id.in_(expired_ids)))
+                session.execute(delete(DbIngestionJob).where(DbIngestionJob.id.in_(expired_ids)))
+                session.commit()
+        for job_id in expired_ids:
+            self.job_store.remove(job_id)
+            self.results.pop(job_id, None)
+        return len(expired_ids)
 
     def _source_exists(self, source_path: str) -> bool:
         try:

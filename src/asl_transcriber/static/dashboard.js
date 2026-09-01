@@ -2,6 +2,13 @@ const recordings = document.querySelector('#recordings');
 const activity = document.querySelector('#activity');
 const searchInput = document.querySelector('#search-input');
 const callsignCards = document.querySelector('#last-heard-callsigns');
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+function authenticatedFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+  return fetch(url, { ...options, headers });
+}
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
@@ -69,7 +76,7 @@ function renderJobs(items, databaseTotals = {}) {
     <article class="recording" data-source-path="${esc(item.source_path)}">
       <div class="recording-meta"><span class="recording-path">${esc(item.source_path)}</span><span class="recording-date">${item.timestamp ? esc(new Date(item.timestamp).toLocaleString()) : 'Timestamp unavailable'}</span><span class="status ${item.status}">${esc(item.status)}</span></div>
       <button class="play-button" type="button" data-audio-url="${esc(item.audio_url)}" aria-label="Play ${esc(item.source_path)}">▶ Play audio</button>
-      <p class="transcript">${item.transcript ? `${linkedTranscript(item.transcript.display_text, item.callsigns)}${item.transcript.provisional ? ' <span style="color:var(--muted)">(provisional)</span>' : ''}` : '<span style="color:var(--muted)">Awaiting local transcription</span>'}</p>
+      <p class="transcript">${item.transcript ? `${linkedTranscript(item.transcript.display_text, item.callsigns)}${item.transcript.provisional ? ' <span class="muted-text">(provisional)</span>' : ''}` : '<span class="muted-text">Awaiting local transcription</span>'}</p>
     </article>`).join('');
   recordings.querySelectorAll('.play-button').forEach(button => button.addEventListener('click', () => playAudio(button)));
   recordings.querySelectorAll('.transcript-callsign').forEach(button => button.addEventListener('click', () => revealCallsign(button.dataset.callsign)));
@@ -967,7 +974,7 @@ async function startTopologyCrawl(restart = false) {
   if (!item) return;
   const home = encodeURIComponent(controlledNodeId());
   const root = encodeURIComponent(item.target_identifier);
-  const response = await fetch(`/ui/nodes/${home}/topology/${root}/crawl?restart=${restart}`, { method: 'POST' });
+  const response = await authenticatedFetch(`/ui/nodes/${home}/topology/${root}/crawl?restart=${restart}`, { method: 'POST' });
   if (response.ok) {
     topologyGraph = await response.json();
     renderTopology();
@@ -1084,7 +1091,7 @@ async function loadFavorites() {
 async function addConnectedFavorite(identifier) {
   const connection = currentConnections.find(item => String(item.identifier) === String(identifier));
   const label = connection?.display_name || connection?.callsign || String(identifier);
-  const response = await fetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites`, {
+  const response = await authenticatedFetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ target_identifier: String(identifier), label, callsign: connection?.callsign || null }),
@@ -1142,7 +1149,7 @@ function showStatusWindow(name, text) {
 
 document.querySelector('#refresh-node').addEventListener('click', loadNodeStatus);
 document.querySelector('#ping-node').addEventListener('click', async () => {
-  const response = await fetch('/api/v1/node/ping', { method: 'POST' });
+  const response = await authenticatedFetch('/api/v1/node/ping', { method: 'POST' });
   setControlResult(response.ok ? 'Node responded to AMI ping.' : `Ping failed (${response.status}).`, !response.ok);
 });
 document.querySelectorAll('.node-action').forEach(button => button.addEventListener('click', () => {
@@ -1156,7 +1163,7 @@ document.querySelectorAll('.node-action').forEach(button => button.addEventListe
 }));
 async function runCommand(name, target = null) {
   const nodeId = controlledNodeId();
-  const response = await fetch(`/ui/node/${encodeURIComponent(nodeId)}/command`, {
+  const response = await authenticatedFetch(`/ui/node/${encodeURIComponent(nodeId)}/command`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, target, confirmed: true }),
   });
@@ -1199,7 +1206,7 @@ document.querySelector('#run-function').addEventListener('click', async () => {
   const functionInput = document.querySelector('#function-code');
   const code = functionInput.value.trim();
   if (!code) return;
-  const response = await fetch(`/ui/node/${encodeURIComponent(nodeId)}/function`, {
+  const response = await authenticatedFetch(`/ui/node/${encodeURIComponent(nodeId)}/function`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ function: code }),
   });
@@ -1294,6 +1301,10 @@ document.querySelector('#open-settings').addEventListener('click', () => {
 });
 document.querySelector('#close-settings').addEventListener('click', () => settingsModal.setAttribute('hidden', ''));
 settingsModal.addEventListener('click', event => { if (event.target === settingsModal) settingsModal.setAttribute('hidden', ''); });
+document.querySelector('#sign-out')?.addEventListener('click', async () => {
+  const response = await authenticatedFetch('/auth/logout', { method: 'POST' });
+  if (response.redirected) window.location.assign(response.url);
+});
 
 /* Favorite metadata editor */
 const favoriteModal = document.querySelector('#favorite-modal');
@@ -1316,7 +1327,7 @@ favoriteModal.addEventListener('click', event => { if (event.target === favorite
 document.querySelector('#favorite-form').addEventListener('submit', async event => {
   event.preventDefault();
   const favoriteId = document.querySelector('#favorite-id').value;
-  const response = await fetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites/${encodeURIComponent(favoriteId)}`, {
+  const response = await authenticatedFetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites/${encodeURIComponent(favoriteId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1338,7 +1349,7 @@ document.querySelector('#favorite-form').addEventListener('submit', async event 
 document.querySelector('#delete-favorite').addEventListener('click', async () => {
   const favoriteId = document.querySelector('#favorite-id').value;
   const target = document.querySelector('#favorite-target').value;
-  const response = await fetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites/${encodeURIComponent(favoriteId)}`, { method: 'DELETE' });
+  const response = await authenticatedFetch(`/ui/nodes/${encodeURIComponent(controlledNodeId())}/favorites/${encodeURIComponent(favoriteId)}`, { method: 'DELETE' });
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
     setControlResult(detail.detail || `Favorite could not be removed (${response.status}).`, true);

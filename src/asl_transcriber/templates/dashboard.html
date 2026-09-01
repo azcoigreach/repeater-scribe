@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <title>REPEATER SCRIBE</title>
   <link rel="icon" id="favicon" type="image/png" sizes="256x256" href="/static/repeater-scribe-state0-256px.png">
   <link rel="apple-touch-icon" href="/static/repeater-scribe-state0-256px.png">
@@ -16,6 +17,7 @@
       <div class="menu" id="main-menu">
         <button class="menu-trigger icon-button" id="main-menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Open menu"><span class="hamburger-icon" aria-hidden="true"></span></button>
         <div class="menu-panel menu-panel-right" id="main-menu-panel" hidden>
+          <div class="menu-identity">{{ identity }} · {{ role }}</div>
           <div class="menu-item has-submenu" data-submenu="view-submenu" role="button" tabindex="0">
             <span>VIEW</span><span class="submenu-caret">&#9666;</span>
           </div>
@@ -46,6 +48,7 @@
             </div>
           </div>
           <div class="menu-item" id="open-settings" role="button" tabindex="0"><span>Settings</span></div>
+          {% if csrf_token %}<button class="menu-action" id="sign-out" type="button">Sign out</button>{% endif %}
         </div>
       </div>
     </div>
