@@ -91,6 +91,8 @@ def main() -> None:
         if not args.name.strip() or len(args.name) > 128:
             parser.error("token name must contain 1 to 128 characters")
         token = create_api_token(args.name.strip(), args.role)
+        # The operator explicitly requested this one-time token; stdout is its delivery channel.
+        # codeql[py/clear-text-logging-sensitive-data]
         print(json.dumps({"name": args.name.strip(), "role": args.role, "token": token}))
         return
 
@@ -98,6 +100,8 @@ def main() -> None:
         from asl_transcriber.auth import revoke_api_token
 
         revoked = revoke_api_token(args.name.strip())
+        # Token names are non-secret identifiers, and revocation returns no token material.
+        # codeql[py/clear-text-logging-sensitive-data]
         print(json.dumps({"name": args.name.strip(), "revoked": revoked}))
         return
 

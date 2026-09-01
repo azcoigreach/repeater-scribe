@@ -54,6 +54,10 @@ container from starting. Use this least-privilege layout:
 - Secret files owned by the deployment account, group `10001`, mode `0640`.
 - Recheck owner, group, mode, and non-empty size after every rotation.
 
+The session secret keys stored session, OIDC-state, and named API-token digests.
+Rotating it invalidates all three. Plan for browser sign-in and machine-token
+replacement immediately after a rotation.
+
 Do not make secret files world-readable. Prefer changing only the three exact
 session, OIDC, and AMI files. Diagnose mounts and presence metadata before
 changing permissions.

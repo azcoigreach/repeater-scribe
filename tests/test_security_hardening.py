@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
@@ -21,7 +20,7 @@ from joserfc.jwk import import_key
 from pydantic import ValidationError
 
 from asl_transcriber import auth
-from asl_transcriber.auth import create_api_token
+from asl_transcriber.auth import create_api_token, token_digest
 from asl_transcriber.config import Settings, settings
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.main import app
@@ -36,7 +35,7 @@ def _session(role: str) -> tuple[str, str]:
     with SessionLocal() as session:
         session.add(
             AuthSession(
-                token_hash=hashlib.sha256(raw.encode()).hexdigest(),
+                token_hash=token_digest(raw),
                 subject=f"subject-{uuid4()}",
                 identity=f"{role}@example.test",
                 role=role,
@@ -161,7 +160,7 @@ def test_database_api_tokens_are_hashed_and_authorized() -> None:
     raw = create_api_token(name, "admin")
     with SessionLocal() as session:
         stored = session.query(ApiToken).filter_by(name=name).one()
-        assert stored.token_hash == hashlib.sha256(raw.encode()).hexdigest()
+        assert stored.token_hash == token_digest(raw)
         assert raw not in stored.token_hash
     response = TestClient(app).get(
         "/api/v1/system/info", headers={"Authorization": f"Bearer {raw}"}
@@ -217,9 +216,7 @@ def test_oidc_code_flow_validates_signed_token_and_prevents_state_replay(monkeyp
         authorization_url = await auth.oidc_authorization_url("/after-login")
         state = parse_qs(urlparse(authorization_url).query)["state"][0]
         with SessionLocal() as session:
-            login = session.get(
-                OidcLoginState, hashlib.sha256(state.encode()).hexdigest()
-            )
+            login = session.get(OidcLoginState, token_digest(state))
             assert login is not None
             now = int(datetime.now(UTC).timestamp())
             id_token = jwt.encode(

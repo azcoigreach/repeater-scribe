@@ -34,8 +34,12 @@ class Principal:
     session_hash: str | None = None
 
 
-def _hash(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+def token_digest(value: str) -> str:
+    """Return a keyed digest for a high-entropy authentication token."""
+    message = b"repeater-scribe-token-v1\0" + value.encode("utf-8")
+    return hmac.new(
+        settings.resolved_session_secret.encode("utf-8"), message, hashlib.sha256
+    ).hexdigest()
 
 
 def _utc(value: datetime) -> datetime:
@@ -75,7 +79,7 @@ def audit_event(
 
 
 def _session_principal(raw_token: str) -> Principal | None:
-    token_hash = _hash(raw_token)
+    token_hash = token_digest(raw_token)
     now = datetime.now(UTC)
     with SessionLocal() as session:
         stored = session.get(AuthSession, token_hash)
@@ -101,7 +105,7 @@ def _session_principal(raw_token: str) -> Principal | None:
 
 def _api_principal(raw_token: str) -> Principal | None:
     now = datetime.now(UTC)
-    token_hash = _hash(raw_token)
+    token_hash = token_digest(raw_token)
     with SessionLocal() as session:
         stored = session.scalar(
             select(ApiToken).where(ApiToken.token_hash == token_hash, ApiToken.enabled.is_(True))
@@ -288,7 +292,7 @@ async def oidc_authorization_url(next_path: str | None = None) -> str:
         session.execute(delete(OidcLoginState).where(OidcLoginState.expires_at <= now))
         session.add(
             OidcLoginState(
-                state_hash=_hash(state),
+                state_hash=token_digest(state),
                 nonce=nonce,
                 code_verifier=verifier,
                 next_path=_safe_next_path(next_path),
@@ -354,7 +358,7 @@ def _identity_is_allowed(claims: dict[str, Any]) -> bool:
 async def complete_oidc_login(code: str, state: str) -> tuple[str, Principal, str]:
     now = datetime.now(UTC)
     with SessionLocal() as session:
-        login = session.get(OidcLoginState, _hash(state))
+        login = session.get(OidcLoginState, token_digest(state))
         if login is None or _utc(login.expires_at) <= now:
             raise HTTPException(status_code=400, detail="Invalid or expired login state")
         nonce = login.nonce
@@ -441,7 +445,7 @@ async def complete_oidc_login(code: str, state: str) -> tuple[str, Principal, st
     with SessionLocal() as session:
         session.add(
             AuthSession(
-                token_hash=_hash(raw_session),
+                token_hash=token_digest(raw_session),
                 subject=subject,
                 identity=identity[:255],
                 role=role,
@@ -459,7 +463,7 @@ def revoke_session(raw_token: str | None) -> None:
     if not raw_token:
         return
     with SessionLocal() as session:
-        stored = session.get(AuthSession, _hash(raw_token))
+        stored = session.get(AuthSession, token_digest(raw_token))
         if stored is not None:
             session.delete(stored)
             session.commit()
@@ -468,7 +472,7 @@ def revoke_session(raw_token: str | None) -> None:
 def create_api_token(name: str, role: Role) -> str:
     raw_token = f"aslt_{secrets.token_urlsafe(36)}"
     with SessionLocal() as session:
-        session.add(ApiToken(name=name, token_hash=_hash(raw_token), role=role))
+        session.add(ApiToken(name=name, token_hash=token_digest(raw_token), role=role))
         session.commit()
     return raw_token
 
