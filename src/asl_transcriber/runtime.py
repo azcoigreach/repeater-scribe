@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,7 +16,7 @@ from asl_transcriber.ingestion.service import ArchiveIngestionService
 from asl_transcriber.models import Base as ModelBase
 from asl_transcriber.models import IngestionJob as DbIngestionJob
 from asl_transcriber.models import Transcript
-from asl_transcriber.transcription.base import TranscriptResult
+from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
 from asl_transcriber.workers.processor import ProcessingResult, ProcessingWorker
 
 
@@ -57,11 +58,22 @@ class ArchiveRuntime:
     @staticmethod
     def _ensure_schema(bind: Engine) -> None:
         inspector = inspect(bind)
-        columns = {column["name"] for column in inspector.get_columns("ingestion_jobs")}
-        if "archive_root" not in columns:
+        job_columns = {column["name"] for column in inspector.get_columns("ingestion_jobs")}
+        if "archive_root" not in job_columns:
             with bind.begin() as connection:  # type: ignore[union-attr]
                 connection.execute(
                     text("ALTER TABLE ingestion_jobs ADD COLUMN archive_root VARCHAR(1024)")
+                )
+        transcript_columns = {
+            column["name"] for column in inspector.get_columns("transcripts")
+        }
+        if "callsign_mentions_json" not in transcript_columns:
+            with bind.begin() as connection:  # type: ignore[union-attr]
+                connection.execute(
+                    text(
+                        "ALTER TABLE transcripts ADD COLUMN callsign_mentions_json "
+                        "TEXT NOT NULL DEFAULT '[]'"
+                    )
                 )
 
     def _backfill_archive_roots(self, bind: Engine) -> None:
@@ -146,6 +158,7 @@ class ArchiveRuntime:
                 display_text=transcript.display_text,
                 language=transcript.language,
                 confidence=transcript.confidence,
+                callsign_mentions=transcript.callsign_mentions,
             )
 
         worker = ProcessingWorker(job_store=self.job_store, process_func=process)
@@ -177,6 +190,7 @@ class ArchiveRuntime:
             display_text=display_text if display_text is not None else transcript.display_text,
             language=transcript.language,
             confidence=transcript.confidence,
+            callsign_mentions=transcript.callsign_mentions,
         )
         self.live_results[source_path] = result
         self._events.put(
@@ -285,6 +299,9 @@ class ArchiveRuntime:
                         display_text=stored.transcript.display_text,
                         language=stored.transcript.language,
                         confidence=stored.transcript.confidence,
+                        callsign_mentions=self._deserialize_callsign_mentions(
+                            stored.transcript.callsign_mentions_json
+                        ),
                     )
             session.commit()
 
@@ -307,7 +324,46 @@ class ArchiveRuntime:
             transcript.display_text = result.display_text
             transcript.language = result.language
             transcript.confidence = result.confidence
+            transcript.callsign_mentions_json = json.dumps(
+                [
+                    {
+                        "callsign": mention.callsign,
+                        "start": mention.start,
+                        "end": mention.end,
+                        "confidence": mention.confidence,
+                        "acoustic_confidence": mention.acoustic_confidence,
+                        "recognition_confidence": mention.recognition_confidence,
+                        "evidence": list(mention.evidence),
+                    }
+                    for mention in (result.callsign_mentions or [])
+                ]
+            )
             session.commit()
+
+    @staticmethod
+    def _deserialize_callsign_mentions(value: str | None) -> list[TranscriptCallsignMention]:
+        try:
+            items = json.loads(value or "[]")
+            return [
+                TranscriptCallsignMention(
+                    callsign=str(item["callsign"]),
+                    start=float(item["start"]),
+                    end=float(item["end"]),
+                    confidence=float(item.get("confidence", 0.5)),
+                    acoustic_confidence=(
+                        float(item["acoustic_confidence"])
+                        if item.get("acoustic_confidence") is not None
+                        else None
+                    ),
+                    recognition_confidence=float(
+                        item.get("recognition_confidence", 0.5)
+                    ),
+                    evidence=tuple(str(value) for value in item.get("evidence", [])),
+                )
+                for item in items
+            ]
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return []
 
     def activity_events(self) -> list[ActivityLogEvent]:
         events: list[ActivityLogEvent] = []

@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -60,6 +60,7 @@ from asl_transcriber.topology import (
     ensure_topology_crawl,
     serialize_topology,
 )
+from asl_transcriber.transcription.base import TranscriptCallsignMention
 from asl_transcriber.transcription.callsigns import (
     CallsignResolver,
     extract_callsigns,
@@ -139,6 +140,33 @@ def recording_timestamp(source_path: str) -> str | None:
         tzinfo=UTC, microsecond=int(match.group(2)) * 10000
     )
     return timestamp.isoformat()
+
+
+def callsign_confidence_score(
+    best_observation: float,
+    observation_count: int,
+    recording_count: int,
+    *,
+    qrz_confirmed: bool = False,
+) -> float:
+    """Combine independent evidence into an explainable, bounded estimate."""
+    score = max(0.05, min(0.98, best_observation))
+    score = 1.0 - (
+        (1.0 - score)
+        * (0.9 ** min(max(0, observation_count - 1), 5))
+        * (0.8 ** min(max(0, recording_count - 1), 3))
+    )
+    if qrz_confirmed:
+        score = 1.0 - ((1.0 - score) * 0.65)
+    return min(0.99, score)
+
+
+def callsign_confidence_label(score: float) -> str:
+    if score >= 0.88:
+        return "High confidence"
+    if score >= 0.75:
+        return "Probable"
+    return "Tentative"
 
 
 def current_qrz_client() -> QrzClient | None:
@@ -1098,9 +1126,9 @@ def recordings(
                 ),
                 "timestamp": recording_timestamp(source_path),
                 "audio_url": f"/api/v1/audio?path={quote(source_path)}",
-                "callsigns": (
-                    list(extract_callsigns(live_result.display_text)) if live_result else []
-                ),
+                "callsigns": list(extract_callsigns(live_result.display_text))
+                if live_result
+                else [],
             }
         )
     all_items: list[dict[str, object]] = waiting_items + [
@@ -1160,48 +1188,256 @@ def audio(path: str) -> FileResponse:
 @app.get("/api/v1/callsigns/last-heard", dependencies=[Depends(require_viewer)])
 def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
     active_runtime = current_runtime()
-    heard: dict[str, dict[str, str | None]] = {}
-    sources: list[tuple[str, str]] = []
+    heard: dict[str, dict[str, object]] = {}
+    heard_times: dict[str, datetime | None] = {}
+    observations: dict[str, list[TranscriptCallsignMention | None]] = {}
+    recording_sources: dict[str, set[str]] = {}
+    sources: list[tuple[str, object]] = []
     sources.extend(
-        (source_path, result.display_text)
+        (source_path, result)
         for source_path, result in active_runtime.live_results.items()
     )
     sources.extend(
-        (job.source_path, active_runtime.results[job.id].display_text)
+        (job.source_path, active_runtime.results[job.id])
         for job in active_runtime.jobs()
         if job.id in active_runtime.results
     )
-    for source_path, text in sorted(
-        sources, key=lambda item: recording_timestamp(item[0]) or item[0], reverse=True
-    ):
-        for callsign in extract_callsigns(text):
-            if callsign not in heard:
-                heard[callsign] = {
-                    "callsign": callsign,
-                    "last_heard_at": recording_timestamp(source_path),
-                    "source_path": source_path,
-                }
+
+    for source_path, result in sources:
+        started_at_value = recording_timestamp(source_path)
+        started_at = datetime.fromisoformat(started_at_value) if started_at_value else None
+        mentions = getattr(result, "callsign_mentions", None) or []
+        candidates: list[
+            tuple[
+                str,
+                datetime | None,
+                float | None,
+                str,
+                TranscriptCallsignMention | None,
+            ]
+        ] = []
+        if mentions:
+            candidates.extend(
+                (
+                    mention.callsign,
+                    started_at + timedelta(seconds=max(0.0, mention.end))
+                    if started_at
+                    else None,
+                    max(0.0, mention.end),
+                    "segment",
+                    mention,
+                )
+                for mention in mentions
+            )
+        else:
+            candidates.extend(
+                (callsign, started_at, None, "recording", None)
+                for callsign in extract_callsigns(str(getattr(result, "display_text", "")))
+            )
+
+        for callsign, last_heard_at, offset, precision, mention in candidates:
+            observations.setdefault(callsign, []).append(mention)
+            recording_sources.setdefault(callsign, set()).add(source_path)
+            current_time = heard_times.get(callsign)
+            if callsign in heard and (
+                current_time is not None
+                and (last_heard_at is None or current_time >= last_heard_at)
+            ):
+                continue
+            item: dict[str, object] = {
+                "callsign": callsign,
+                "last_heard_at": last_heard_at.isoformat() if last_heard_at else None,
+                "source_path": source_path,
+            }
+            if offset is not None:
+                item["heard_offset_seconds"] = offset
+                item["time_precision"] = precision
+            heard[callsign] = item
+            heard_times[callsign] = last_heard_at
+
+    for callsign, item in heard.items():
+        mentions = observations[callsign]
+        timed_mentions = [mention for mention in mentions if mention is not None]
+        best_observation = max(
+            (mention.confidence for mention in timed_mentions), default=0.45
+        )
+        observation_count = len(mentions)
+        recording_count = len(recording_sources[callsign])
+        score = callsign_confidence_score(
+            best_observation,
+            observation_count,
+            recording_count,
+        )
+        evidence = list(
+            dict.fromkeys(
+                detail
+                for mention in sorted(
+                    timed_mentions, key=lambda value: value.confidence, reverse=True
+                )
+                for detail in mention.evidence
+            )
+        )
+        if observation_count > 1:
+            evidence.append(
+                f"Heard {observation_count} times across {recording_count} recording"
+                f"{'s' if recording_count != 1 else ''}"
+            )
+        if not timed_mentions:
+            evidence.append("Older transcript without saved acoustic evidence")
+        acoustic_values = [
+            mention.acoustic_confidence
+            for mention in timed_mentions
+            if mention.acoustic_confidence is not None
+        ]
+        item.update(
+            {
+                "confidence": round(score, 3),
+                "confidence_percent": round(score * 100),
+                "confidence_label": callsign_confidence_label(score),
+                "observation_count": observation_count,
+                "recording_count": recording_count,
+                "acoustic_quality_percent": (
+                    round(max(acoustic_values) * 100) if acoustic_values else None
+                ),
+                "evidence": evidence[:6],
+                "_best_observation": best_observation,
+            }
+        )
+
+    possible_extensions: dict[str, list[str]] = {}
+    for shorter, item in heard.items():
+        extensions = [
+            longer
+            for longer in heard
+            if longer != shorter
+            and longer.startswith(shorter)
+            and len(longer) - len(shorter) <= 2
+            and recording_sources[shorter] & recording_sources[longer]
+        ]
+        if not extensions:
+            continue
+        possible_extensions[shorter] = sorted(extensions, key=len, reverse=True)
+        raw_confidence = item["confidence"]
+        raw_evidence = item["evidence"]
+        assert isinstance(raw_confidence, (float, int))
+        assert isinstance(raw_evidence, list)
+        partial_score = min(float(raw_confidence), 0.59)
+        item.update(
+            {
+                "confidence": round(partial_score, 3),
+                "confidence_percent": round(partial_score * 100),
+                "confidence_label": "Possible partial",
+                "needs_review": True,
+                "possible_extension": possible_extensions[shorter][0],
+                "evidence": [
+                    f"Later audio may extend this to {possible_extensions[shorter][0]}",
+                    *raw_evidence,
+                ][:6],
+            }
+        )
 
     result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
-    recent = list(heard.values())[:result_limit]
+    sorted_heard = sorted(
+        heard.values(),
+        key=lambda item: heard_times[str(item["callsign"])]
+        or datetime.min.replace(tzinfo=UTC),
+        reverse=True,
+    )
     client = current_qrz_client()
     if client is None:
+        recent = sorted_heard[:result_limit]
+        for item in recent:
+            item.pop("_best_observation", None)
         return {"configured": False, "total": len(heard), "items": recent}
 
     items: list[dict[str, object]] = []
+    rejected = 0
     lookup_error: str | None = None
-    for item in recent:
+    selected_callsigns = {
+        str(item["callsign"]) for item in sorted_heard[:result_limit]
+    }
+    selected_callsigns.update(
+        extension
+        for callsign in tuple(selected_callsigns)
+        for extension in possible_extensions.get(callsign, [])
+    )
+    for item in (
+        candidate
+        for candidate in sorted_heard[:100]
+        if str(candidate["callsign"]) in selected_callsigns
+    ):
         if lookup_error is not None:
+            item.pop("_best_observation", None)
             items.append({**item, "status": "error", "error": lookup_error})
             continue
         try:
             details = client.lookup(str(item["callsign"])).serialize()
-            items.append({**item, **details})
+            if details["status"] == "not_found":
+                rejected += 1
+                continue
+            best_value = item.pop("_best_observation")
+            observation_value = item["observation_count"]
+            recording_value = item["recording_count"]
+            raw_evidence = item["evidence"]
+            assert isinstance(best_value, (float, int))
+            assert isinstance(observation_value, int)
+            assert isinstance(recording_value, int)
+            assert isinstance(raw_evidence, list)
+            score = callsign_confidence_score(
+                float(best_value),
+                observation_value,
+                recording_value,
+                qrz_confirmed=True,
+            )
+            if item.get("needs_review") is True:
+                score = min(score, 0.59)
+            evidence = [str(value) for value in raw_evidence]
+            evidence.insert(0, "QRZ confirms this callsign exists")
+            items.append(
+                {
+                    **item,
+                    **details,
+                    "confidence": round(score, 3),
+                    "confidence_percent": round(score * 100),
+                    "confidence_label": callsign_confidence_label(score),
+                    "evidence": evidence[:6],
+                }
+            )
         except QrzError as error:
             logger.warning("QRZ lookup failed for %s: %s", item["callsign"], error)
             lookup_error = str(error)
+            item.pop("_best_observation", None)
             items.append({**item, "status": "error", "error": lookup_error})
-    return {"configured": True, "total": len(heard), "items": items}
+    confirmed_callsigns = {
+        str(item["callsign"]) for item in items if item.get("status") == "found"
+    }
+    superseded = sum(
+        1
+        for item in items
+        if item.get("status") == "found"
+        and any(
+            extension in confirmed_callsigns
+            for extension in possible_extensions.get(str(item["callsign"]), [])
+        )
+    )
+    items = [
+        item
+        for item in items
+        if not (
+            item.get("status") == "found"
+            and any(
+                extension in confirmed_callsigns
+                for extension in possible_extensions.get(str(item["callsign"]), [])
+            )
+        )
+    ][:result_limit]
+    return {
+        "configured": True,
+        "total": len(items),
+        "rejected": rejected,
+        "superseded": superseded,
+        "items": items,
+    }
 
 
 @app.get("/api/v1/events")
