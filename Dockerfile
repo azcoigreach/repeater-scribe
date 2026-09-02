@@ -21,11 +21,16 @@ RUN python -m pip install --upgrade pip && \
     touch src/asl_transcriber/__init__.py && \
     python -m pip install . nvidia-cublas-cu12 nvidia-cudnn-cu12
 
+# Give the CUDA libraries a stable runtime path independent of the Python minor
+# version used by the pinned base image.
+RUN ln -s "$(python -c 'import site; print(site.getsitepackages()[0])')/nvidia" /opt/nvidia
+ENV LD_LIBRARY_PATH=/opt/nvidia/cublas/lib:/opt/nvidia/cudnn/lib
+
 COPY --chown=root:root . /app
 
 RUN python -m pip install --no-deps . && \
     cp src/asl_transcriber/__init__.py \
-        /usr/local/lib/python3.12/site-packages/asl_transcriber/__init__.py && \
+        "$(python -c 'import site; print(site.getsitepackages()[0])')/asl_transcriber/__init__.py" && \
     chmod -R a-w /app
 
 USER appuser

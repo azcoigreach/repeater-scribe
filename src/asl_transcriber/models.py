@@ -94,6 +94,7 @@ class Transcript(Base):
     display_text: Mapped[str] = mapped_column(Text, default="")
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    callsign_mentions_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
 
     job: Mapped[IngestionJob] = relationship(back_populates="transcript")
 

@@ -23,3 +23,23 @@ def test_runtime_processes_pending_archive_job_with_injected_engine(tmp_path: Pa
     assert len(results) == 1
     assert results[0].display_text == "hello"
     assert runtime.jobs()[0].status.value == "completed"
+
+
+def test_runtime_limits_background_final_processing(tmp_path: Path) -> None:
+    for name in ("one.wav", "two.wav"):
+        (tmp_path / name).write_bytes(b"audio")
+    runtime = ArchiveRuntime([tmp_path])
+    runtime.scan_once()
+    runtime.scan_once()
+
+    first = runtime.process_pending(
+        lambda _: TranscriptResult(raw_text="done", display_text="done"), limit=1
+    )
+
+    assert len(first) == 1
+    assert [job.status.value for job in runtime.jobs()].count("pending") == 1
+    second = runtime.process_pending(
+        lambda _: TranscriptResult(raw_text="done", display_text="done"), limit=1
+    )
+    assert len(second) == 1
+    assert all(job.status.value == "completed" for job in runtime.jobs())

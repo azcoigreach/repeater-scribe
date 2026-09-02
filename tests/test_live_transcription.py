@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from asl_transcriber.runtime import ArchiveRuntime
@@ -78,3 +79,34 @@ def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Pa
     assert event["provisional"] is True
 
     assert service.process_once(runtime) == 0
+
+
+def test_live_service_processes_all_growing_files_newest_first(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    older = archive / "100000" / "older.wav"
+    newer = archive / "100000" / "newer.wav"
+    older.parent.mkdir(parents=True)
+    older.write_bytes(b"older" * 1000)
+    newer.write_bytes(b"newer" * 1000)
+    os.utime(older, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(newer, ns=(2_000_000_000, 2_000_000_000))
+    runtime = ArchiveRuntime([archive])
+    runtime.scan_once()
+    processed: list[str] = []
+
+    class Snapshotter:
+        def snapshot(self, source: Path) -> Path:
+            processed.append(source.name)
+            snapshot = tmp_path / "snapshot.wav"
+            snapshot.write_bytes(b"snapshot")
+            return snapshot
+
+    service = LiveTranscriptionService(
+        snapshotter=Snapshotter(),  # type: ignore[arg-type]
+        transcribe=lambda _: TranscriptResult(raw_text="live", display_text="live"),
+    )
+
+    assert service.process_once(runtime) == 2
+    assert processed == ["newer.wav", "older.wav"]
+    assert "100000/newer.wav" in runtime.live_results
+    assert "100000/older.wav" in runtime.live_results

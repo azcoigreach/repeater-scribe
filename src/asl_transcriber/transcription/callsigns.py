@@ -96,7 +96,7 @@ _CALLSIGN_IN_TEXT = re.compile(
     re.IGNORECASE,
 )
 _US_CALLSIGN = re.compile(r"^(?:[KNW][A-Z]?|A[A-L])\d[A-Z]{1,3}$")
-_WORD = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)?|\d")
+_WORD = re.compile(r"[A-Za-z0-9]+(?:-[A-Za-z]+)?")
 _DIGIT_LIKE = {"I": "1", "L": "1", "O": "0"}
 _LOW_COST_GROUPS = (
     frozenset("I1L"),
@@ -135,12 +135,26 @@ def normalize_callsigns(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
 
 def _is_callsign(candidate: str) -> bool:
     match = _CALLSIGN.fullmatch(candidate)
-    return match is not None and any(symbol.isalpha() for symbol in match.group("prefix"))
+    if match is None or not any(symbol.isalpha() for symbol in match.group("prefix")):
+        return False
+    if candidate.startswith(("K", "N", "W", "A")):
+        return _US_CALLSIGN.fullmatch(candidate) is not None
+    return True
 
 
 def extract_callsigns(text: str) -> tuple[str, ...]:
     """Return unique, normalized callsigns already present in transcript text."""
-    return normalize_callsigns([match.group(1) for match in _CALLSIGN_IN_TEXT.finditer(text)])
+    return normalize_callsigns(find_callsigns(text))
+
+
+def find_callsigns(text: str) -> tuple[str, ...]:
+    """Return normalized callsign occurrences, retaining repetitions as evidence."""
+    callsigns: list[str] = []
+    for match in _CALLSIGN_IN_TEXT.finditer(text):
+        normalized = normalize_callsigns((match.group(1),))
+        if normalized:
+            callsigns.append(normalized[0])
+    return tuple(callsigns)
 
 
 def callsign_hotwords(callsigns: list[str] | tuple[str, ...], extra: str | None = None) -> str:
@@ -216,7 +230,12 @@ class CallsignResolver:
                 if match is None:
                     continue
                 quality = (match.tier, match.score, -len(observed))
-                if best is None or quality < best[0]:
+                extends_best = (
+                    best is not None
+                    and match.callsign != best[2].callsign
+                    and match.callsign.startswith(best[2].callsign)
+                )
+                if best is None or quality < best[0] or extends_best:
                     best = (quality, end, match)
             if best is None:
                 index += 1
@@ -250,6 +269,24 @@ class CallsignResolver:
             return known_match
 
         structural = self._structural_callsign(observed)
+        extends_known = any(
+            observed.startswith(candidate) and observed != candidate
+            for candidate in self.known_callsigns
+        )
+        if structural is not None and extends_known:
+            callsign, changed_digit = structural
+            return _CandidateMatch(
+                callsign=callsign,
+                tier=2 if changed_digit else 3,
+                score=0.0,
+                confidence="medium" if changed_digit else "high",
+                reason="numeric-slot normalization" if changed_digit else "callsign formatting",
+            )
+
+        embedded_match = self._embedded_known_match(observed)
+        if embedded_match is not None:
+            return embedded_match
+
         if structural is not None:
             callsign, changed_digit = structural
             return _CandidateMatch(
@@ -284,10 +321,37 @@ class CallsignResolver:
             reason="repeated-symbol collapse",
         )
 
+    def _embedded_known_match(self, observed: str) -> _CandidateMatch | None:
+        """Recover a confirmed call embedded in a duplicated or run-together decode."""
+        matches: list[tuple[int, int, str]] = []
+        for index, candidate in enumerate(self.known_callsigns):
+            occurrences = observed.count(candidate)
+            remainder = len(observed) - (occurrences * len(candidate))
+            if occurrences >= 1 and 0 <= remainder <= 2:
+                matches.append((-occurrences, index, candidate))
+        if not matches:
+            return None
+        occurrences, _, candidate = min(matches)
+        confidence = "high" if occurrences < -1 else "medium"
+        return _CandidateMatch(
+            callsign=candidate,
+            tier=1,
+            score=0.0,
+            confidence=confidence,
+            reason="confirmed callsign recovered from run-together decode",
+        )
+
     def _known_match(self, observed: str) -> _CandidateMatch | None:
         if observed in self.known_callsigns:
             return _CandidateMatch(observed, 0, 0.0, "high", "exact local candidate")
         if not self.known_callsigns or len(observed) < 4:
+            return None
+        if _is_callsign(observed) and any(
+            observed.startswith(candidate) and observed != candidate
+            for candidate in self.known_callsigns
+        ):
+            # A confirmed shorter call must not consume the leading portion of a
+            # longer, structurally complete observation.
             return None
 
         ranked = sorted(
@@ -383,7 +447,7 @@ class CallsignResolver:
             return symbol
         digit_index = next((index for index, char in enumerate(current) if char.isdigit()), None)
         suffix_length = len(current) - digit_index - 1 if digit_index is not None else -1
-        if word.isalpha() and word.isupper() and len(word) <= 8:
+        if word.isalnum() and word.isupper() and len(word) <= 16:
             if digit_index is not None and suffix_length > 0:
                 return None
             return word

@@ -109,6 +109,12 @@ class QrzClient:
                 if record.status == "found"
             )
 
+    def cached_status(self, callsign: str) -> str | None:
+        """Return a cached validation status without triggering a QRZ request."""
+        with self._lock:
+            cached = self._cache.get(callsign.strip().upper())
+            return cached[1].status if cached is not None else None
+
     def _login(self) -> None:
         root = self._request(
             {"username": self.username, "password": self.password, "agent": self.agent}

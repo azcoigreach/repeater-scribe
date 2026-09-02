@@ -1,11 +1,7 @@
-"""Preserve the migration lineage shipped by the 0.6.0 container image.
+"""Persist callsign mention timing for accurate last-heard values.
 
 Revision ID: callsign_mention_timing
 Revises: favorite_key_stats
-
-The associated application feature was reverted, but deployed databases may
-already identify this revision as their current Alembic head. Keeping the
-idempotent migration in the chain allows those databases to upgrade safely.
 """
 
 from __future__ import annotations

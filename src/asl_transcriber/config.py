@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     request_rate_per_minute: int = Field(default=300, ge=10, le=10000)
     anonymous_rate_per_minute: int = Field(default=60, ge=5, le=1000)
     control_rate_per_minute: int = Field(default=30, ge=1, le=600)
-    sse_connections_per_identity: int = Field(default=4, ge=1, le=32)
+    sse_connections_per_identity: int = Field(default=8, ge=1, le=32)
     retention_days: int = Field(default=0, ge=0, le=36500)
     audit_retention_days: int = Field(default=180, ge=1, le=3650)
     retry_backoff_seconds: int = Field(default=5)

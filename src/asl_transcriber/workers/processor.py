@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from asl_transcriber.ingestion.jobs import IngestionJob, JobState, JobStore
+from asl_transcriber.transcription.base import TranscriptCallsignMention
 
 
 @dataclass
@@ -14,6 +15,7 @@ class ProcessingResult:
     display_text: str
     language: str | None = None
     confidence: float | None = None
+    callsign_mentions: list[TranscriptCallsignMention] | None = None
 
 
 class ProcessingWorker:

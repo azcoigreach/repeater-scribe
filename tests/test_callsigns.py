@@ -4,6 +4,7 @@ from asl_transcriber.transcription.callsigns import (
     CallsignResolver,
     callsign_hotwords,
     extract_callsigns,
+    find_callsigns,
     normalize_callsigns,
 )
 
@@ -28,6 +29,11 @@ def test_hotwords_include_written_and_spoken_callsign() -> None:
 
 def test_extract_callsigns_preserves_first_mention_order_and_removes_duplicates() -> None:
     assert extract_callsigns("K7ABC called km7ghs, then K7ABC again.") == ("K7ABC", "KM7GHS")
+    assert find_callsigns("K7ABC called KM7GHS, then K7ABC again.") == (
+        "K7ABC",
+        "KM7GHS",
+        "K7ABC",
+    )
 
 
 def test_international_and_portable_callsigns_are_normalized_and_extracted() -> None:
@@ -109,3 +115,24 @@ def test_resolver_does_not_guess_between_equally_close_candidates() -> None:
     resolver = CallsignResolver(("K7ABC", "K7ABD"))
 
     assert resolver.resolve("K7ABX testing") == "K7ABX testing"
+
+
+def test_us_shaped_fragments_must_follow_us_callsign_structure() -> None:
+    assert extract_callsigns("KTW4LKT K04VAP AI4DQPK, but W3UW and AI4DQP") == (
+        "W3UW",
+        "AI4DQP",
+    )
+
+
+def test_resolver_recovers_confirmed_calls_from_run_together_decodes() -> None:
+    resolver = CallsignResolver(("W3UW", "N5AQM"))
+
+    assert resolver.resolve("W3UWUW3UW calling") == "W3UW calling"
+    assert resolver.resolve("MN5AQMM in Chandler") == "N5AQM in Chandler"
+
+
+def test_confirmed_prefix_does_not_consume_a_longer_complete_callsign() -> None:
+    resolver = CallsignResolver(("KM7GH",))
+
+    assert resolver.resolve("Kilo Mike Seven Golf Hotel Sierra") == "KM7GHS"
+    assert resolver.resolve("KM7GHS checking in") == "KM7GHS checking in"

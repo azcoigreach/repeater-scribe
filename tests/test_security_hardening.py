@@ -123,11 +123,12 @@ def test_host_request_size_rate_and_sse_limits(monkeypatch) -> None:
     assert oversized.headers["x-content-type-options"] == "nosniff"
 
     token = create_api_token(f"rate-{uuid4()}", "viewer")
-    monkeypatch.setattr(settings, "request_rate_per_minute", 10)
+    monkeypatch.setattr(settings, "request_rate_per_minute", 2)
     client = TestClient(app)
     headers = {"Authorization": f"Bearer {token}"}
-    assert all(client.get("/health", headers=headers).status_code == 200 for _ in range(10))
-    assert client.get("/health", headers=headers).status_code == 429
+    assert all(client.get("/api/v1/activity", headers=headers).status_code == 200 for _ in range(3))
+    assert all(client.post("/missing", headers=headers).status_code == 404 for _ in range(2))
+    assert client.post("/missing", headers=headers).status_code == 429
 
     monkeypatch.setattr(settings, "sse_connections_per_identity", 1)
     limiter = SseConnectionLimiter()
