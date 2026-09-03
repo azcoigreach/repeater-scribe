@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from queue import Queue
+from queue import Full, Queue
 from threading import RLock
 from time import monotonic
 
@@ -59,7 +59,8 @@ class ArchiveRuntime:
         ]
         self.results: dict[str, ProcessingResult] = {}
         self.live_results: dict[str, ProcessingResult] = {}
-        self._events: Queue[dict[str, object]] = Queue()
+        self._subscribers: set[Queue[dict[str, object]]] = set()
+        self._subscriber_lock = RLock()
         self._restore_state()
 
     def scan_once(self) -> list[IngestionJob]:
@@ -216,7 +217,14 @@ class ArchiveRuntime:
         return results
 
     def subscribe(self) -> Queue[dict[str, object]]:
-        return self._events
+        subscriber: Queue[dict[str, object]] = Queue(maxsize=100)
+        with self._subscriber_lock:
+            self._subscribers.add(subscriber)
+        return subscriber
+
+    def unsubscribe(self, subscriber: Queue[dict[str, object]]) -> None:
+        with self._subscriber_lock:
+            self._subscribers.discard(subscriber)
 
     def set_live_result(
         self, source_path: str, transcript: TranscriptResult, *, display_text: str | None = None
@@ -231,7 +239,7 @@ class ArchiveRuntime:
             callsign_mentions=transcript.callsign_mentions,
         )
         self.live_results[source_path] = result
-        self._events.put(
+        self._broadcast(
             {
                 "id": None,
                 "source_path": source_path,
@@ -258,7 +266,17 @@ class ArchiveRuntime:
         return payload
 
     def _publish(self, job: IngestionJob, result: ProcessingResult | None = None) -> None:
-        self._events.put(self._event_payload(job, result))
+        self._broadcast(self._event_payload(job, result))
+
+    def _broadcast(self, payload: dict[str, object]) -> None:
+        with self._subscriber_lock:
+            subscribers = tuple(self._subscribers)
+        for subscriber in subscribers:
+            try:
+                subscriber.put_nowait(payload)
+            except Full:
+                # A stale browser must not hold the publisher or other viewers hostage.
+                self.unsubscribe(subscriber)
 
     def _resolve_source(self, source_path: str, archive_root: str | None = None) -> Path:
         roots = [Path(archive_root)] if archive_root else self.roots

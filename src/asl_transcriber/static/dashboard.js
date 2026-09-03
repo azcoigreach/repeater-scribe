@@ -4,6 +4,7 @@ const searchInput = document.querySelector('#search-input');
 const callsignCards = document.querySelector('#last-heard-callsigns');
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 let confirmedCallsigns = null;
+let jobsRequestVersion = 0;
 
 function authenticatedFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -103,9 +104,10 @@ function playAudio(button) {
 player.addEventListener('ended', () => { if (activeButton) activeButton.textContent = '▶ Play audio'; activeButton = null; });
 
 async function loadJobs() {
+  const requestVersion = ++jobsRequestVersion;
   const query = encodeURIComponent(searchInput.value.trim());
   const response = await fetch(`/api/v1/recordings?limit=500${query ? `&q=${query}` : ''}`);
-  if (response.ok) {
+  if (response.ok && requestVersion === jobsRequestVersion) {
     const data = await response.json();
     renderJobs(data.items, data.database_totals);
   }
@@ -1236,6 +1238,7 @@ document.querySelector('#run-function').addEventListener('click', async () => {
 
 searchInput.addEventListener('input', loadJobs);
 loadJobs();
+setInterval(loadJobs, 30000);
 loadActivity();
 loadCallsigns();
 setInterval(loadActivity, 5000);

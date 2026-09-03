@@ -154,3 +154,11 @@ def test_archive_detail_client_refetches_metadata_after_audio_failure(archive_ui
     assert "method: 'HEAD'" not in script
     assert "audioStatus = (await response.json()).audio_status" in script
     assert "Audio expired under the retention policy." in script
+
+
+def test_dashboard_reconciles_jobs_and_ignores_stale_responses() -> None:
+    script = TestClient(app).get("/static/dashboard.js").text
+
+    assert "let jobsRequestVersion = 0" in script
+    assert "requestVersion === jobsRequestVersion" in script
+    assert "setInterval(loadJobs, 30000)" in script

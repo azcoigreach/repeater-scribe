@@ -26,7 +26,11 @@ class ArchiveScanner:
 
         entries: list[ArchiveEntry] = []
         for path in sorted(self.root.rglob("*")):
-            if not path.is_file():
+            try:
+                if not path.is_file():
+                    continue
+                stat = path.stat()
+            except OSError:
                 continue
 
             name = path.name
@@ -38,7 +42,6 @@ class ArchiveScanner:
                 continue
             if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
-            stat = path.stat()
             if self.retention_days > 0:
                 cutoff = datetime.now(UTC) - timedelta(days=self.retention_days)
                 if stat.st_mtime < cutoff.timestamp():
