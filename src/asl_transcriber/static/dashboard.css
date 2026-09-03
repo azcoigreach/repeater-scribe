@@ -10,6 +10,9 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .topbar { height: 60px; padding: 0 clamp(16px, 3vw, 40px); display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { display: flex; align-items: center; gap: 11px; font: 700 13px/1.1 "IBM Plex Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
 .brand-logo { height: 38px; width: auto; display: block; }
+.workspace-nav { display: flex; align-items: center; gap: 4px; }
+.workspace-link { padding: 8px 10px; border-bottom: 2px solid transparent; color: var(--muted); font-size: 12px; text-decoration: none; text-transform: uppercase; }
+.workspace-link:hover, .workspace-link.active { border-color: var(--green); color: var(--ink); }
 .menu { position: relative; }
 .menu-trigger { border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; background: var(--paper); color: var(--ink); cursor: pointer; font: 700 11px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
 .menu-trigger:hover { border-color: var(--green); color: var(--green); }
@@ -305,6 +308,7 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 
 @media (max-width: 900px) {
   .topbar { height: auto; min-height: 56px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+  .workspace-nav { order: 3; width: 100%; }
   .desktop { height: auto; overflow: visible; padding: 12px; background-size: 20px 20px; }
   .dock-root { position: static; flex-direction: column; }
   .dock-split { flex-direction: column !important; height: auto; }
