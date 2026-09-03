@@ -124,12 +124,17 @@ def test_all_authenticated_roles_can_open_archive_pages(archive_ui_db, monkeypat
 
 def test_archive_assets_use_database_api_and_id_based_audio(archive_ui_db) -> None:
     client = TestClient(app)
+    archive_html = client.get("/archive").text
     archive_script = client.get("/static/archive.js").text
     detail_script = client.get("/static/archive_detail.js").text
 
+    assert "/static/archive.css?v=20260903-1" in archive_html
+    assert "/static/archive.js?v=20260903-1" in archive_html
     assert "/api/v1/archive/recordings" in archive_script
     assert "/api/v1/archive/recordings/${encodeURIComponent(item.id)}/audio" in detail_script
     assert "/api/v1/audio?path=" not in archive_script + detail_script
+    assert "const filterLabel = field =>" in archive_script
+    assert "field.labels?.[0]?.firstChild?.textContent?.trim()" in archive_script
 
 
 def test_archive_browser_client_replaces_searches_and_keeps_cursors_out_of_urls(

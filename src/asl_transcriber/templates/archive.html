@@ -6,7 +6,7 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>Radio Archive | Repeater Scribe</title>
   <link rel="icon" type="image/png" href="/static/repeater-scribe-state0-256px.png">
-  <link rel="stylesheet" href="/static/archive.css">
+  <link rel="stylesheet" href="/static/archive.css?v=20260903-1">
 </head>
 <body>
   <header class="topbar">
@@ -30,6 +30,6 @@
     <div id="active-filters" class="active-filters" aria-label="Active filters"></div>
     <section class="results-section" aria-labelledby="results-heading"><div class="results-heading"><h2 id="results-heading">Recordings</h2><p id="loaded-count" aria-live="polite">Loading archive...</p></div><p id="archive-state" class="state" role="status" aria-live="polite">Loading archive...</p><div class="table-wrap"><table class="recording-table"><thead><tr><th>Time</th><th>Duration</th><th>Callsigns</th><th>Node</th><th>Status</th><th>Audio</th><th>Transcript</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="recordings"></tbody></table></div><div id="recording-cards" class="recording-cards"></div><div class="load-more-wrap"><button id="load-more" class="primary-button" type="button" hidden>Load more</button></div></section>
   </main>
-  <script src="/static/archive.js" defer></script>
+  <script src="/static/archive.js?v=20260903-1" defer></script>
 </body>
 </html>
