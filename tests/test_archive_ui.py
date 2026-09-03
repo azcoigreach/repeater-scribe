@@ -130,3 +130,24 @@ def test_archive_assets_use_database_api_and_id_based_audio(archive_ui_db) -> No
     assert "/api/v1/archive/recordings" in archive_script
     assert "/api/v1/archive/recordings/${encodeURIComponent(item.id)}/audio" in detail_script
     assert "/api/v1/audio?path=" not in archive_script + detail_script
+
+
+def test_archive_browser_client_replaces_searches_and_keeps_cursors_out_of_urls(
+    archive_ui_db,
+) -> None:
+    script = TestClient(app).get("/static/archive.js").text
+
+    assert "if (append && loading) return" in script
+    assert "controller?.abort()" in script
+    assert "requestVersion += 1" in script
+    assert "hasActiveFilters" in script
+    assert "query.set('cursor', cursor)" in script
+    assert "query.set(field.name, field.value)" in script
+
+
+def test_archive_detail_client_refetches_metadata_after_audio_failure(archive_ui_db) -> None:
+    script = TestClient(app).get("/static/archive_detail.js").text
+
+    assert "method: 'HEAD'" not in script
+    assert "audioStatus = (await response.json()).audio_status" in script
+    assert "Audio expired under the retention policy." in script
