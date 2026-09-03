@@ -223,7 +223,7 @@ class SecurityMiddleware:
         async def receive_validated() -> Message:
             if buffered_messages:
                 return buffered_messages.pop(0)
-            return {"type": "http.disconnect"}
+            return await receive()
 
         try:
             await self.app(scope, receive_validated, send_with_headers)
