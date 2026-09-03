@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from asl_transcriber.database import Base
-from asl_transcriber.models import IngestionJob, Transcript
+from asl_transcriber.models import IngestionJob, Recording, Transcript
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
 
@@ -226,3 +226,56 @@ def test_routine_scan_does_not_refresh_entire_catalog(tmp_path: Path, monkeypatc
     monkeypatch.setattr("asl_transcriber.runtime.refresh_audio", counted_refresh)
     runtime.scan_once()
     assert calls == 0
+
+
+def test_routine_scan_queries_only_current_sources_and_one_catalog_batch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "current.wav").write_bytes(b"audio")
+    engine = create_engine(f"sqlite:///{tmp_path / 'bounded.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as session:
+        for index in range(1_000):
+            session.add(
+                Recording(
+                    id=f"recording-{index}",
+                    source_path=f"missing-{index}.wav",
+                    archive_root=str(archive.resolve()),
+                    status="completed",
+                )
+            )
+            session.add(
+                IngestionJob(
+                    id=f"historical-{index}",
+                    source_path=f"missing-{index}.wav",
+                    archive_root=str(archive.resolve()),
+                    status="completed",
+                )
+            )
+        session.commit()
+    runtime = ArchiveRuntime(
+        [archive], session_factory=sessions, catalog_refresh_seconds=3600, catalog_refresh_batch_size=7
+    )
+    queried_paths: list[set[str]] = []
+    original = runtime._persisted_paths
+
+    def tracked_paths(root: str, paths: set[str]) -> set[str]:
+        queried_paths.append(paths)
+        return original(root, paths)
+
+    monkeypatch.setattr(runtime, "_persisted_paths", tracked_paths)
+    refreshed: list[str] = []
+
+    def tracked_refresh(recording: Recording) -> None:
+        refreshed.append(recording.id)
+
+    monkeypatch.setattr("asl_transcriber.runtime.refresh_audio", tracked_refresh)
+    runtime.scan_once()
+    runtime.scan_once()
+
+    assert queried_paths == [{"current.wav"}, {"current.wav"}]
+    assert len(runtime.jobs()) == 1
+    assert len(refreshed) == 14

@@ -31,13 +31,16 @@ class ArchiveRuntime:
         stable_seconds: float = 0.0,
         retention_days: int = 0,
         catalog_refresh_seconds: float = 300.0,
+        catalog_refresh_batch_size: int = 100,
     ) -> None:
         self.roots = [Path(root) for root in roots]
         self.session_factory = session_factory
         self.stable_seconds = stable_seconds
         self.retention_days = retention_days
         self.catalog_refresh_seconds = catalog_refresh_seconds
+        self.catalog_refresh_batch_size = catalog_refresh_batch_size
         self._last_catalog_refresh = 0.0
+        self._catalog_refresh_cursor: str | None = None
         self._scan_lock = RLock()
         bind = session_factory.kw.get("bind") if hasattr(session_factory, "kw") else None
         self._database_ready = bind is None or inspect(bind).has_table("ingestion_jobs")
@@ -63,25 +66,13 @@ class ArchiveRuntime:
 
     def _scan_once_locked(self) -> list[IngestionJob]:
         jobs: list[IngestionJob] = []
-        persisted: set[tuple[str | None, str]] = set()
-        if self._database_ready:
-            with self.session_factory() as session:
-                persisted = {
-                    (row.archive_root, row.source_path) for row in session.query(DbIngestionJob).all()
-                }
-                if monotonic() - self._last_catalog_refresh >= self.catalog_refresh_seconds:
-                    configured_roots = {str(root.resolve()) for root in self.roots}
-                    for recording in session.scalars(select(Recording)).all():
-                        if recording.archive_root in configured_roots:
-                            refresh_audio(recording)
-                    self._last_catalog_refresh = monotonic()
-                    session.commit()
         for service in self.services:
             root_key = str(service.root.resolve())
-            service._seen_paths.update(
-                source_path for archive_root, source_path in persisted if archive_root == root_key
-            )
-            new_jobs = service.scan_once(publish=not self._database_ready)
+            entries = service.discover()
+            current_paths = {entry.source_path for entry in entries}
+            if self._database_ready and current_paths:
+                service._seen_paths.update(self._persisted_paths(root_key, current_paths))
+            new_jobs = service.scan_once(entries, publish=not self._database_ready)
             if self._database_ready:
                 with self.session_factory() as session:
                     for job in new_jobs:
@@ -107,7 +98,52 @@ class ArchiveRuntime:
                     jobs.extend(new_jobs)
             for job in new_jobs:
                 self._publish(job)
+        if self._database_ready:
+            self._refresh_catalog_batch()
         return jobs
+
+    def _persisted_paths(self, archive_root: str, source_paths: set[str]) -> set[str]:
+        persisted: set[str] = set()
+        path_list = list(source_paths)
+        with self.session_factory() as session:
+            for offset in range(0, len(path_list), 500):
+                statement = select(DbIngestionJob.source_path).where(
+                    DbIngestionJob.archive_root == archive_root,
+                    DbIngestionJob.source_path.in_(path_list[offset : offset + 500]),
+                )
+                persisted.update(session.scalars(statement))
+        return persisted
+
+    def _refresh_catalog_batch(self) -> None:
+        now = monotonic()
+        if (
+            self._catalog_refresh_cursor is None
+            and now - self._last_catalog_refresh < self.catalog_refresh_seconds
+        ):
+            return
+        configured_roots = [str(root.resolve()) for root in self.roots]
+        if not configured_roots:
+            return
+        with self.session_factory() as session:
+            statement = select(Recording).where(Recording.archive_root.in_(configured_roots))
+            if self._catalog_refresh_cursor is not None:
+                statement = statement.where(Recording.id > self._catalog_refresh_cursor)
+            rows = list(
+                session.scalars(
+                    statement.order_by(Recording.id).limit(self.catalog_refresh_batch_size)
+                )
+            )
+            if not rows:
+                completed_batch = self._catalog_refresh_cursor is not None
+                self._catalog_refresh_cursor = None
+                self._last_catalog_refresh = now
+                if completed_batch and self.catalog_refresh_seconds == 0:
+                    self._refresh_catalog_batch()
+                return
+            for recording in rows:
+                refresh_audio(recording)
+            self._catalog_refresh_cursor = rows[-1].id
+            session.commit()
 
     def jobs(self) -> list[IngestionJob]:
         return self.job_store.list()
