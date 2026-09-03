@@ -31,7 +31,7 @@ class ArchiveIngestionService:
     def _hash_file(self, path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    def scan_once(self) -> list[IngestionJob]:
+    def scan_once(self, *, publish: bool = True) -> list[IngestionJob]:
         discovered = ArchiveScanner(self.root, retention_days=self.retention_days).discover()
         jobs: list[IngestionJob] = []
         now = self.clock()
@@ -54,11 +54,17 @@ class ArchiveIngestionService:
                 archive_root=str(self.root.resolve()),
                 status=JobState.PENDING,
             )
-            self.job_store.add(job)
-            self._seen_paths.add(rel_path)
+            if publish:
+                self.job_store.add(job)
+                self._seen_paths.add(rel_path)
             jobs.append(job)
 
         return jobs
+
+    def publish(self, job: IngestionJob) -> None:
+        """Expose a discovered job after its durable state has committed."""
+        self.job_store.add(job)
+        self._seen_paths.add(job.source_path)
 
     def waiting_paths(self) -> list[str]:
         return sorted(path for path in self._snapshots if path not in self._seen_paths)

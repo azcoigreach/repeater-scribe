@@ -5,6 +5,8 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Queue
+from threading import RLock
+from time import monotonic
 
 from sqlalchemy import func, inspect, select
 
@@ -28,11 +30,15 @@ class ArchiveRuntime:
         session_factory: Callable = SessionLocal,
         stable_seconds: float = 0.0,
         retention_days: int = 0,
+        catalog_refresh_seconds: float = 300.0,
     ) -> None:
         self.roots = [Path(root) for root in roots]
         self.session_factory = session_factory
         self.stable_seconds = stable_seconds
         self.retention_days = retention_days
+        self.catalog_refresh_seconds = catalog_refresh_seconds
+        self._last_catalog_refresh = 0.0
+        self._scan_lock = RLock()
         bind = session_factory.kw.get("bind") if hasattr(session_factory, "kw") else None
         self._database_ready = bind is None or inspect(bind).has_table("ingestion_jobs")
         self.job_store = JobStore()
@@ -52,6 +58,10 @@ class ArchiveRuntime:
         self._restore_state()
 
     def scan_once(self) -> list[IngestionJob]:
+        with self._scan_lock:
+            return self._scan_once_locked()
+
+    def _scan_once_locked(self) -> list[IngestionJob]:
         jobs: list[IngestionJob] = []
         persisted: set[tuple[str | None, str]] = set()
         if self._database_ready:
@@ -59,18 +69,19 @@ class ArchiveRuntime:
                 persisted = {
                     (row.archive_root, row.source_path) for row in session.query(DbIngestionJob).all()
                 }
-                configured_roots = {str(root.resolve()) for root in self.roots}
-                for recording in session.scalars(select(Recording)).all():
-                    if recording.archive_root in configured_roots:
-                        refresh_audio(recording)
-                session.commit()
+                if monotonic() - self._last_catalog_refresh >= self.catalog_refresh_seconds:
+                    configured_roots = {str(root.resolve()) for root in self.roots}
+                    for recording in session.scalars(select(Recording)).all():
+                        if recording.archive_root in configured_roots:
+                            refresh_audio(recording)
+                    self._last_catalog_refresh = monotonic()
+                    session.commit()
         for service in self.services:
             root_key = str(service.root.resolve())
             service._seen_paths.update(
                 source_path for archive_root, source_path in persisted if archive_root == root_key
             )
-            new_jobs = service.scan_once()
-            jobs.extend(new_jobs)
+            new_jobs = service.scan_once(publish=not self._database_ready)
             if self._database_ready:
                 with self.session_factory() as session:
                     for job in new_jobs:
@@ -91,6 +102,9 @@ class ArchiveRuntime:
                             )
                         )
                     session.commit()
+                    for job in new_jobs:
+                        service.publish(job)
+                    jobs.extend(new_jobs)
             for job in new_jobs:
                 self._publish(job)
         return jobs
@@ -259,9 +273,9 @@ class ArchiveRuntime:
                 session.commit()
         return len(expired_ids)
 
-    def _source_exists(self, source_path: str) -> bool:
+    def _source_exists(self, source_path: str, archive_root: str | None = None) -> bool:
         try:
-            self._resolve_source(source_path)
+            self._resolve_source(source_path, archive_root)
         except FileNotFoundError:
             return False
         return True
@@ -273,7 +287,7 @@ class ArchiveRuntime:
             for stored in session.query(DbIngestionJob).all():
                 if stored.archive_root not in {str(root.resolve()) for root in self.roots}:
                     continue
-                if not self._source_exists(stored.source_path):
+                if not self._source_exists(stored.source_path, stored.archive_root):
                     continue
                 job = IngestionJob(
                     source_path=stored.source_path,
