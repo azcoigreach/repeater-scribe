@@ -143,6 +143,9 @@ def test_archive_browser_client_replaces_searches_and_keeps_cursors_out_of_urls(
     assert "hasActiveFilters" in script
     assert "query.set('cursor', cursor)" in script
     assert "query.set(field.name, field.value)" in script
+    assert "form.elements[name].value = query.get(name) ?? ''" in script
+    assert "form.elements[name].value = stored ? stored.slice(0, 10) : ''" in script
+    assert "window.addEventListener('popstate', () => { clearTimeout(debounce);" in script
 
 
 def test_archive_detail_client_refetches_metadata_after_audio_failure(archive_ui_db) -> None:
