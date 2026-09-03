@@ -46,6 +46,10 @@ def upgrade() -> None:
     job_indexes = {index["name"] for index in sa.inspect(bind).get_indexes("ingestion_jobs")}
     if "ix_ingestion_jobs_archive_root" not in job_indexes:
         op.create_index("ix_ingestion_jobs_archive_root", "ingestion_jobs", ["archive_root"])
+    if "ix_ingestion_jobs_root_path" not in job_indexes:
+        op.create_index(
+            "ix_ingestion_jobs_root_path", "ingestion_jobs", ["archive_root", "source_path"]
+        )
     with op.batch_alter_table("recordings") as batch:
         batch.add_column(sa.Column("archive_root", sa.String(1024), nullable=True))
         batch.add_column(sa.Column("started_at", sa.DateTime(timezone=True), nullable=True))
@@ -102,6 +106,7 @@ def downgrade() -> None:
         batch.drop_column("recording_id")
     with op.batch_alter_table("ingestion_jobs") as batch:
         batch.drop_index("ix_ingestion_jobs_recording_id")
+        batch.drop_index("ix_ingestion_jobs_root_path")
         batch.drop_constraint("fk_ingestion_jobs_recording", type_="foreignkey")
         batch.drop_column("recording_id")
     with op.batch_alter_table("recordings") as batch:

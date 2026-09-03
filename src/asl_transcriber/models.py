@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from asl_transcriber.database import Base
@@ -66,6 +76,9 @@ class Recording(Base):
 
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
+    __table_args__ = (
+        Index("ix_ingestion_jobs_root_path", "archive_root", "source_path"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     created_at: Mapped[datetime] = mapped_column(

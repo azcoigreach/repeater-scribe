@@ -32,6 +32,7 @@ class ArchiveRuntime:
         retention_days: int = 0,
         catalog_refresh_seconds: float = 300.0,
         catalog_refresh_batch_size: int = 100,
+        clock: Callable[[], float] = monotonic,
     ) -> None:
         self.roots = [Path(root) for root in roots]
         self.session_factory = session_factory
@@ -39,7 +40,8 @@ class ArchiveRuntime:
         self.retention_days = retention_days
         self.catalog_refresh_seconds = catalog_refresh_seconds
         self.catalog_refresh_batch_size = catalog_refresh_batch_size
-        self._last_catalog_refresh = 0.0
+        self.clock = clock
+        self._last_catalog_refresh: float | None = None
         self._catalog_refresh_cursor: str | None = None
         self._scan_lock = RLock()
         bind = session_factory.kw.get("bind") if hasattr(session_factory, "kw") else None
@@ -115,9 +117,10 @@ class ArchiveRuntime:
         return persisted
 
     def _refresh_catalog_batch(self) -> None:
-        now = monotonic()
+        now = self.clock()
         if (
             self._catalog_refresh_cursor is None
+            and self._last_catalog_refresh is not None
             and now - self._last_catalog_refresh < self.catalog_refresh_seconds
         ):
             return

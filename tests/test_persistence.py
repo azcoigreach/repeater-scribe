@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from asl_transcriber.database import Base
@@ -256,8 +256,13 @@ def test_routine_scan_queries_only_current_sources_and_one_catalog_batch(
                 )
             )
         session.commit()
+    now = [10.0]
     runtime = ArchiveRuntime(
-        [archive], session_factory=sessions, catalog_refresh_seconds=3600, catalog_refresh_batch_size=7
+        [archive],
+        session_factory=sessions,
+        catalog_refresh_seconds=3600,
+        catalog_refresh_batch_size=7,
+        clock=lambda: now[0],
     )
     queried_paths: list[set[str]] = []
     original = runtime._persisted_paths
@@ -279,3 +284,20 @@ def test_routine_scan_queries_only_current_sources_and_one_catalog_batch(
     assert queried_paths == [{"current.wav"}, {"current.wav"}]
     assert len(runtime.jobs()) == 1
     assert len(refreshed) == 14
+
+
+def test_persisted_path_lookup_uses_composite_root_path_index(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    engine = create_engine(f"sqlite:///{tmp_path / 'query-plan.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as session:
+        plan = session.execute(
+            text(
+                "EXPLAIN QUERY PLAN SELECT source_path FROM ingestion_jobs "
+                "WHERE archive_root = :root AND source_path IN (:path)"
+            ),
+            {"root": str(archive.resolve()), "path": "current.wav"},
+        ).all()
+    assert any("ix_ingestion_jobs_root_path" in str(row) for row in plan)
