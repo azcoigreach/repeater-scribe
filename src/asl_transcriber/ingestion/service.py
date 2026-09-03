@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from time import monotonic
 
 from asl_transcriber.ingestion.jobs import IngestionJob, JobState, JobStore
-from asl_transcriber.ingestion.scanner import ArchiveScanner
+from asl_transcriber.ingestion.scanner import ArchiveEntry, ArchiveScanner
 
 
 class ArchiveIngestionService:
@@ -31,8 +31,13 @@ class ArchiveIngestionService:
     def _hash_file(self, path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    def scan_once(self) -> list[IngestionJob]:
-        discovered = ArchiveScanner(self.root, retention_days=self.retention_days).discover()
+    def discover(self) -> list[ArchiveEntry]:
+        return ArchiveScanner(self.root, retention_days=self.retention_days).discover()
+
+    def scan_once(
+        self, entries: Iterable[ArchiveEntry] | None = None, *, publish: bool = True
+    ) -> list[IngestionJob]:
+        discovered = list(entries) if entries is not None else self.discover()
         jobs: list[IngestionJob] = []
         now = self.clock()
 
@@ -49,12 +54,22 @@ class ArchiveIngestionService:
             if rel_path in self._seen_paths:
                 continue
 
-            job = IngestionJob(source_path=rel_path, status=JobState.PENDING)
-            self.job_store.add(job)
-            self._seen_paths.add(rel_path)
+            job = IngestionJob(
+                source_path=rel_path,
+                archive_root=str(self.root.resolve()),
+                status=JobState.PENDING,
+            )
+            if publish:
+                self.job_store.add(job)
+                self._seen_paths.add(rel_path)
             jobs.append(job)
 
         return jobs
+
+    def publish(self, job: IngestionJob) -> None:
+        """Expose a discovered job after its durable state has committed."""
+        self.job_store.add(job)
+        self._seen_paths.add(job.source_path)
 
     def waiting_paths(self) -> list[str]:
         return sorted(path for path in self._snapshots if path not in self._seen_paths)

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Durable `Recording` catalog records, independent from ingestion workflow rows,
+  with archive-relative identity, audio availability, and persisted transcripts.
+- SQLite FTS5 archive search and cursor-paginated archive recording, detail, and
+  ID-based audio APIs.
+
+### Fixed
+
+- Historical Alembic revisions now use frozen schema definitions instead of live
+  ORM metadata; container startup upgrades the database before serving traffic.
+- Request body limits are enforced for streamed/chunked ASGI payloads and QRZ XML
+  responses are bounded and parsed with `defusedxml`.
+
 ## [0.6.1] - 2026-09-01
 
 ### Added

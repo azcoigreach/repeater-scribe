@@ -53,9 +53,25 @@ controls require an operator. Ingestion and diagnostics require an administrator
 Raw AllStar functions have a separate default-off control because their meaning
 depends on the local `app_rpt` configuration.
 
-AMI control is disabled by default. Enabling it requires both AMI credentials
-and an application API key; arbitrary AMI actions are never exposed through the
-HTTP API.
+AMI control is disabled by default. Enabling it requires AMI credentials and an
+authenticated operator (a named API token, browser session, or legacy API key).
+Arbitrary AMI actions are never exposed through the HTTP API.
+
+## Archive catalog
+
+`Recording` is the durable historical catalog entity, identified by archive root
+and source-relative path. `IngestionJob` remains processing workflow state, and
+`Transcript` is a transcription result associated with both during the migration
+period. Source audio can be `missing`, `expired`, `archived`, or `protected`
+while recording metadata and text remain available. SQLite FTS5 indexes raw and
+corrected display text for the supported 0.7 archive backend.
+
+Archive results sort by derived recording start time descending, then recording
+UUID descending. A source name without an ASL timestamp uses `created_at` as its
+deterministic ordering value. Routine source rotation changes only audio status
+to `missing`; configured retention changes audio status to `expired` while
+retaining catalog and transcript history. Routine refreshes never replace
+intentional `expired`, `protected`, or `archived` states.
 
 ## Runtime lifecycle
 

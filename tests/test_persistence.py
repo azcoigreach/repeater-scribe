@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from asl_transcriber.database import Base
-from asl_transcriber.models import IngestionJob, Transcript
+from asl_transcriber.models import IngestionJob, Recording, Transcript
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
 
@@ -116,3 +117,187 @@ def test_database_totals_are_not_limited_to_dashboard_page_size(tmp_path: Path) 
     runtime = ArchiveRuntime([archive], session_factory=sessions)
 
     assert runtime.database_totals() == {"recordings": 503, "transcribed": 502}
+
+
+def test_runtime_resolves_duplicate_source_names_against_each_job_root(tmp_path: Path) -> None:
+    root_one = tmp_path / "root-one"
+    root_two = tmp_path / "root-two"
+    root_one.mkdir()
+    root_two.mkdir()
+    (root_one / "same.wav").write_text("one")
+    (root_two / "same.wav").write_text("two")
+    engine = create_engine(f"sqlite:///{tmp_path / 'roots.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    runtime = ArchiveRuntime([root_one, root_two], session_factory=sessions)
+    runtime.scan_once()
+    runtime.scan_once()
+    processed: list[str] = []
+    runtime.process_pending(
+        lambda source: (processed.append(Path(source).read_text()) or TranscriptResult("", ""))
+    )
+    assert sorted(processed) == ["one", "two"]
+
+
+def test_scan_refreshes_existing_catalog_audio_after_rotation_and_reappearance(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    source = archive / "call.wav"
+    source.write_bytes(b"audio")
+    engine = create_engine(f"sqlite:///{tmp_path / 'reconcile.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    runtime = ArchiveRuntime([archive], session_factory=sessions, catalog_refresh_seconds=0)
+    runtime.scan_once()
+    runtime.scan_once()
+    source.unlink()
+    runtime.scan_once()
+    from asl_transcriber.models import Recording
+
+    with sessions() as session:
+        recording = session.query(Recording).one()
+        assert recording.audio_status == "missing"
+    source.write_bytes(b"audio again")
+    assert runtime.scan_once() == []
+    with sessions() as session:
+        recording = session.query(Recording).one()
+        assert recording.audio_status == "available"
+        assert session.query(IngestionJob).count() == 1
+
+
+def test_restore_ignores_missing_source_at_its_own_root(tmp_path: Path) -> None:
+    root_one = tmp_path / "root-one"
+    root_two = tmp_path / "root-two"
+    root_one.mkdir()
+    root_two.mkdir()
+    (root_one / "same.wav").write_bytes(b"one")
+    engine = create_engine(f"sqlite:///{tmp_path / 'restore-roots.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as session:
+        session.add(
+            IngestionJob(
+                id="root-two-job",
+                source_path="same.wav",
+                archive_root=str(root_two.resolve()),
+                status="completed",
+            )
+        )
+        session.commit()
+
+    runtime = ArchiveRuntime([root_one, root_two], session_factory=sessions)
+
+    assert runtime.jobs() == []
+
+
+def test_concurrent_scans_publish_only_after_one_durable_commit(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "call.wav").write_bytes(b"audio")
+    engine = create_engine(f"sqlite:///{tmp_path / 'concurrent.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    runtime = ArchiveRuntime([archive], session_factory=sessions)
+    runtime.scan_once()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _: runtime.scan_once(), range(2)))
+
+    assert len(runtime.jobs()) == 1
+    assert runtime.database_totals() == {"recordings": 1, "transcribed": 0}
+
+
+def test_routine_scan_does_not_refresh_entire_catalog(tmp_path: Path, monkeypatch) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "call.wav").write_bytes(b"audio")
+    engine = create_engine(f"sqlite:///{tmp_path / 'incremental.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    runtime = ArchiveRuntime([archive], session_factory=sessions, catalog_refresh_seconds=3600)
+    runtime.scan_once()
+    runtime.scan_once()
+    calls = 0
+
+    def counted_refresh(recording):
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr("asl_transcriber.runtime.refresh_audio", counted_refresh)
+    runtime.scan_once()
+    assert calls == 0
+
+
+def test_routine_scan_queries_only_current_sources_and_one_catalog_batch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "current.wav").write_bytes(b"audio")
+    engine = create_engine(f"sqlite:///{tmp_path / 'bounded.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as session:
+        for index in range(1_000):
+            session.add(
+                Recording(
+                    id=f"recording-{index}",
+                    source_path=f"missing-{index}.wav",
+                    archive_root=str(archive.resolve()),
+                    status="completed",
+                )
+            )
+            session.add(
+                IngestionJob(
+                    id=f"historical-{index}",
+                    source_path=f"missing-{index}.wav",
+                    archive_root=str(archive.resolve()),
+                    status="completed",
+                )
+            )
+        session.commit()
+    now = [10.0]
+    runtime = ArchiveRuntime(
+        [archive],
+        session_factory=sessions,
+        catalog_refresh_seconds=3600,
+        catalog_refresh_batch_size=7,
+        clock=lambda: now[0],
+    )
+    queried_paths: list[set[str]] = []
+    original = runtime._persisted_paths
+
+    def tracked_paths(root: str, paths: set[str]) -> set[str]:
+        queried_paths.append(paths)
+        return original(root, paths)
+
+    monkeypatch.setattr(runtime, "_persisted_paths", tracked_paths)
+    refreshed: list[str] = []
+
+    def tracked_refresh(recording: Recording) -> None:
+        refreshed.append(recording.id)
+
+    monkeypatch.setattr("asl_transcriber.runtime.refresh_audio", tracked_refresh)
+    runtime.scan_once()
+    runtime.scan_once()
+
+    assert queried_paths == [{"current.wav"}, {"current.wav"}]
+    assert len(runtime.jobs()) == 1
+    assert len(refreshed) == 14
+
+
+def test_persisted_path_lookup_uses_composite_root_path_index(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    engine = create_engine(f"sqlite:///{tmp_path / 'query-plan.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as session:
+        plan = session.execute(
+            text(
+                "EXPLAIN QUERY PLAN SELECT source_path FROM ingestion_jobs "
+                "WHERE archive_root = :root AND source_path IN (:path)"
+            ),
+            {"root": str(archive.resolve()), "path": "current.wav"},
+        ).all()
+    assert any("ix_ingestion_jobs_root_path" in str(row) for row in plan)
