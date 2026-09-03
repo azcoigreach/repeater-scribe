@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from queue import Empty
 from typing import Annotated
 from urllib.parse import quote
 
@@ -275,17 +276,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     async def poll_archive() -> None:
         while True:
-            active_runtime = current_runtime()
-            await asyncio.to_thread(active_runtime.scan_once)
-            if settings.auto_process:
-                try:
+            try:
+                active_runtime = current_runtime()
+                await asyncio.to_thread(active_runtime.scan_once)
+                if settings.auto_process:
                     await asyncio.to_thread(
                         active_runtime.process_pending,
                         transcription_engine.transcribe,
                         limit=1,
                     )
-                except Exception:
-                    logger.exception("Background archive processing cycle failed")
+            except Exception:
+                logger.exception("Background archive polling cycle failed")
             await asyncio.sleep(settings.archive_poll_seconds)
 
     async def transcribe_live_audio() -> None:
@@ -426,6 +427,40 @@ def dashboard(request: Request):
             "role": principal.role,
         },
     )
+
+
+def _workspace_context(request: Request, template_name: str, *, recording_id: str | None = None):
+    principal = authenticate_request(request)
+    if principal is None:
+        next_path = request.url.path
+        return RedirectResponse(url=f"/auth/login?next={quote(next_path, safe='/')}", status_code=303)
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "csrf_token": principal.csrf_token or "",
+        "identity": principal.identity,
+        "role": principal.role,
+    }
+    if recording_id is not None:
+        context["recording_id"] = recording_id
+    return templates.TemplateResponse(request=request, name=template_name, context=context)
+
+
+@app.get("/archive")
+def archive_workspace(request: Request):
+    return _workspace_context(request, "archive.html")
+
+
+@app.get("/archive/recordings/{recording_id}")
+def archive_detail_workspace(
+    db: Annotated[Session, Depends(get_db)], request: Request, recording_id: str
+):
+    response = _workspace_context(request, "archive_detail.html", recording_id=recording_id)
+    if isinstance(response, RedirectResponse):
+        return response
+    if db.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return response
 
 
 @app.get("/auth/login")
@@ -1510,7 +1545,7 @@ def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
 
 
 @app.get("/api/v1/events")
-async def events(principal: Viewer) -> StreamingResponse:
+async def events(request: Request, principal: Viewer) -> StreamingResponse:
     active_runtime = current_runtime()
     event_queue = active_runtime.subscribe()
     await sse_connections.acquire(principal.subject)
@@ -1519,9 +1554,15 @@ async def events(principal: Viewer) -> StreamingResponse:
         try:
             yield "event: ready\ndata: {}\n\n"
             while True:
-                payload = await asyncio.to_thread(event_queue.get)
-                yield f"event: job\ndata: {json.dumps(payload)}\n\n"
+                if await request.is_disconnected():
+                    return
+                try:
+                    payload = await asyncio.to_thread(event_queue.get, True, 15)
+                    yield f"event: job\ndata: {json.dumps(payload)}\n\n"
+                except Empty:
+                    yield ": heartbeat\n\n"
         finally:
+            active_runtime.unsubscribe(event_queue)
             await sse_connections.release(principal.subject)
 
     return StreamingResponse(

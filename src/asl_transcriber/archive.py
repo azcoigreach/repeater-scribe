@@ -55,10 +55,14 @@ def refresh_audio(recording: Recording) -> None:
         return
     candidate = (Path(recording.archive_root) / recording.source_path).resolve()
     root = Path(recording.archive_root).resolve()
-    if not candidate.is_relative_to(root) or not candidate.is_file():
+    if not candidate.is_relative_to(root):
         recording.audio_status = "missing"
         return
-    stat = candidate.stat()
+    try:
+        stat = candidate.stat()
+    except OSError:
+        recording.audio_status = "missing"
+        return
     recording.audio_status = "available"
     recording.file_size = stat.st_size
     recording.source_modified_at = datetime.fromtimestamp(stat.st_mtime, UTC)

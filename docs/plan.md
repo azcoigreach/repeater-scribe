@@ -51,6 +51,12 @@ remote transcription backend are not implemented. See
   `GET /api/v1/archive/recordings/{recording_id}/audio` for viewer clients.
 - Use SQLite FTS5 and opaque descending cursors for historical transcript search.
 
+### Archive workspace (0.7.0 in progress)
+
+- Provide a standalone historical browser with database-backed filters, cursor
+  pagination, permanent recording detail pages, audio availability states, and
+  saved callsign mention evidence.
+
 ### Node-control foundation
 
 - Persistent AMI transport with buffered framing, reconnect, and ActionID routing.

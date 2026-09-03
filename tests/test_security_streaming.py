@@ -83,3 +83,34 @@ def test_incomplete_stream_is_not_treated_as_an_overflow() -> None:
     sent, consumed = invoke([{"type": "http.request", "body": b"partial", "more_body": True}])
     assert sent == []
     assert consumed == len(b"partial")
+
+
+def test_validated_receive_delegates_after_replayed_request_body() -> None:
+    received: list[str] = []
+
+    async def handler(_scope, receive, _send) -> None:
+        received.append((await receive())["type"])
+        received.append((await receive())["type"])
+
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"", "more_body": False},
+            {"type": "http.disconnect"},
+        ]
+    )
+
+    async def receive() -> dict:
+        return next(messages)
+
+    async def send(_message: dict) -> None:
+        return None
+
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "GET", "scheme": "http", "path": "/events", "raw_path": b"/events",
+        "query_string": b"", "headers": [], "client": ("127.0.0.1", 1234),
+        "server": ("testserver", 80),
+    }
+    asyncio.run(SecurityMiddleware(handler)(scope, receive, send))
+
+    assert received == ["http.request", "http.disconnect"]

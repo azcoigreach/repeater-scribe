@@ -11,13 +11,14 @@ def test_runtime_publishes_processing_and_completed_events(tmp_path: Path) -> No
     recording.parent.mkdir()
     recording.write_bytes(b"audio")
     runtime = ArchiveRuntime([tmp_path])
+    subscriber = runtime.subscribe()
     runtime.scan_once()
     runtime.scan_once()
-    runtime.subscribe().get_nowait()
+    subscriber.get_nowait()
 
     runtime.process_pending(
         lambda _: TranscriptResult(raw_text="hello", display_text="hello")
     )
 
-    events = [runtime.subscribe().get_nowait(), runtime.subscribe().get_nowait()]
+    events = [subscriber.get_nowait(), subscriber.get_nowait()]
     assert [event["status"] for event in events] == ["processing", "completed"]

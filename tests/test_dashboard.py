@@ -20,6 +20,8 @@ def test_dashboard_page_is_available(monkeypatch, tmp_path) -> None:
     assert 'data-controlled-node="100000"' in response.text
     assert "Operating node" not in response.text
     assert "/static/dashboard.css" in response.text
+    assert 'class="workspace-link active" href="/"' in response.text
+    assert 'class="workspace-link" href="/archive"' in response.text
 
 
 def test_dashboard_renders_normalized_callsign_rows_from_sse() -> None:

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Radio Archive | Repeater Scribe</title>
+  <link rel="icon" type="image/png" href="/static/repeater-scribe-state0-256px.png">
+  <link rel="stylesheet" href="/static/archive.css?v=20260903-1">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><img class="brand-logo" src="/static/logo.png" alt="REPEATER SCRIBE"></a>
+    <nav class="workspace-nav" aria-label="Workspaces"><a class="workspace-link" href="/">Dashboard</a><a class="workspace-link active" href="/archive" aria-current="page">Archive</a></nav>
+    <div class="identity">{{ identity }} <span>{{ role }}</span></div>
+    {% if csrf_token %}<button id="sign-out" class="quiet-button" type="button">Sign out</button>{% endif %}
+  </header>
+  <main class="archive-shell">
+    <section class="archive-heading"><div><p class="eyebrow">Historical Workspace</p><h1>Radio Archive</h1><p>Searchable transcripts remain available when source audio has rotated away.</p></div><button id="refresh" class="primary-button" type="button">Refresh</button></section>
+    <form id="archive-filters" class="filters" novalidate>
+      <label class="search-field">Full-text search<input id="q" name="q" type="search" autocomplete="off" placeholder="Search corrected or raw text"></label>
+      <label>Callsign<input id="callsign" name="callsign" type="text" autocomplete="off" placeholder="KM7GHS"></label>
+      <label>From<input id="from" name="from" type="date"></label>
+      <label>To<input id="to" name="to" type="date"></label>
+      <label>Recording status<select id="status" name="status"><option value="">Any status</option><option>pending</option><option>processing</option><option>completed</option><option>ignored</option><option>failed</option><option>dead_letter</option></select></label>
+      <label>Audio status<select id="audio_status" name="audio_status"><option value="">Any audio</option><option>available</option><option>missing</option><option>expired</option><option>archived</option><option>protected</option></select></label>
+      <div class="filter-actions"><button class="primary-button" type="submit">Apply</button><button id="clear" class="quiet-button" type="button">Clear</button></div>
+      <p id="filter-error" class="form-error" role="alert" hidden></p>
+    </form>
+    <div id="active-filters" class="active-filters" aria-label="Active filters"></div>
+    <section class="results-section" aria-labelledby="results-heading"><div class="results-heading"><h2 id="results-heading">Recordings</h2><p id="loaded-count" aria-live="polite">Loading archive...</p></div><p id="archive-state" class="state" role="status" aria-live="polite">Loading archive...</p><div class="table-wrap"><table class="recording-table"><thead><tr><th>Time</th><th>Duration</th><th>Callsigns</th><th>Node</th><th>Status</th><th>Audio</th><th>Transcript</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="recordings"></tbody></table></div><div id="recording-cards" class="recording-cards"></div><div class="load-more-wrap"><button id="load-more" class="primary-button" type="button" hidden>Load more</button></div></section>
+  </main>
+  <script src="/static/archive.js?v=20260903-1" defer></script>
+</body>
+</html>

@@ -54,6 +54,7 @@ def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Pa
     recording.parent.mkdir(parents=True)
     recording.write_bytes(b"audio" * 1000)
     runtime = ArchiveRuntime([recording.parents[1]])
+    subscriber = runtime.subscribe()
     runtime.scan_once()
 
     class Snapshotter:
@@ -74,7 +75,7 @@ def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Pa
 
     assert service.process_once(runtime) == 1
     assert runtime.live_results["100000/active.wav"].display_text == "KM7GHS"
-    event = runtime.subscribe().get_nowait()
+    event = subscriber.get_nowait()
     assert event["status"] == "live"
     assert event["provisional"] is True
 

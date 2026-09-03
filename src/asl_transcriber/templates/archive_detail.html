@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Recording | Repeater Scribe</title>
+  <link rel="icon" type="image/png" href="/static/repeater-scribe-state0-256px.png">
+  <link rel="stylesheet" href="/static/archive.css?v=20260903-1">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><img class="brand-logo" src="/static/logo.png" alt="REPEATER SCRIBE"></a><nav class="workspace-nav" aria-label="Workspaces"><a class="workspace-link" href="/">Dashboard</a><a class="workspace-link active" href="/archive" aria-current="page">Archive</a></nav><div class="identity">{{ identity }} <span>{{ role }}</span></div>{% if csrf_token %}<button id="sign-out" class="quiet-button" type="button">Sign out</button>{% endif %}</header>
+  <main class="archive-shell detail-shell" data-recording-id="{{ recording_id }}">
+    <a class="back-link" href="/archive">Back to archive</a>
+    <p id="detail-state" class="state" role="status" aria-live="polite">Loading recording...</p>
+    <article id="recording-detail" hidden>
+      <header class="detail-heading"><div><p class="eyebrow">Historical Recording</p><h1 id="recording-time"></h1><p id="recording-path"></p></div><div id="detail-statuses" class="status-group"></div></header>
+      <section id="audio-section" class="detail-section"><h2>Audio</h2><div id="audio-content"></div></section>
+      <section class="detail-section"><h2>Transcript</h2><div id="transcript-content"></div></section>
+      <section id="evidence-section" class="detail-section"><h2>Callsign mentions</h2><div id="callsign-evidence"></div></section>
+      <section class="detail-section"><h2>Recording details</h2><dl id="metadata" class="metadata"></dl></section>
+    </article>
+  </main>
+  <script src="/static/archive_detail.js?v=20260903-1" defer></script>
+</body>
+</html>
