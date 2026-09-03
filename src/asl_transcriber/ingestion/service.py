@@ -49,7 +49,11 @@ class ArchiveIngestionService:
             if rel_path in self._seen_paths:
                 continue
 
-            job = IngestionJob(source_path=rel_path, status=JobState.PENDING)
+            job = IngestionJob(
+                source_path=rel_path,
+                archive_root=str(self.root.resolve()),
+                status=JobState.PENDING,
+            )
             self.job_store.add(job)
             self._seen_paths.add(rel_path)
             jobs.append(job)

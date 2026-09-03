@@ -1238,6 +1238,9 @@ def archive_audio(
     recording = db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail={"code": "recording_not_found"})
+    configured_roots = {Path(root).resolve() for root in settings.archive_path_list}
+    if not recording.archive_root or Path(recording.archive_root).resolve() not in configured_roots:
+        raise HTTPException(status_code=404, detail={"code": "audio_missing"})
     refresh_audio(recording)
     db.commit()
     if recording.audio_status == "expired":

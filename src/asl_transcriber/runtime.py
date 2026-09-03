@@ -8,7 +8,7 @@ from queue import Queue
 
 from sqlalchemy import func, inspect, select
 
-from asl_transcriber.archive import get_or_create_recording
+from asl_transcriber.archive import get_or_create_recording, refresh_audio
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.ingestion.activity import ActivityLogEvent, ActivityLogParser
 from asl_transcriber.ingestion.jobs import IngestionJob, JobState, JobStore
@@ -59,6 +59,11 @@ class ArchiveRuntime:
                 persisted = {
                     (row.archive_root, row.source_path) for row in session.query(DbIngestionJob).all()
                 }
+                configured_roots = {str(root.resolve()) for root in self.roots}
+                for recording in session.scalars(select(Recording)).all():
+                    if recording.archive_root in configured_roots:
+                        refresh_audio(recording)
+                session.commit()
         for service in self.services:
             root_key = str(service.root.resolve())
             service._seen_paths.update(
@@ -125,11 +130,11 @@ class ArchiveRuntime:
         *,
         limit: int | None = None,
     ) -> list[ProcessingResult]:
-        def process(source_path: str) -> ProcessingResult:
-            source = self._resolve_source(source_path)
+        def process(job: IngestionJob) -> ProcessingResult:
+            source = self._resolve_source(job.source_path, job.archive_root)
             transcript = transcribe(str(source))
             return ProcessingResult(
-                source_path=source_path,
+                source_path=job.source_path,
                 status="completed",
                 raw_text=transcript.raw_text,
                 display_text=transcript.display_text,
@@ -138,7 +143,6 @@ class ArchiveRuntime:
                 callsign_mentions=transcript.callsign_mentions,
             )
 
-        worker = ProcessingWorker(job_store=self.job_store, process_func=process)
         results: list[ProcessingResult] = []
         pending_jobs = [job for job in self.job_store.list() if job.status == JobState.PENDING]
         if limit is not None:
@@ -147,6 +151,10 @@ class ArchiveRuntime:
             job.status = JobState.PROCESSING
             job.touch()
             self._publish(job)
+            def process_current(_source_path: str, current_job: IngestionJob = job) -> ProcessingResult:
+                return process(current_job)
+
+            worker = ProcessingWorker(job_store=self.job_store, process_func=process_current)
             result = worker.process_job(job.id)
             self.results[job.id] = result
             self._persist_result(job, result)
@@ -199,8 +207,12 @@ class ArchiveRuntime:
     def _publish(self, job: IngestionJob, result: ProcessingResult | None = None) -> None:
         self._events.put(self._event_payload(job, result))
 
-    def _resolve_source(self, source_path: str) -> Path:
-        for root in self.roots:
+    def _resolve_source(self, source_path: str, archive_root: str | None = None) -> Path:
+        roots = [Path(archive_root)] if archive_root else self.roots
+        configured_roots = {root.resolve() for root in self.roots}
+        for root in roots:
+            if root.resolve() not in configured_roots:
+                continue
             candidate = (root / source_path).resolve()
             if candidate.is_relative_to(root.resolve()) and candidate.is_file():
                 if self.retention_days > 0:
@@ -263,10 +275,14 @@ class ArchiveRuntime:
                     continue
                 if not self._source_exists(stored.source_path):
                     continue
-                job = IngestionJob(source_path=stored.source_path, id=stored.id)
+                job = IngestionJob(
+                    source_path=stored.source_path,
+                    archive_root=stored.archive_root,
+                    id=stored.id,
+                )
                 status = JobState(stored.status)
                 if status == JobState.COMPLETED and stored.transcript is not None:
-                    source = self._resolve_source(stored.source_path)
+                    source = self._resolve_source(stored.source_path, stored.archive_root)
                     processed_at = stored.transcript.updated_at or stored.transcript.created_at
                     if processed_at.tzinfo is None:
                         processed_at = processed_at.replace(tzinfo=UTC)

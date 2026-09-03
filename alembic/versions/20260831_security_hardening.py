@@ -48,7 +48,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_used_at", sa.DateTime(timezone=True)),
     )
-    op.create_index("ix_api_tokens_token_hash", "api_tokens", ["token_hash"])
+    op.create_index("ix_api_tokens_token_hash", "api_tokens", ["token_hash"], unique=True)
     op.create_table(
         "security_audits",
         sa.Column("id", sa.String(36), primary_key=True),

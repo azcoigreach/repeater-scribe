@@ -18,6 +18,7 @@ class JobState(str, Enum):
 @dataclass
 class IngestionJob:
     source_path: str
+    archive_root: str | None = None
     id: str = field(default_factory=lambda: str(uuid4()))
     status: JobState = JobState.PENDING
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

@@ -93,6 +93,7 @@ class IngestionJob(Base):
 
 class Transcript(Base):
     __tablename__ = "transcripts"
+    __table_args__ = (UniqueConstraint("job_id", name="uq_transcript_job"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     created_at: Mapped[datetime] = mapped_column(
@@ -103,7 +104,7 @@ class Transcript(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
-    job_id: Mapped[str] = mapped_column(String(36), ForeignKey("ingestion_jobs.id"), unique=True)
+    job_id: Mapped[str] = mapped_column(String(36), ForeignKey("ingestion_jobs.id"))
     raw_text: Mapped[str] = mapped_column(Text, default="")
     display_text: Mapped[str] = mapped_column(Text, default="")
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)

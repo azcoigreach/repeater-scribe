@@ -7,6 +7,7 @@ Revises: security_hardening
 from __future__ import annotations
 
 import re
+import wave
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,6 +31,14 @@ def _started_at(source_path: str) -> datetime | None:
 
 def upgrade() -> None:
     bind = op.get_bind()
+    topology_columns = {
+        column["name"] for column in sa.inspect(bind).get_columns("topology_node_snapshots")
+    }
+    if "total_kerchunks" not in topology_columns:
+        with op.batch_alter_table("topology_node_snapshots") as batch:
+            batch.add_column(
+                sa.Column("total_kerchunks", sa.Integer(), nullable=False, server_default="0")
+            )
     job_columns = {column["name"] for column in sa.inspect(bind).get_columns("ingestion_jobs")}
     if "archive_root" not in job_columns:
         with op.batch_alter_table("ingestion_jobs") as batch:
@@ -55,15 +64,23 @@ def upgrade() -> None:
         batch.add_column(sa.Column("recording_id", sa.String(36), nullable=True))
         batch.create_foreign_key("fk_transcripts_recording", "recordings", ["recording_id"], ["id"])
         batch.create_index("ix_transcripts_recording_id", ["recording_id"])
+        batch.create_unique_constraint("uq_transcript_job", ["job_id"])
 
     rows = bind.execute(sa.text("SELECT id, source_path, archive_root, status, created_at FROM ingestion_jobs")).mappings()
     for row in rows:
         root = row["archive_root"] or ""
         source = Path(root) / row["source_path"]
         stat = source.stat() if root and source.is_file() else None
+        duration = None
+        if stat is not None:
+            try:
+                with wave.open(str(source), "rb") as audio:
+                    duration = audio.getnframes() / audio.getframerate()
+            except (EOFError, OSError, wave.Error, ZeroDivisionError):
+                pass
         bind.execute(
-            sa.text("INSERT OR IGNORE INTO recordings (id, created_at, updated_at, source_path, archive_root, started_at, source_modified_at, status, file_size, audio_status) VALUES (:id, :created, :created, :path, :root, :started, :modified, :status, :size, :audio_status)"),
-            {"id": row["id"], "created": row["created_at"], "path": row["source_path"], "root": root, "started": _started_at(row["source_path"]), "modified": datetime.fromtimestamp(stat.st_mtime, UTC) if stat else None, "status": row["status"], "size": stat.st_size if stat else None, "audio_status": "available" if stat else "missing"},
+            sa.text("INSERT INTO recordings (id, created_at, updated_at, source_path, archive_root, started_at, source_modified_at, status, file_size, duration_seconds, audio_status) VALUES (:id, :created, :created, :path, :root, :started, :modified, :status, :size, :duration, :audio_status) ON CONFLICT(id) DO UPDATE SET source_path = excluded.source_path, archive_root = excluded.archive_root, started_at = excluded.started_at, source_modified_at = excluded.source_modified_at, status = excluded.status, file_size = excluded.file_size, duration_seconds = excluded.duration_seconds, audio_status = excluded.audio_status"),
+            {"id": row["id"], "created": row["created_at"], "path": row["source_path"], "root": root, "started": _started_at(row["source_path"]), "modified": datetime.fromtimestamp(stat.st_mtime, UTC) if stat else None, "status": row["status"], "size": stat.st_size if stat else None, "duration": duration, "audio_status": "available" if stat else "missing"},
         )
         bind.execute(sa.text("UPDATE ingestion_jobs SET recording_id = :id WHERE id = :id"), {"id": row["id"]})
         bind.execute(sa.text("UPDATE transcripts SET recording_id = :id WHERE job_id = :id"), {"id": row["id"]})

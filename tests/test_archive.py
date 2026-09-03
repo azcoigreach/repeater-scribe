@@ -121,7 +121,10 @@ def test_archive_filters_and_null_start_ordering(archive_db, tmp_path: Path) -> 
         assert [item["id"] for item in items] == ["second"]
 
 
-def test_archive_routes_validate_cursor_limits_detail_and_audio_safety(archive_db, tmp_path: Path) -> None:
+def test_archive_routes_validate_cursor_limits_detail_and_audio_safety(
+    archive_db, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "archive_paths", str(tmp_path))
     audio = tmp_path / "inside.wav"
     audio.write_bytes(b"audio")
     add_recording(archive_db, tmp_path, "inside", offset=1)
@@ -171,6 +174,16 @@ def test_archive_routes_validate_cursor_limits_detail_and_audio_safety(archive_d
         expired = client.get("/api/v1/archive/recordings/inside/audio")
         assert expired.status_code == 410
         assert expired.json()["detail"] == {"code": "audio_expired"}
+        with archive_db() as session:
+            row = session.get(Recording, "inside")
+            assert row is not None
+            row.archive_root = "/etc"
+            row.source_path = "passwd"
+            row.audio_status = "available"
+            session.commit()
+        response = client.get("/api/v1/archive/recordings/inside/audio")
+        assert response.status_code == 404
+        assert "root" not in response.text
 
 
 def test_audio_refresh_preserves_intentional_states_and_reappearance(archive_db, tmp_path: Path) -> None:

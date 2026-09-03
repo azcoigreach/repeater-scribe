@@ -4,6 +4,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import wave
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -45,6 +46,12 @@ def test_fresh_archive_migration_creates_catalog_and_fts(tmp_path: Path) -> None
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'trigger')")}
     assert {"recordings", "ingestion_jobs", "transcripts", "transcript_fts", "transcript_fts_insert"} <= tables
     assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("archive_foundation",)
+    from asl_transcriber.models import TopologyNodeSnapshot
+
+    engine = sa.create_engine(f"sqlite:///{database}")
+    with sa.orm.Session(engine) as session:
+        session.add(TopologyNodeSnapshot(home_node="100", identifier="200"))
+        session.commit()
 
 
 def test_seeded_security_database_backfills_catalog_across_roots_and_reupgrades(tmp_path: Path) -> None:
@@ -53,7 +60,11 @@ def test_seeded_security_database_backfills_catalog_across_roots_and_reupgrades(
     root_two = tmp_path / "root-two"
     root_one.mkdir()
     root_two.mkdir()
-    (root_one / "2026090101010100.wav").write_bytes(b"audio")
+    with wave.open(str(root_one / "2026090101010100.wav"), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\0\0" * 8000)
     alembic(database, "security_hardening")
     connection = sqlite3.connect(database)
     connection.execute("ALTER TABLE ingestion_jobs ADD COLUMN archive_root VARCHAR(1024)")
@@ -81,6 +92,7 @@ def test_seeded_security_database_backfills_catalog_across_roots_and_reupgrades(
     ]
     assert connection.execute("SELECT recording_id, callsign_mentions_json FROM transcripts").fetchone() == ("done", evidence)
     assert connection.execute("SELECT recording_id FROM ingestion_jobs WHERE id = 'done'").fetchone() == ("done",)
+    assert connection.execute("SELECT duration_seconds FROM recordings WHERE id = 'done'").fetchone() == (1.0,)
     assert connection.execute("SELECT count(*) FROM transcript_fts WHERE transcript_fts MATCH 'historic'").fetchone() == (1,)
     connection.close()
 
@@ -88,6 +100,12 @@ def test_seeded_security_database_backfills_catalog_across_roots_and_reupgrades(
     alembic(database, "archive_foundation")
     connection = sqlite3.connect(database)
     assert connection.execute("SELECT count(*) FROM recordings").fetchone() == (4,)
+    archive_root, started_at, audio_status = connection.execute(
+        "SELECT archive_root, started_at, audio_status FROM recordings WHERE id = 'done'"
+    ).fetchone()
+    assert archive_root == str(root_one)
+    assert datetime.fromisoformat(started_at) == datetime(2026, 9, 1, 1, 1, 1, tzinfo=UTC)
+    assert audio_status == "available"
 
 
 def test_historical_migrations_do_not_create_future_registered_models(tmp_path: Path) -> None:

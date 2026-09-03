@@ -116,3 +116,49 @@ def test_database_totals_are_not_limited_to_dashboard_page_size(tmp_path: Path) 
     runtime = ArchiveRuntime([archive], session_factory=sessions)
 
     assert runtime.database_totals() == {"recordings": 503, "transcribed": 502}
+
+
+def test_runtime_resolves_duplicate_source_names_against_each_job_root(tmp_path: Path) -> None:
+    root_one = tmp_path / "root-one"
+    root_two = tmp_path / "root-two"
+    root_one.mkdir()
+    root_two.mkdir()
+    (root_one / "same.wav").write_text("one")
+    (root_two / "same.wav").write_text("two")
+    engine = create_engine(f"sqlite:///{tmp_path / 'roots.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    runtime = ArchiveRuntime([root_one, root_two], session_factory=sessions)
+    runtime.scan_once()
+    runtime.scan_once()
+    processed: list[str] = []
+    runtime.process_pending(
+        lambda source: (processed.append(Path(source).read_text()) or TranscriptResult("", ""))
+    )
+    assert sorted(processed) == ["one", "two"]
+
+
+def test_scan_refreshes_existing_catalog_audio_after_rotation_and_reappearance(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    source = archive / "call.wav"
+    source.write_bytes(b"audio")
+    engine = create_engine(f"sqlite:///{tmp_path / 'reconcile.db'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    runtime = ArchiveRuntime([archive], session_factory=sessions)
+    runtime.scan_once()
+    runtime.scan_once()
+    source.unlink()
+    runtime.scan_once()
+    from asl_transcriber.models import Recording
+
+    with sessions() as session:
+        recording = session.query(Recording).one()
+        assert recording.audio_status == "missing"
+    source.write_bytes(b"audio again")
+    assert runtime.scan_once() == []
+    with sessions() as session:
+        recording = session.query(Recording).one()
+        assert recording.audio_status == "available"
+        assert session.query(IngestionJob).count() == 1
