@@ -30,6 +30,7 @@ class Node(Base):
 
 class Recording(Base):
     __tablename__ = "recordings"
+    __table_args__ = (UniqueConstraint("archive_root", "source_path", name="uq_recording_root_path"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     created_at: Mapped[datetime] = mapped_column(
@@ -41,17 +42,26 @@ class Recording(Base):
         onupdate=lambda: datetime.now(UTC),
     )
     source_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    archive_root: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    source_modified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(64), default="pending", index=True)
     local_node: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_node: Mapped[int | None] = mapped_column(Integer, nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_status: Mapped[str] = mapped_column(String(16), default="available", index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     node_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("nodes.id"), nullable=True)
 
     node: Mapped[Node | None] = relationship(back_populates="recordings")
     transmissions: Mapped[list[Transmission]] = relationship(back_populates="recording")
+    ingestion_jobs: Mapped[list[IngestionJob]] = relationship(back_populates="recording")
+    transcripts: Mapped[list[Transcript]] = relationship(back_populates="recording")
 
 
 class IngestionJob(Base):
@@ -73,8 +83,12 @@ class IngestionJob(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     dead_letter: Mapped[bool] = mapped_column(Boolean, default=False)
     retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recording_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("recordings.id"), nullable=True, index=True
+    )
 
     transcript: Mapped[Transcript | None] = relationship(back_populates="job", uselist=False)
+    recording: Mapped[Recording | None] = relationship(back_populates="ingestion_jobs")
 
 
 class Transcript(Base):
@@ -95,8 +109,12 @@ class Transcript(Base):
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     callsign_mentions_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    recording_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("recordings.id"), nullable=True, index=True
+    )
 
     job: Mapped[IngestionJob] = relationship(back_populates="transcript")
+    recording: Mapped[Recording | None] = relationship(back_populates="transcripts")
 
 
 class Transmission(Base):

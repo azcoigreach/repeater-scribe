@@ -18,6 +18,20 @@ deployment profile: audio transcription uses `faster-whisper` on the
 machine running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
 
+## Database migrations
+
+Run `alembic upgrade head` before starting application traffic. The reference
+container does this automatically. `Recording` is a durable historical catalog
+entity; `IngestionJob` is processing state and `Transcript` is its durable text
+result. Rotating or removing source audio marks catalog audio unavailable but
+does not remove the recording or transcript. Archive search is backed by SQLite
+FTS5 through `GET /api/v1/archive/recordings`; details and playback use
+`/api/v1/archive/recordings/{recording_id}` and `/audio` respectively.
+Archive results are newest-first by derived source timestamp then recording UUID;
+sources without a parseable timestamp use catalog creation time. Retention marks
+audio `expired` while keeping catalog text, whereas routine source rotation marks
+audio `missing` and permits a later source reappearance to become `available`.
+
 ## What it does
 
 ### Operates an AllStar node

@@ -29,8 +29,8 @@ This phase establishes the application skeleton and operating model needed to su
 - Keep dynamic hotword prompting off by default and retain raw text for review.
 - Benchmark model speed and exact callsign accuracy against real repeater audio.
 
-Segment timestamps and callsign-correction evidence are currently returned by
-the engine but are not persisted. Manual transcript/callsign overrides and a
+Segment timestamps and callsign-correction evidence are persisted in
+`callsign_mentions_json`. Manual transcript/callsign overrides and a
 remote transcription backend are not implemented. See
 [AI transcription](transcription.md) for the as-built design.
 
@@ -41,6 +41,15 @@ remote transcription backend are not implemented. See
 - Support API-key authentication and read-only operations.
 - Add opt-in authenticated AMI status and AllStar function controls.
 - Associate AMI station events with archive recordings and transcripts.
+
+### Archive foundation (0.7.0 in progress)
+
+- Persist archive-root/source-relative `Recording` catalog rows separately from
+  ingestion jobs and retain them when read-only source audio rotates away.
+- Provide `GET /api/v1/archive/recordings`,
+  `GET /api/v1/archive/recordings/{recording_id}`, and
+  `GET /api/v1/archive/recordings/{recording_id}/audio` for viewer clients.
+- Use SQLite FTS5 and opaque descending cursors for historical transcript search.
 
 ### Node-control foundation
 

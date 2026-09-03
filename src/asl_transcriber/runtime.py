@@ -6,16 +6,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Queue
 
-from sqlalchemy import delete, func, inspect, select, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import func, inspect, select
 
+from asl_transcriber.archive import get_or_create_recording
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.ingestion.activity import ActivityLogEvent, ActivityLogParser
 from asl_transcriber.ingestion.jobs import IngestionJob, JobState, JobStore
 from asl_transcriber.ingestion.service import ArchiveIngestionService
-from asl_transcriber.models import Base as ModelBase
 from asl_transcriber.models import IngestionJob as DbIngestionJob
-from asl_transcriber.models import Transcript
+from asl_transcriber.models import Recording, Transcript
 from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
 from asl_transcriber.workers.processor import ProcessingResult, ProcessingWorker
 
@@ -35,10 +34,7 @@ class ArchiveRuntime:
         self.stable_seconds = stable_seconds
         self.retention_days = retention_days
         bind = session_factory.kw.get("bind") if hasattr(session_factory, "kw") else None
-        if bind is not None:
-            ModelBase.metadata.create_all(bind)
-            self._ensure_schema(bind)
-            self._backfill_archive_roots(bind)
+        self._database_ready = bind is None or inspect(bind).has_table("ingestion_jobs")
         self.job_store = JobStore()
         self.services = [
             ArchiveIngestionService(
@@ -55,42 +51,14 @@ class ArchiveRuntime:
         self._events: Queue[dict[str, object]] = Queue()
         self._restore_state()
 
-    @staticmethod
-    def _ensure_schema(bind: Engine) -> None:
-        inspector = inspect(bind)
-        job_columns = {column["name"] for column in inspector.get_columns("ingestion_jobs")}
-        if "archive_root" not in job_columns:
-            with bind.begin() as connection:  # type: ignore[union-attr]
-                connection.execute(
-                    text("ALTER TABLE ingestion_jobs ADD COLUMN archive_root VARCHAR(1024)")
-                )
-        transcript_columns = {
-            column["name"] for column in inspector.get_columns("transcripts")
-        }
-        if "callsign_mentions_json" not in transcript_columns:
-            with bind.begin() as connection:  # type: ignore[union-attr]
-                connection.execute(
-                    text(
-                        "ALTER TABLE transcripts ADD COLUMN callsign_mentions_json "
-                        "TEXT NOT NULL DEFAULT '[]'"
-                    )
-                )
-
-    def _backfill_archive_roots(self, bind: Engine) -> None:
-        if not self.roots:
-            return
-        with bind.begin() as connection:
-            connection.execute(
-                text("UPDATE ingestion_jobs SET archive_root = :root WHERE archive_root IS NULL"),
-                {"root": str(self.roots[0].resolve())},
-            )
-
     def scan_once(self) -> list[IngestionJob]:
         jobs: list[IngestionJob] = []
-        with self.session_factory() as session:
-            persisted = {
-                (row.archive_root, row.source_path) for row in session.query(DbIngestionJob).all()
-            }
+        persisted: set[tuple[str | None, str]] = set()
+        if self._database_ready:
+            with self.session_factory() as session:
+                persisted = {
+                    (row.archive_root, row.source_path) for row in session.query(DbIngestionJob).all()
+                }
         for service in self.services:
             root_key = str(service.root.resolve())
             service._seen_paths.update(
@@ -98,17 +66,26 @@ class ArchiveRuntime:
             )
             new_jobs = service.scan_once()
             jobs.extend(new_jobs)
-            with self.session_factory() as session:
-                for job in new_jobs:
-                    session.add(
-                        DbIngestionJob(
-                            id=job.id,
+            if self._database_ready:
+                with self.session_factory() as session:
+                    for job in new_jobs:
+                        recording = get_or_create_recording(
+                            session,
                             source_path=job.source_path,
                             archive_root=root_key,
+                            recording_id=job.id,
                             status=job.status.value,
                         )
-                    )
-                session.commit()
+                        session.add(
+                            DbIngestionJob(
+                                id=job.id,
+                                source_path=job.source_path,
+                                archive_root=root_key,
+                                recording_id=recording.id,
+                                status=job.status.value,
+                            )
+                        )
+                    session.commit()
             for job in new_jobs:
                 self._publish(job)
         return jobs
@@ -253,14 +230,21 @@ class ArchiveRuntime:
                     ):
                         source_is_old = candidate.stat().st_mtime < cutoff.timestamp()
                 if source_is_old:
-                    expired_ids.append(stored.id)
+                    if stored.recording is None:
+                        stored.recording = get_or_create_recording(
+                            session,
+                            source_path=stored.source_path,
+                            archive_root=stored.archive_root or "",
+                            recording_id=stored.id,
+                            status=stored.status,
+                        )
+                    expired_ids.append(stored.recording.id)
             if expired_ids:
-                session.execute(delete(Transcript).where(Transcript.job_id.in_(expired_ids)))
-                session.execute(delete(DbIngestionJob).where(DbIngestionJob.id.in_(expired_ids)))
+                session.query(Recording).filter(Recording.id.in_(expired_ids)).update(
+                    {"audio_status": "expired", "expired_at": datetime.now(UTC)},
+                    synchronize_session=False,
+                )
                 session.commit()
-        for job_id in expired_ids:
-            self.job_store.remove(job_id)
-            self.results.pop(job_id, None)
         return len(expired_ids)
 
     def _source_exists(self, source_path: str) -> bool:
@@ -271,6 +255,8 @@ class ArchiveRuntime:
         return True
 
     def _restore_state(self) -> None:
+        if not self._database_ready:
+            return
         with self.session_factory() as session:
             for stored in session.query(DbIngestionJob).all():
                 if stored.archive_root not in {str(root.resolve()) for root in self.roots}:
@@ -311,7 +297,16 @@ class ArchiveRuntime:
             if stored_job is None:
                 stored_job = DbIngestionJob(id=job.id, source_path=job.source_path)
                 session.add(stored_job)
+            if stored_job.recording is None:
+                stored_job.recording = get_or_create_recording(
+                    session,
+                    source_path=stored_job.source_path,
+                    archive_root=stored_job.archive_root or "",
+                    recording_id=stored_job.id,
+                    status=job.status.value,
+                )
             stored_job.status = job.status.value
+            stored_job.recording.status = job.status.value
             stored_job.attempt_count = job.attempt_count
             stored_job.last_error = job.last_error
             transcript = stored_job.transcript
@@ -324,6 +319,7 @@ class ArchiveRuntime:
             transcript.display_text = result.display_text
             transcript.language = result.language
             transcript.confidence = result.confidence
+            transcript.recording_id = stored_job.recording_id
             transcript.callsign_mentions_json = json.dumps(
                 [
                     {

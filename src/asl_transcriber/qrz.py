@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import threading
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from time import monotonic
 from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
+
+from defusedxml import ElementTree as ET  # type: ignore[import-untyped]
+from defusedxml.common import DefusedXmlException  # type: ignore[import-untyped]
 
 
 class QrzError(RuntimeError):
@@ -63,6 +65,7 @@ class QrzClient:
         timeout_seconds: float = 10.0,
         cache_seconds: float = 86400.0,
         agent: str = "repeater-scribe",
+        max_response_bytes: int = 1_000_000,
         opener: Callable[..., Any] = urlopen,
     ) -> None:
         self.username = username
@@ -71,6 +74,7 @@ class QrzClient:
         self.timeout_seconds = timeout_seconds
         self.cache_seconds = cache_seconds
         self.agent = agent
+        self.max_response_bytes = max_response_bytes
         self.opener = opener
         self._session_key: str | None = None
         self._cache: dict[str, tuple[float, QrzCallsign]] = {}
@@ -133,9 +137,16 @@ class QrzClient:
         )
         try:
             with self.opener(request, timeout=self.timeout_seconds) as response:
-                payload = response.read()
-            return ET.fromstring(payload)
-        except (OSError, ET.ParseError) as error:
+                payload = bytearray()
+                while len(payload) <= self.max_response_bytes:
+                    chunk = response.read(min(65_536, self.max_response_bytes + 1 - len(payload)))
+                    if not chunk:
+                        return ET.fromstring(bytes(payload))
+                    payload.extend(chunk)
+            raise QrzError("QRZ response exceeds the configured size limit")
+        except QrzError:
+            raise
+        except (OSError, ET.ParseError, DefusedXmlException) as error:
             raise QrzError(f"QRZ request failed: {error}") from error
 
     @staticmethod

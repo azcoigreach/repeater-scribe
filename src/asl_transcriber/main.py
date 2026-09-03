@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +23,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from asl_transcriber import __version__
 from asl_transcriber.ami import AmiError, AmiResponse
+from asl_transcriber.archive import (
+    ArchiveQueryError,
+    list_recordings,
+    refresh_audio,
+    serialize_recording,
+)
 from asl_transcriber.auth import (
     Admin,
     Viewer,
@@ -40,7 +46,7 @@ from asl_transcriber.auth import (
     verify_csrf,
 )
 from asl_transcriber.config import settings
-from asl_transcriber.database import SessionLocal, get_db
+from asl_transcriber.database import SessionLocal, get_db, require_current_schema
 from asl_transcriber.favorites import (
     FavoriteNotFound,
     create_favorite,
@@ -49,7 +55,7 @@ from asl_transcriber.favorites import (
     record_remote_key_transition,
     update_favorite,
 )
-from asl_transcriber.models import Favorite
+from asl_transcriber.models import Favorite, Recording
 from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.qrz import QrzClient, QrzError
@@ -247,6 +253,7 @@ def build_local_transcription_engine() -> FasterWhisperEngine:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     global node_monitor, topology_service, transcription_engine
+    require_current_schema()
     active_runtime = current_runtime()
     await asyncio.to_thread(active_runtime.scan_once)
     transcription_engine = build_local_transcription_engine()
@@ -1182,6 +1189,65 @@ def audio(path: str) -> FileResponse:
         source = current_runtime()._resolve_source(path)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Audio recording not found") from error
+    return FileResponse(source, media_type="audio/wav", filename=source.name)
+
+
+@app.get("/api/v1/archive/recordings", dependencies=[Depends(require_viewer)])
+def archive_recordings(
+    db: Annotated[Session, Depends(get_db)],
+    cursor: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    q: str | None = None,
+    status: str | None = None,
+    audio_status: str | None = None,
+    from_: Annotated[datetime | None, Query(alias="from")] = None,
+    to: datetime | None = None,
+    callsign: str | None = None,
+) -> dict[str, object]:
+    try:
+        items, next_cursor, has_more = list_recordings(
+            db, cursor=cursor, limit=limit, query=q, status=status,
+            audio_status=audio_status, from_at=from_, to_at=to, callsign=callsign,
+        )
+    except ArchiveQueryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {
+        "items": items,
+        "next_cursor": next_cursor,
+        "has_more": has_more,
+        "filters": {"q": q, "status": status, "audio_status": audio_status, "from": from_.isoformat() if from_ else None, "to": to.isoformat() if to else None, "callsign": callsign},
+    }
+
+
+@app.get("/api/v1/archive/recordings/{recording_id}", dependencies=[Depends(require_viewer)])
+def archive_recording(
+    db: Annotated[Session, Depends(get_db)], recording_id: str
+) -> dict[str, object]:
+    recording = db.get(Recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    refresh_audio(recording)
+    db.commit()
+    return serialize_recording(recording)
+
+
+@app.get("/api/v1/archive/recordings/{recording_id}/audio", dependencies=[Depends(require_viewer)])
+def archive_audio(
+    db: Annotated[Session, Depends(get_db)], recording_id: str
+) -> FileResponse:
+    recording = db.get(Recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail={"code": "recording_not_found"})
+    refresh_audio(recording)
+    db.commit()
+    if recording.audio_status == "expired":
+        raise HTTPException(status_code=410, detail={"code": "audio_expired"})
+    if recording.audio_status != "available" or not recording.archive_root:
+        raise HTTPException(status_code=404, detail={"code": "audio_missing"})
+    source = (Path(recording.archive_root) / recording.source_path).resolve()
+    root = Path(recording.archive_root).resolve()
+    if not source.is_relative_to(root) or not source.is_file():
+        raise HTTPException(status_code=404, detail={"code": "audio_missing"})
     return FileResponse(source, media_type="audio/wav", filename=source.name)
 
 

@@ -15,6 +15,10 @@ from asl_transcriber.auth import Principal, audit_event, authenticate_request
 from asl_transcriber.config import settings
 
 
+class RequestBodyTooLarge(Exception):
+    pass
+
+
 class SlidingWindowLimiter:
     def __init__(self) -> None:
         self._events: dict[str, deque[float]] = defaultdict(deque)
@@ -194,8 +198,45 @@ class SecurityMiddleware:
                 self._apply_headers(message, path, request_id)
             await send(message)
 
+        buffered_messages: list[Message] = []
+        received_bytes = 0
+        while True:
+            message = await receive()
+            buffered_messages.append(message)
+            if message["type"] != "http.request":
+                break
+            received_bytes += len(message.get("body", b""))
+            if received_bytes > settings.request_body_max_bytes:
+                await self._reject(
+                    scope,
+                    receive,
+                    send,
+                    413,
+                    "Request body is too large",
+                    path,
+                    request_id,
+                )
+                return
+            if not message.get("more_body", False):
+                break
+
+        async def receive_validated() -> Message:
+            if buffered_messages:
+                return buffered_messages.pop(0)
+            return {"type": "http.disconnect"}
+
         try:
-            await self.app(scope, receive, send_with_headers)
+            await self.app(scope, receive_validated, send_with_headers)
+        except RequestBodyTooLarge:
+            await self._reject(
+                scope,
+                receive,
+                send,
+                413,
+                "Request body is too large",
+                path,
+                request_id,
+            )
         finally:
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
                 current = getattr(request.state, "principal", None)

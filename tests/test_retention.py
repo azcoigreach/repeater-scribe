@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from asl_transcriber.database import Base
 from asl_transcriber.ingestion.scanner import ArchiveScanner
 from asl_transcriber.models import IngestionJob as DbIngestionJob
-from asl_transcriber.models import Transcript
+from asl_transcriber.models import Recording, Transcript
 from asl_transcriber.runtime import ArchiveRuntime
 
 
@@ -29,7 +29,7 @@ def test_retention_hides_old_archive_audio(tmp_path) -> None:
     assert [entry.source_path for entry in entries] == ["recent.wav"]
 
 
-def test_retention_purges_derived_transcript_without_deleting_source(tmp_path) -> None:
+def test_retention_expires_audio_without_deleting_catalog_or_transcript(tmp_path) -> None:
     archive = tmp_path / "archive"
     archive.mkdir()
     old = archive / "old.wav"
@@ -58,5 +58,10 @@ def test_retention_purges_derived_transcript_without_deleting_source(tmp_path) -
     assert runtime.purge_expired() == 1
     assert old.exists()
     with sessions() as session:
-        assert session.scalar(select(DbIngestionJob)) is None
-        assert session.scalar(select(Transcript)) is None
+        job = session.scalar(select(DbIngestionJob))
+        assert job is not None
+        assert session.scalar(select(Transcript)) is not None
+        recording = session.scalar(select(Recording))
+        assert recording is not None
+        assert recording.audio_status == "expired"
+        assert recording.expired_at is not None

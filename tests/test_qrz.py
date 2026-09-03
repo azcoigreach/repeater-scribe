@@ -3,11 +3,33 @@ from __future__ import annotations
 from io import BytesIO
 from urllib.parse import parse_qs
 
-from asl_transcriber.qrz import QrzClient
+import pytest
+
+from asl_transcriber.qrz import QrzClient, QrzError
 
 
 class Response(BytesIO):
     pass
+
+
+class ChunkedResponse:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def read(self, size: int = -1) -> bytes:
+        if not self.chunks:
+            return b""
+        chunk = self.chunks[0]
+        if size < 0 or len(chunk) <= size:
+            return self.chunks.pop(0)
+        self.chunks[0] = chunk[size:]
+        return chunk[:size]
 
 
 def test_qrz_client_logs_in_once_parses_location_and_caches_lookup() -> None:
@@ -61,3 +83,25 @@ def test_qrz_client_returns_not_found_record() -> None:
     assert result.status == "not_found"
     assert result.callsign == "N0NONE"
     assert client.cached_status("N0NONE") == "not_found"
+
+
+def test_qrz_response_size_is_bounded_across_chunks() -> None:
+    payload = b"<QRZDatabase><Session><Key>key</Key></Session></QRZDatabase>"
+    exact = QrzClient("user", "secret", max_response_bytes=len(payload), opener=lambda *_args, **_kwargs: ChunkedResponse([payload[:10], payload[10:]]))
+    assert exact._request({"username": "user"}).tag == "QRZDatabase"
+    oversized = QrzClient("user", "secret", max_response_bytes=10, opener=lambda *_args, **_kwargs: ChunkedResponse([b"x" * 6, b"x" * 6]))
+    with pytest.raises(QrzError, match="size limit"):
+        oversized._request({"username": "user"})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"<QRZDatabase>",
+        b"<?xml version='1.0'?><!DOCTYPE a [<!ENTITY x 'value'>]><QRZDatabase>&x;</QRZDatabase>",
+    ],
+)
+def test_qrz_malformed_or_hostile_xml_is_controlled(payload: bytes) -> None:
+    client = QrzClient("user", "secret", opener=lambda *_args, **_kwargs: ChunkedResponse([payload]))
+    with pytest.raises(QrzError, match="QRZ request failed"):
+        client._request({"username": "user"})
