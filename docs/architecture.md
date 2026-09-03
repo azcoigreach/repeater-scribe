@@ -73,6 +73,12 @@ to `missing`; configured retention changes audio status to `expired` while
 retaining catalog and transcript history. Routine refreshes never replace
 intentional `expired`, `protected`, or `archived` states.
 
+The Dashboard is the live operations workspace. The separate Archive workspace
+uses only the archive APIs and database catalog: it does not read the runtime
+job list or poll on the live dashboard interval. It applies SQLite FTS5 and
+cursor pagination for historical searches, and can present transcript evidence
+when retained source audio is unavailable.
+
 ## Runtime lifecycle
 
 1. The application starts up and validates configuration.

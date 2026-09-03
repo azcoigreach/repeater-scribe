@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A database-backed Radio Archive workspace with SQLite FTS5 transcript search,
+  status/date/callsign filters, cursor pagination, recording details, saved
+  callsign evidence, and retained-audio playback.
+
+### Added
+
 - Durable `Recording` catalog records, independent from ingestion workflow rows,
   with archive-relative identity, audio availability, and persisted transcripts.
 - SQLite FTS5 archive search and cursor-paginated archive recording, detail, and

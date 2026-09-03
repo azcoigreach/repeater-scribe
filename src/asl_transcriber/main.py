@@ -428,6 +428,40 @@ def dashboard(request: Request):
     )
 
 
+def _workspace_context(request: Request, template_name: str, *, recording_id: str | None = None):
+    principal = authenticate_request(request)
+    if principal is None:
+        next_path = request.url.path
+        return RedirectResponse(url=f"/auth/login?next={quote(next_path, safe='/')}", status_code=303)
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "csrf_token": principal.csrf_token or "",
+        "identity": principal.identity,
+        "role": principal.role,
+    }
+    if recording_id is not None:
+        context["recording_id"] = recording_id
+    return templates.TemplateResponse(request=request, name=template_name, context=context)
+
+
+@app.get("/archive")
+def archive_workspace(request: Request):
+    return _workspace_context(request, "archive.html")
+
+
+@app.get("/archive/recordings/{recording_id}")
+def archive_detail_workspace(
+    db: Annotated[Session, Depends(get_db)], request: Request, recording_id: str
+):
+    response = _workspace_context(request, "archive_detail.html", recording_id=recording_id)
+    if isinstance(response, RedirectResponse):
+        return response
+    if db.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return response
+
+
 @app.get("/auth/login")
 async def auth_login(next: str | None = None) -> RedirectResponse:
     return RedirectResponse(await oidc_authorization_url(next), status_code=303)

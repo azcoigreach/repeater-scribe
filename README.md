@@ -32,6 +32,15 @@ sources without a parseable timestamp use catalog creation time. Retention marks
 audio `expired` while keeping catalog text, whereas routine source rotation marks
 audio `missing` and permits a later source reappearance to become `available`.
 
+## Archive workspace
+
+Use **Archive** in the top navigation for historical radio traffic; **Dashboard**
+remains the live operational workspace. Archive search is database-backed,
+cursor-paginated, and uses SQLite FTS5 across raw and corrected transcripts.
+Catalog records and transcripts remain searchable after normal source rotation.
+`missing` means the source file is no longer mounted; `expired` means retention
+withheld audio. Callsigns are transcript mentions, not operator attribution.
+
 ## What it does
 
 ### Operates an AllStar node
