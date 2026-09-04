@@ -130,7 +130,7 @@ def test_populated_archive_foundation_upgrades_callsign_history_safely(tmp_path:
     created = datetime(2026, 9, 2, tzinfo=UTC).isoformat()
     mention_json = (
         '[{"callsign":"KM7GHS","start":"1.5","end":"2.5",'
-        '"confidence":"bad","acoustic_confidence":"bad",'
+        '"confidence":"Infinity","acoustic_confidence":"NaN",'
         '"recognition_confidence":"bad"},'
         '{"callsign":"KM7GHS","start":3,"end":4},'
         '{"callsign":"bad","start":0,"end":1}]'

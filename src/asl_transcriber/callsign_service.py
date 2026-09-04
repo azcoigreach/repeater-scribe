@@ -39,8 +39,12 @@ def persist_transcript_details(
     session: Session, transcript: Transcript, recording: Recording, result: object
 ) -> None:
     """Replace durable details for a transcript inside its caller's transaction."""
-    previous_reviews = {
-        (mention.raw_observed_value, mention.start_offset, mention.end_offset): (
+    previous_reviews = [
+        (
+            mention.id,
+            mention.raw_observed_value,
+            mention.start_offset,
+            mention.end_offset,
             mention.callsign_id,
             mention.canonical_callsign,
             mention.review_status,
@@ -51,7 +55,7 @@ def persist_transcript_details(
             CallsignMention.transcript_id == transcript.id,
             CallsignMention.review_status.in_(("confirmed", "corrected", "rejected")),
         )
-    }
+    ]
     session.query(CallsignMention).filter(CallsignMention.transcript_id == transcript.id).delete()
     session.query(TranscriptSegment).filter(TranscriptSegment.transcript_id == transcript.id).delete()
     segments = getattr(result, "segments", None) or []
@@ -91,7 +95,18 @@ def persist_transcript_details(
         heard_at = None
         if started_at is not None:
             heard_at = started_at + timedelta(seconds=max(0.0, mention.end))
+        review = next(
+            (
+                item
+                for item in previous_reviews
+                if item[1] == (getattr(mention, "raw_observed_value", None) or mention.callsign)
+                and abs((item[2] or 0.0) - mention.start) <= 0.25
+                and abs((item[3] or 0.0) - mention.end) <= 0.25
+            ),
+            None,
+        )
         mention_row = CallsignMention(
+            id=review[0] if review is not None else None,
             callsign_id=callsign.id,
             transcript_id=transcript.id,
             recording_id=recording.id,
@@ -109,9 +124,6 @@ def persist_transcript_details(
             evidence_json=json.dumps(list(mention.evidence)),
             qrz_validation_status=callsign.qrz_status,
         )
-        review = previous_reviews.get(
-            (mention_row.raw_observed_value, mention_row.start_offset, mention_row.end_offset)
-        )
         if review is not None:
             (
                 mention_row.callsign_id,
@@ -119,7 +131,7 @@ def persist_transcript_details(
                 mention_row.review_status,
                 mention_row.reviewer_identity,
                 mention_row.reviewed_at,
-            ) = review
+            ) = review[4:]
         session.add(mention_row)
     recording.current_transcript_id = transcript.id
 
@@ -141,6 +153,7 @@ def _decode_cursor(value: str) -> tuple[datetime | None, str]:
 def list_callsigns(
     session: Session, *, query: str | None, cursor: str | None, limit: int,
     alphabetical: bool = False, review_status: str | None = None,
+    qrz_validation_status: str | None = None,
 ) -> tuple[list[dict[str, object]], str | None, bool]:
     counted = func.count(CallsignMention.id).label("mention_count")
     confirmed = func.sum(
@@ -178,12 +191,13 @@ def list_callsigns(
     ).where(
         CallsignMention.review_status != "rejected",
         CallsignMention.transcript_id == Recording.current_transcript_id,
-        (Callsign.qrz_status.is_(None)) | (Callsign.qrz_status != "not_found"),
     ).group_by(Callsign.id)
     if query:
         statement = statement.where(Callsign.normalized_callsign.ilike(f"%{query.strip().upper()}%"))
     if review_status:
         statement = statement.where(CallsignMention.review_status == review_status)
+    if qrz_validation_status:
+        statement = statement.where(Callsign.qrz_status == qrz_validation_status)
     cursor_time: datetime | None = None
     cursor_callsign: str | None = None
     if cursor:
@@ -338,6 +352,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
     ).where(
         CallsignMention.review_status != "rejected",
         CallsignMention.transcript_id == Recording.current_transcript_id,
+        (Callsign.qrz_status.is_(None)) | (Callsign.qrz_status != "not_found"),
     ).group_by(Callsign.id).order_by(
         func.max(CallsignMention.heard_at).desc(), Callsign.normalized_callsign.desc()
     ).limit(min(max(limit, 1), 100))
@@ -477,5 +492,8 @@ def update_qrz_snapshot(
     callsign.qrz_profile_url = details.profile_url
     callsign.qrz_lookup_at = now
     callsign.qrz_cache_expires_at = now + timedelta(seconds=cache_seconds)
+    session.query(CallsignMention).filter(
+        CallsignMention.callsign_id == callsign.id
+    ).update({CallsignMention.qrz_validation_status: details.status})
     session.flush()
     return callsign

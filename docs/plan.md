@@ -30,8 +30,9 @@ This phase establishes the application skeleton and operating model needed to su
 - Benchmark model speed and exact callsign accuracy against real repeater audio.
 
 Segment timestamps and callsign-correction evidence are persisted in
-`callsign_mentions_json`. Manual transcript/callsign overrides and a
-remote transcription backend are not implemented. See
+`callsign_mentions_json`. Manual callsign mention review and correction are
+implemented; manual full-transcript overrides and a remote transcription backend
+remain future work. See
 [AI transcription](transcription.md) for the as-built design.
 
 ## Phase 4: API and UI

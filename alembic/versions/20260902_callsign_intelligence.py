@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -61,9 +62,10 @@ def _datetime_value(value: object) -> datetime | None:
 
 def _float_value(value: object) -> float | None:
     try:
-        return float(value) if value is not None else None
+        result = float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+    return result if result is None or math.isfinite(result) else None
 
 
 def _has_table(bind: sa.Connection, name: str) -> bool:

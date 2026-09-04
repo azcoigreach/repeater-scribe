@@ -190,6 +190,7 @@ These are the environment variables read by the current transcription path:
 | `ASLT_CALLSIGN_HOTWORD_LIMIT` | `0` | Number of ranked dynamic calls added to final-pass hotwords |
 | `ASLT_CALLSIGN_MAX_CANDIDATES` | `250` | Maximum post-decode fuzzy candidates |
 | `ASLT_CALLSIGN_CONTEXT_CACHE_SECONDS` | `30` | Dynamic candidate cache lifetime |
+| `ASLT_QRZ_LAST_HEARD_REFRESH_LIMIT` | `10` | Maximum uncached QRZ lookups during one Last Heard refresh |
 | `ASLT_AUTO_PROCESS` | `true` | Automatically runs the final pass for pending stable files |
 | `ASLT_ARCHIVE_POLL_SECONDS` | `1` | Interval for archive discovery and final-job processing |
 | `ASLT_FILE_STABILIZATION_SECONDS` | `5` | Required unchanged interval before final processing |

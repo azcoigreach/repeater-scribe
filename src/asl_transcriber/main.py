@@ -1324,11 +1324,12 @@ def callsign_directory(
     db: Annotated[Session, Depends(get_db)], q: str | None = None,
     cursor: str | None = None, limit: int = Query(default=50, ge=1, le=100),
     alphabetical: bool = False, review_status: str | None = None,
+    qrz_validation_status: str | None = None,
 ) -> dict[str, object]:
     try:
         items, next_cursor, has_more = list_callsigns(
             db, query=q, cursor=cursor, limit=limit, alphabetical=alphabetical,
-            review_status=review_status,
+            review_status=review_status, qrz_validation_status=qrz_validation_status,
         )
     except ValueError as error:
         raise HTTPException(

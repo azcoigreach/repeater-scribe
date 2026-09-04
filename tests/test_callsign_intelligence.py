@@ -145,6 +145,7 @@ def test_review_qrz_and_explicit_attribution_are_separate(archive_db) -> None:
         assert profile["attributed_transmission_count"] == 1
         assert profile["attributed_airtime_seconds"] == 4.0
         assert profile["qrz_display_name"] == "Test Operator"
+        assert session.query(CallsignMention).one().qrz_validation_status == "found"
 
 
 def test_directory_cursor_is_returned_for_more_rows(archive_db) -> None:
@@ -301,6 +302,56 @@ def test_retranscription_preserves_corrected_assignment_and_hides_rejected_evide
         session.commit()
         session.refresh(recording)
         assert serialize_recording(recording)["transcript"]["callsign_mentions"] == []
+
+
+def test_retranscription_preserves_review_identity_across_small_timing_shift(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-shift", source_path="shift.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-shift", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-shift", job_id="job-shift", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(
+            session, transcript, recording,
+            SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1)]),
+        )
+        session.flush()
+        initial = session.query(CallsignMention).one()
+        review_mention(session, initial.id, action="confirm", corrected_callsign=None, reviewer_identity="operator")
+        session.commit()
+        persist_transcript_details(
+            session, transcript, recording,
+            SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0.05, 1.05)]),
+        )
+        session.commit()
+        preserved = session.query(CallsignMention).one()
+        assert preserved.id == initial.id
+        assert preserved.review_status == "confirmed"
+        assert preserved.reviewer_identity == "operator"
+
+
+def test_directory_keeps_qrz_not_found_callsigns(archive_db) -> None:
+    with archive_db() as session:
+        for index, callsign in enumerate(("KM7GHS", "KE7WIL")):
+            recording = Recording(id=f"recording-qrz-{index}", source_path=f"qrz-{index}.wav", archive_root="", status="completed")
+            session.add(recording)
+            session.flush()
+            session.add(IngestionJob(id=f"job-qrz-{index}", source_path=recording.source_path, recording_id=recording.id))
+            session.flush()
+            transcript = Transcript(id=f"transcript-qrz-{index}", job_id=f"job-qrz-{index}", recording_id=recording.id)
+            session.add(transcript)
+            session.flush()
+            persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention(callsign, 0, 1)]))
+        callsign = session.query(Callsign).filter_by(normalized_callsign="KE7WIL").one()
+        callsign.qrz_status = "not_found"
+        session.commit()
+        items, _, _ = list_callsigns(session, query=None, cursor=None, limit=50)
+        assert {item["callsign"] for item in items} == {"KM7GHS", "KE7WIL"}
+        filtered, _, _ = list_callsigns(session, query=None, cursor=None, limit=50, qrz_validation_status="not_found")
+        assert [item["callsign"] for item in filtered] == ["KE7WIL"]
 
 
 def test_retranscription_replaces_unreviewed_detection(archive_db) -> None:

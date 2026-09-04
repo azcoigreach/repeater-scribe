@@ -300,6 +300,7 @@ quality; benchmark representative repeater audio before choosing a model.
 | `ASLT_QRZ_USERNAME` / `ASLT_QRZ_PASSWORD` | Optional QRZ XML Logbook Data credentials used only by the server. |
 | `ASLT_QRZ_CACHE_SECONDS` | How long to reuse callsign lookup results; defaults to 24 hours. |
 | `ASLT_QRZ_LAST_HEARD_LIMIT` | Maximum recent unique callsigns shown in the dashboard. |
+| `ASLT_QRZ_LAST_HEARD_REFRESH_LIMIT` | Maximum uncached QRZ lookups attempted during one dashboard refresh. |
 
 The full transcription setting reference is in
 [docs/transcription.md](docs/transcription.md).
