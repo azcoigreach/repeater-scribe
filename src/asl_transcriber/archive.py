@@ -108,12 +108,18 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
                 "callsign": mention.canonical_callsign,
                 "start": mention.start_offset,
                 "end": mention.end_offset,
+                "raw_observed_value": mention.raw_observed_value,
                 "confidence": mention.confidence,
                 "acoustic_confidence": mention.acoustic_confidence,
                 "recognition_confidence": mention.recognition_confidence,
+                "recognition_method": mention.recognition_method,
+                "timing_precision": mention.timing_precision,
+                "qrz_validation_status": mention.qrz_validation_status,
+                "review_status": mention.review_status,
                 "evidence": json.loads(mention.evidence_json),
             }
             for mention in transcript.callsign_mentions
+            if mention.review_status != "rejected"
         ]
         if transcript and transcript.callsign_mentions
         else json.loads(transcript.callsign_mentions_json) if transcript else []
@@ -189,10 +195,7 @@ def list_recordings(
             legacy_match = exists(
                 select(1).select_from(Transcript).join(legacy_values, text("1=1")).where(
                     Transcript.recording_id == Recording.id,
-                    or_(
-                        Transcript.id == Recording.current_transcript_id,
-                        Recording.current_transcript_id.is_(None),
-                    ),
+                    Recording.current_transcript_id.is_(None),
                     func.json_extract(legacy_values.c.value, "$.callsign") == normalized_callsign,
                 )
             )

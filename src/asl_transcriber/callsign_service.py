@@ -41,7 +41,11 @@ def persist_transcript_details(
     """Replace durable details for a transcript inside its caller's transaction."""
     previous_reviews = {
         (mention.raw_observed_value, mention.start_offset, mention.end_offset): (
-            mention.review_status, mention.reviewer_identity, mention.reviewed_at
+            mention.callsign_id,
+            mention.canonical_callsign,
+            mention.review_status,
+            mention.reviewer_identity,
+            mention.reviewed_at,
         )
         for mention in session.query(CallsignMention).filter(
             CallsignMention.transcript_id == transcript.id
@@ -108,7 +112,13 @@ def persist_transcript_details(
             (mention_row.raw_observed_value, mention_row.start_offset, mention_row.end_offset)
         )
         if review is not None:
-            mention_row.review_status, mention_row.reviewer_identity, mention_row.reviewed_at = review
+            (
+                mention_row.callsign_id,
+                mention_row.canonical_callsign,
+                mention_row.review_status,
+                mention_row.reviewer_identity,
+                mention_row.reviewed_at,
+            ) = review
         session.add(mention_row)
     recording.current_transcript_id = transcript.id
 
@@ -263,7 +273,12 @@ def list_call_sign_mentions(
             "transcript_id": mention.transcript_id, "segment_id": mention.segment_id,
             "heard_at": mention.heard_at.isoformat() if mention.heard_at else None,
             "start_offset": mention.start_offset, "end_offset": mention.end_offset,
-            "raw_observed_value": mention.raw_observed_value, "confidence": mention.confidence,
+            "timing_precision": mention.timing_precision,
+            "raw_observed_value": mention.raw_observed_value,
+            "canonical_callsign": mention.canonical_callsign,
+            "recognition_method": mention.recognition_method,
+            "qrz_validation_status": mention.qrz_validation_status,
+            "confidence": mention.confidence,
             "acoustic_confidence": mention.acoustic_confidence,
             "recognition_confidence": mention.recognition_confidence,
             "evidence": json.loads(mention.evidence_json), "review_status": mention.review_status,
@@ -302,6 +317,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
     latest_end_offset = latest.with_only_columns(CallsignMention.end_offset).scalar_subquery()
     latest_evidence = latest.with_only_columns(CallsignMention.evidence_json).scalar_subquery()
     latest_recording = latest.with_only_columns(CallsignMention.recording_id).scalar_subquery()
+    latest_source_path = latest.with_only_columns(Recording.source_path).scalar_subquery()
     statement = select(
         Callsign,
         func.min(CallsignMention.heard_at),
@@ -314,6 +330,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
         latest_end_offset,
         latest_evidence,
         latest_recording,
+        latest_source_path,
     ).join(CallsignMention, CallsignMention.callsign_id == Callsign.id).join(
         Recording, Recording.id == CallsignMention.recording_id
     ).where(
@@ -335,7 +352,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
             "_best_observation": float(row[5] or 0.45),
             "acoustic_quality_percent": round(float(row[6]) * 100) if row[6] is not None else None,
             "evidence": [*map(str, evidence), f"Heard {row[3]} times across {row[4]} recording{'s' if row[4] != 1 else ''}"],
-            "source_path": None,
+            "source_path": row[11],
             "_recording_id": row[10],
             "qrz_status": details.qrz_status,
             "qrz_display_name": details.qrz_display_name,

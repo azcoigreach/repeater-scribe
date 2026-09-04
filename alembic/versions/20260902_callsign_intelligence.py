@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -27,12 +28,15 @@ def _new_id() -> str:
 
 
 def _normalize(value: object) -> str | None:
-    from asl_transcriber.transcription.callsigns import normalize_callsigns
-
     if not isinstance(value, str):
         return None
-    normalized = normalize_callsigns((value,))
-    return normalized[0] if normalized else None
+    for choice in value.upper().split("/"):
+        candidate = re.sub(r"[^A-Z0-9]", "", choice)
+        if re.fullmatch(r"[A-Z0-9]{1,3}\d[A-Z]{1,4}", candidate) and any(
+            symbol.isalpha() for symbol in candidate[:3]
+        ):
+            return candidate
+    return None
 
 
 def _datetime_value(value: object) -> datetime | None:
@@ -47,6 +51,13 @@ def _datetime_value(value: object) -> datetime | None:
     return None
 
 
+def _float_value(value: object) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _has_table(bind: sa.Connection, name: str) -> bool:
     return sa.inspect(bind).has_table(name)
 
@@ -57,6 +68,10 @@ def _has_index(bind: sa.Connection, table: str, name: str) -> bool:
 
 def upgrade() -> None:
     bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        # SQLite batch migrations recreate recordings, which cannot be dropped
+        # while its existing dependents are enforced. Re-enable before backfill.
+        bind.exec_driver_sql("PRAGMA foreign_keys=OFF")
     recording_columns = {column["name"] for column in sa.inspect(bind).get_columns("recordings")}
     if "current_transcript_id" not in recording_columns:
         with op.batch_alter_table("recordings") as batch:
@@ -212,11 +227,8 @@ def upgrade() -> None:
                     ),
                     {"id": callsign_id, "callsign": callsign},
                 )
-            end_offset = item.get("end")
-            try:
-                end_value = float(end_offset) if end_offset is not None else None
-            except (TypeError, ValueError):
-                end_value = None
+            start_value = _float_value(item.get("start"))
+            end_value = _float_value(item.get("end"))
             heard_at = None
             precision = "recording"
             if started is not None and end_value is not None:
@@ -238,17 +250,25 @@ def upgrade() -> None:
                 {
                     "id": _new_id(), "callsign_id": callsign_id, "transcript_id": transcript_id,
                     "recording_id": recording_id, "raw_value": item.get("callsign"), "callsign": callsign,
-                    "start_offset": item.get("start"), "end_offset": end_value, "heard_at": heard_at,
-                    "precision": precision, "confidence": item.get("confidence"),
-                    "acoustic": item.get("acoustic_confidence"), "recognition": item.get("recognition_confidence"),
+                    "start_offset": start_value, "end_offset": end_value, "heard_at": heard_at,
+                    "precision": precision, "confidence": _float_value(item.get("confidence")),
+                    "acoustic": _float_value(item.get("acoustic_confidence")),
+                    "recognition": _float_value(item.get("recognition_confidence")),
                     "evidence": json.dumps(evidence),
                 },
             )
+
+    if bind.dialect.name == "sqlite":
+        bind.exec_driver_sql("PRAGMA foreign_keys=ON")
+    invalid_foreign_keys = bind.execute(sa.text("PRAGMA foreign_key_check")).all()
+    if invalid_foreign_keys:
+        raise RuntimeError(f"Foreign-key check failed after callsign backfill: {invalid_foreign_keys!r}")
 
 
 def downgrade() -> None:
     op.drop_table("callsign_mentions")
     op.drop_table("transcript_segments")
+    op.drop_index("ix_transmissions_operator_callsign", table_name="transmissions")
     op.drop_index("ix_callsigns_normalized_callsign", table_name="callsigns")
     op.drop_table("callsigns")
     with op.batch_alter_table("recordings") as batch:

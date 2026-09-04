@@ -1536,15 +1536,34 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
     client = current_qrz_client()
     items: list[dict[str, object]] = []
     rejected = 0
-    for database_item in last_heard_rows(db, result_limit):
+    for database_item in last_heard_rows(db, 100):
         expires_at = database_item.pop("qrz_cache_expires_at")
         is_current = isinstance(expires_at, datetime) and (
             expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
         ) >= snapshot_now
-        qrz_status = database_item.pop("qrz_status") if is_current else None
-        if qrz_status == "not_found":
+        stored_qrz_status = database_item.pop("qrz_status")
+        if stored_qrz_status == "not_found":
             rejected += 1
             continue
+        qrz_status = stored_qrz_status if is_current else None
+        if qrz_status is None and client is not None:
+            try:
+                snapshot = client.lookup(str(database_item["callsign"]))
+                update_qrz_snapshot(
+                    db, str(database_item["callsign"]), snapshot,
+                    cache_seconds=settings.qrz_cache_seconds,
+                )
+                db.commit()
+                if snapshot.status == "not_found":
+                    rejected += 1
+                    continue
+                qrz_status = snapshot.status
+                database_item["qrz_display_name"] = snapshot.name
+                database_item["qrz_location"] = snapshot.location
+                database_item["qrz_image_url"] = snapshot.image_url
+                database_item["qrz_profile_url"] = snapshot.profile_url
+            except QrzError as error:
+                logger.warning("QRZ lookup failed for %s: %s", database_item["callsign"], error)
         best_value = database_item.pop("_best_observation")
         observation_count = database_item["observation_count"]
         recording_count = database_item["recording_count"]
@@ -1573,11 +1592,44 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
             "confidence_label": callsign_confidence_label(score),
             "evidence": evidence[:6],
         })
+    confirmed_callsigns = {str(item["callsign"]) for item in items if item["status"] == "found"}
+    latest_recordings = {
+        str(item["callsign"]): item["_recording_id"] for item in items if item["status"] == "found"
+    }
+    superseded = sum(
+        1
+        for item in items
+        if any(
+            longer in confirmed_callsigns
+            and longer != str(item["callsign"])
+            and longer.startswith(str(item["callsign"]))
+            and len(longer) - len(str(item["callsign"])) <= 2
+            and item["_recording_id"] == latest_recordings[longer]
+            for longer in confirmed_callsigns
+        )
+    )
+    items = [
+        item for item in items
+        if not any(
+            longer in confirmed_callsigns
+            and longer != str(item["callsign"])
+            and longer.startswith(str(item["callsign"]))
+            and len(longer) - len(str(item["callsign"])) <= 2
+            and item["_recording_id"] == latest_recordings[longer]
+            for longer in confirmed_callsigns
+        )
+    ][:result_limit]
+    for item in items:
+        item.pop("_recording_id", None)
+        item.pop("qrz_display_name", None)
+        item.pop("qrz_location", None)
+        item.pop("qrz_image_url", None)
+        item.pop("qrz_profile_url", None)
     return {
         "configured": client is not None,
         "total": len(items),
         "rejected": rejected,
-        "superseded": 0,
+        "superseded": superseded,
         "items": items,
     }
 

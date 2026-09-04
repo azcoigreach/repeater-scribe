@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from asl_transcriber.archive import serialize_recording
 from asl_transcriber.callsign_service import (
     callsign_profile,
     list_call_sign_mentions,
@@ -14,7 +15,7 @@ from asl_transcriber.callsign_service import (
     review_mention,
     update_qrz_snapshot,
 )
-from asl_transcriber.database import SessionLocal, engine
+from asl_transcriber.database import SessionLocal, engine, get_db
 from asl_transcriber.main import app, last_heard_callsigns
 from asl_transcriber.models import (
     Callsign,
@@ -243,19 +244,60 @@ def test_callsign_api_contracts_and_ui_review(archive_db) -> None:
         )
         session.commit()
         mention_id = session.query(CallsignMention).one().id
-    client = TestClient(app)
-    directory = client.get("/api/v1/callsigns?limit=1")
-    assert directory.status_code == 200
-    assert directory.json()["items"][0]["callsign"] == "KM7GHS"
-    assert client.get("/api/v1/callsigns?cursor=bad").status_code == 422
-    profile = client.get("/api/v1/callsigns/KM7GHS")
-    assert profile.status_code == 200
-    assert profile.json()["attribution_complete"] is False
-    history = client.get("/api/v1/callsigns/KM7GHS/mentions?review_status=detected")
-    assert history.status_code == 200
-    assert history.json()["items"][0]["mention_id"] == mention_id
-    reviewed = client.patch(
-        f"/ui/callsign-mentions/{mention_id}", json={"action": "confirm"}
-    )
-    assert reviewed.status_code == 200
-    assert reviewed.json()["review_status"] == "confirmed"
+    def override_db():
+        with archive_db() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        client = TestClient(app)
+        directory = client.get("/api/v1/callsigns?limit=1")
+        assert directory.status_code == 200
+        assert directory.json()["items"][0]["callsign"] == "KM7GHS"
+        assert client.get("/api/v1/callsigns?cursor=bad").status_code == 422
+        profile = client.get("/api/v1/callsigns/KM7GHS")
+        assert profile.status_code == 200
+        assert profile.json()["attribution_complete"] is False
+        history = client.get("/api/v1/callsigns/KM7GHS/mentions?review_status=detected")
+        assert history.status_code == 200
+        assert history.json()["items"][0]["mention_id"] == mention_id
+        assert history.json()["items"][0]["timing_precision"] == "segment"
+        assert history.json()["items"][0]["recognition_method"] == "legacy"
+        assert history.json()["items"][0]["qrz_validation_status"] is None
+        reviewed = client.patch(
+            f"/ui/callsign-mentions/{mention_id}", json={"action": "confirm"}
+        )
+        assert reviewed.status_code == 200
+        assert reviewed.json()["review_status"] == "confirmed"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_retranscription_preserves_corrected_assignment_and_hides_rejected_evidence(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-review", source_path="review.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-review", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-review", job_id="job-review", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        result = SimpleNamespace(
+            segments=[],
+            callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1, raw_observed_value="AM7 VHS")],
+        )
+        persist_transcript_details(session, transcript, recording, result)
+        session.flush()
+        mention = session.query(CallsignMention).one()
+        review_mention(session, mention.id, action="correct", corrected_callsign="KE7WIL", reviewer_identity="operator")
+        session.commit()
+        persist_transcript_details(session, transcript, recording, result)
+        session.commit()
+        preserved = session.query(CallsignMention).one()
+        assert preserved.canonical_callsign == "KE7WIL"
+        assert preserved.review_status == "corrected"
+        review_mention(session, preserved.id, action="reject", corrected_callsign=None, reviewer_identity="operator")
+        session.commit()
+        session.refresh(recording)
+        assert serialize_recording(recording)["transcript"]["callsign_mentions"] == []
