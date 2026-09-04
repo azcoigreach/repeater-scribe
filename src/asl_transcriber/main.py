@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Empty
+from types import SimpleNamespace
 from typing import Annotated
 from urllib.parse import quote
 
@@ -18,7 +19,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -32,6 +33,7 @@ from asl_transcriber.archive import (
 )
 from asl_transcriber.auth import (
     Admin,
+    Principal,
     Viewer,
     audit_event,
     authenticate_request,
@@ -46,6 +48,13 @@ from asl_transcriber.auth import (
     revoke_session,
     verify_csrf,
 )
+from asl_transcriber.callsign_service import (
+    callsign_profile,
+    list_call_sign_mentions,
+    list_callsigns,
+    review_mention,
+    update_qrz_snapshot,
+)
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal, get_db, require_current_schema
 from asl_transcriber.favorites import (
@@ -56,7 +65,7 @@ from asl_transcriber.favorites import (
     record_remote_key_transition,
     update_favorite,
 )
-from asl_transcriber.models import Favorite, Recording
+from asl_transcriber.models import CallsignMention, Favorite, Recording
 from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.qrz import QrzClient, QrzError
@@ -429,7 +438,10 @@ def dashboard(request: Request):
     )
 
 
-def _workspace_context(request: Request, template_name: str, *, recording_id: str | None = None):
+def _workspace_context(
+    request: Request, template_name: str, *, recording_id: str | None = None,
+    callsign: str | None = None,
+):
     principal = authenticate_request(request)
     if principal is None:
         next_path = request.url.path
@@ -443,12 +455,24 @@ def _workspace_context(request: Request, template_name: str, *, recording_id: st
     }
     if recording_id is not None:
         context["recording_id"] = recording_id
+    if callsign is not None:
+        context["callsign"] = callsign
     return templates.TemplateResponse(request=request, name=template_name, context=context)
 
 
 @app.get("/archive")
 def archive_workspace(request: Request):
     return _workspace_context(request, "archive.html")
+
+
+@app.get("/callsigns")
+def callsign_directory_workspace(request: Request):
+    return _workspace_context(request, "callsigns.html")
+
+
+@app.get("/callsigns/{callsign}")
+def callsign_history_workspace(request: Request, callsign: str):
+    return _workspace_context(request, "callsign_detail.html", callsign=callsign)
 
 
 @app.get("/archive/recordings/{recording_id}")
@@ -1045,6 +1069,11 @@ class NodeFunctionRequest(BaseModel):
     function: str
 
 
+class CallsignMentionReviewRequest(BaseModel):
+    action: str
+    corrected_callsign: str | None = None
+
+
 async def execute_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
     if not settings.ami_control_enabled:
         raise HTTPException(status_code=503, detail="AMI node control is disabled")
@@ -1289,23 +1318,174 @@ def archive_audio(
     return FileResponse(source, media_type="audio/wav", filename=source.name)
 
 
+@app.get("/api/v1/callsigns", dependencies=[Depends(require_viewer)])
+def callsign_directory(
+    db: Annotated[Session, Depends(get_db)], q: str | None = None,
+    cursor: str | None = None, limit: int = Query(default=50, ge=1, le=100),
+    alphabetical: bool = False, review_status: str | None = None,
+) -> dict[str, object]:
+    items, next_cursor, has_more = list_callsigns(
+        db, query=q, cursor=cursor, limit=limit, alphabetical=alphabetical,
+        review_status=review_status,
+    )
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+
+@app.get("/api/v1/callsigns/{callsign}/mentions", dependencies=[Depends(require_viewer)])
+def callsign_mentions_history(
+    db: Annotated[Session, Depends(get_db)], callsign: str,
+    cursor: str | None = None, limit: int = Query(default=50, ge=1, le=100),
+    from_at: Annotated[datetime | None, Query(alias="from")] = None,
+    to_at: Annotated[datetime | None, Query(alias="to")] = None,
+    review_status: str | None = None, audio_status: str | None = None,
+) -> dict[str, object]:
+    try:
+        items, next_cursor, has_more = list_call_sign_mentions(
+            db, callsign, cursor=cursor, limit=limit, from_at=from_at, to_at=to_at,
+            review_status=review_status, audio_status=audio_status,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+
 @app.get("/api/v1/callsigns/last-heard", dependencies=[Depends(require_viewer)])
-def last_heard_callsigns(limit: int | None = None) -> dict[str, object]:
-    active_runtime = current_runtime()
+def last_heard_callsigns_route(
+    limit: int | None = None,
+    db: Annotated[Session | None, Depends(get_db)] = None,
+) -> dict[str, object]:
+    return last_heard_callsigns(limit=limit, db=db)
+
+
+@app.get("/api/v1/callsigns/{callsign}", dependencies=[Depends(require_viewer)])
+def callsign_history_profile(
+    db: Annotated[Session, Depends(get_db)], callsign: str
+) -> dict[str, object]:
+    try:
+        profile = callsign_profile(db, callsign)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Callsign not found")
+    return profile
+
+
+def _apply_mention_review(
+    db: Session, mention_id: str, payload: CallsignMentionReviewRequest, principal: Principal,
+    request: Request,
+) -> dict[str, object]:
+    try:
+        mention = review_mention(
+            db, mention_id, action=payload.action,
+            corrected_callsign=payload.corrected_callsign,
+            reviewer_identity=principal.identity,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    db.commit()
+    audit_event(
+        actor=principal.identity, auth_source=principal.auth_source,
+        action="callsign_mention_review", outcome="success", request=request,
+        detail=f"mention_id={mention.id};action={mention.review_status}",
+    )
+    return {"mention_id": mention.id, "canonical_callsign": mention.canonical_callsign,
+            "review_status": mention.review_status, "reviewer_identity": mention.reviewer_identity,
+            "reviewed_at": mention.reviewed_at.isoformat() if mention.reviewed_at else None}
+
+
+@app.patch("/api/v1/callsign-mentions/{mention_id}", dependencies=[Depends(require_api_operator)])
+def review_callsign_mention_api(
+    db: Annotated[Session, Depends(get_db)], request: Request, mention_id: str,
+    payload: CallsignMentionReviewRequest, principal: Annotated[Principal, Depends(require_api_operator)],
+) -> dict[str, object]:
+    return _apply_mention_review(db, mention_id, payload, principal, request)
+
+
+@app.patch("/ui/callsign-mentions/{mention_id}", dependencies=[Depends(require_ui_operator)])
+def review_callsign_mention_ui(
+    db: Annotated[Session, Depends(get_db)], request: Request, mention_id: str,
+    payload: CallsignMentionReviewRequest, principal: Annotated[Principal, Depends(require_ui_operator)],
+) -> dict[str, object]:
+    return _apply_mention_review(db, mention_id, payload, principal, request)
+
+
+@app.post("/api/v1/callsigns/{callsign}/qrz-refresh", dependencies=[Depends(require_api_operator)])
+def refresh_callsign_qrz_api(
+    db: Annotated[Session, Depends(get_db)], request: Request, callsign: str,
+    principal: Annotated[Principal, Depends(require_api_operator)],
+) -> dict[str, object]:
+    client = current_qrz_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="QRZ is not configured")
+    try:
+        details = client.lookup(callsign)
+        stored = update_qrz_snapshot(
+            db, callsign, details, cache_seconds=settings.qrz_cache_seconds
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except QrzError as error:
+        raise HTTPException(status_code=502, detail="QRZ lookup failed") from error
+    db.commit()
+    audit_event(
+        actor=principal.identity, auth_source=principal.auth_source,
+        action="callsign_qrz_refresh", outcome="success", request=request,
+        detail=f"callsign={stored.normalized_callsign};status={stored.qrz_status}",
+    )
+    return callsign_profile(db, stored.normalized_callsign) or {}
+
+
+@app.post("/ui/callsigns/{callsign}/qrz-refresh", dependencies=[Depends(require_ui_operator)])
+def refresh_callsign_qrz_ui(
+    db: Annotated[Session, Depends(get_db)], request: Request, callsign: str,
+    principal: Annotated[Principal, Depends(require_ui_operator)],
+) -> dict[str, object]:
+    return refresh_callsign_qrz_api(db, request, callsign, principal)
+
+
+def last_heard_callsigns(
+    limit: int | None = None,
+    db: Annotated[Session | None, Depends(get_db)] = None,
+) -> dict[str, object]:
     heard: dict[str, dict[str, object]] = {}
     heard_times: dict[str, datetime | None] = {}
     observations: dict[str, list[TranscriptCallsignMention | None]] = {}
     recording_sources: dict[str, set[str]] = {}
     sources: list[tuple[str, object]] = []
-    sources.extend(
-        (source_path, result)
-        for source_path, result in active_runtime.live_results.items()
-    )
-    sources.extend(
-        (job.source_path, active_runtime.results[job.id])
-        for job in active_runtime.jobs()
-        if job.id in active_runtime.results
-    )
+    if db is not None and db.bind is not None and inspect(db.bind).has_table("callsign_mentions"):
+        rows = db.execute(
+            select(CallsignMention, Recording)
+            .join(Recording, Recording.id == CallsignMention.recording_id)
+            .where(
+                CallsignMention.review_status != "rejected",
+                CallsignMention.transcript_id == Recording.current_transcript_id,
+            )
+            .order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
+        ).all()
+        for mention, recording in rows:
+            observed = TranscriptCallsignMention(
+                callsign=mention.canonical_callsign,
+                start=mention.start_offset or 0.0,
+                end=mention.end_offset or 0.0,
+                confidence=mention.confidence or 0.45,
+                acoustic_confidence=mention.acoustic_confidence,
+                recognition_confidence=mention.recognition_confidence or 0.5,
+                evidence=tuple(json.loads(mention.evidence_json)),
+            )
+            sources.append((recording.source_path, SimpleNamespace(callsign_mentions=[observed])))
+    else:
+        active_runtime = current_runtime()
+        sources.extend(
+            (source_path, result)
+            for source_path, result in active_runtime.live_results.items()
+        )
+        sources.extend(
+            (job.source_path, active_runtime.results[job.id])
+            for job in active_runtime.jobs()
+            if job.id in active_runtime.results
+        )
 
     for source_path, result in sources:
         started_at_value = recording_timestamp(source_path)

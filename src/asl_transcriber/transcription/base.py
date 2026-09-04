@@ -11,6 +11,9 @@ class TranscriptSegment:
     text: str
     language: str | None = None
     confidence: float | None = None
+    ordinal: int = 0
+    raw_text: str | None = None
+    display_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,9 @@ class TranscriptCallsignMention:
     acoustic_confidence: float | None = None
     recognition_confidence: float = 0.5
     evidence: tuple[str, ...] = ()
+    raw_observed_value: str | None = None
+    recognition_method: str = "legacy"
+    timing_precision: str = "segment"
 
 
 @dataclass

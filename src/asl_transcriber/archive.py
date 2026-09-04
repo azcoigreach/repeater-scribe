@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import Select, and_, exists, false, func, or_, select, text, true
+from sqlalchemy import Select, and_, exists, false, func, or_, select, text
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
-from asl_transcriber.models import Recording, Transcript
+from asl_transcriber.models import CallsignMention, Recording, Transcript
 
 
 class ArchiveQueryError(ValueError):
@@ -97,10 +97,27 @@ def get_or_create_recording(
 
 
 def serialize_recording(recording: Recording) -> dict[str, object]:
-    transcript = next((item for item in recording.transcripts if item.job_id == recording.id), None)
+    transcript = recording.current_transcript
+    transcript = transcript or next((item for item in recording.transcripts if item.job_id == recording.id), None)
     transcript = transcript or (recording.transcripts[0] if recording.transcripts else None)
     job = next((item for item in recording.ingestion_jobs if item.id == recording.id), None)
     job = job or (recording.ingestion_jobs[0] if recording.ingestion_jobs else None)
+    mentions = (
+        [
+            {
+                "callsign": mention.canonical_callsign,
+                "start": mention.start_offset,
+                "end": mention.end_offset,
+                "confidence": mention.confidence,
+                "acoustic_confidence": mention.acoustic_confidence,
+                "recognition_confidence": mention.recognition_confidence,
+                "evidence": json.loads(mention.evidence_json),
+            }
+            for mention in transcript.callsign_mentions
+        ]
+        if transcript and transcript.callsign_mentions
+        else json.loads(transcript.callsign_mentions_json) if transcript else []
+    )
     return {
         "id": recording.id,
         "source_path": recording.source_path,
@@ -118,7 +135,7 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
         "updated_at": recording.updated_at.isoformat(),
         "expired_at": recording.expired_at.isoformat() if recording.expired_at else None,
         "ingestion": ({"status": job.status, "attempt_count": job.attempt_count, "last_error": job.last_error, "dead_letter": job.dead_letter} if job else None),
-        "transcript": ({"raw_text": transcript.raw_text, "display_text": transcript.display_text, "language": transcript.language, "confidence": transcript.confidence, "callsign_mentions": json.loads(transcript.callsign_mentions_json)} if transcript else None),
+        "transcript": ({"raw_text": transcript.raw_text, "display_text": transcript.display_text, "language": transcript.language, "confidence": transcript.confidence, "callsign_mentions": mentions, "segments": [{"id": segment.id, "ordinal": segment.ordinal, "start": segment.start_offset, "end": segment.end_offset, "raw_text": segment.raw_text, "display_text": segment.display_text, "language": segment.language, "confidence": segment.avg_logprob} for segment in transcript.segments]} if transcript else None),
     }
 
 
@@ -158,17 +175,28 @@ def list_recordings(
         if not normalized_callsign:
             conditions.append(false())
         else:
-            mentions = func.json_each(Transcript.callsign_mentions_json).table_valued(
-                "value"
-            ).alias("mentions")
-            conditions.append(
-                exists(
-                    select(1).select_from(Transcript).join(mentions, true()).where(
-                        Transcript.recording_id == Recording.id,
-                        func.json_extract(mentions.c.value, "$.callsign") == normalized_callsign,
-                    )
+            normalized_match = exists(
+                select(1).select_from(CallsignMention).where(
+                    CallsignMention.recording_id == Recording.id,
+                    CallsignMention.canonical_callsign == normalized_callsign,
+                    CallsignMention.review_status != "rejected",
+                    CallsignMention.transcript_id == Recording.current_transcript_id,
                 )
             )
+            legacy_values = func.json_each(Transcript.callsign_mentions_json).table_valued(
+                "value"
+            ).alias("legacy_mentions")
+            legacy_match = exists(
+                select(1).select_from(Transcript).join(legacy_values, text("1=1")).where(
+                    Transcript.recording_id == Recording.id,
+                    or_(
+                        Transcript.id == Recording.current_transcript_id,
+                        Recording.current_transcript_id.is_(None),
+                    ),
+                    func.json_extract(legacy_values.c.value, "$.callsign") == normalized_callsign,
+                )
+            )
+            conditions.append(or_(normalized_match, legacy_match))
     if cursor:
         cursor_time, cursor_id = _decode_cursor(cursor)
         conditions.append(or_(order_time < cursor_time, and_(order_time == cursor_time, Recording.id < cursor_id)))

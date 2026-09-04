@@ -122,13 +122,14 @@ class FasterWhisperEngine:
                 segments_result = info.get("segments", [])
             return [
                 TranscriptSegment(
+                    ordinal=ordinal,
                     start=float(segment_value(segment, "start", 0.0)),
                     end=float(segment_value(segment, "end", 0.0)),
                     text=str(segment_value(segment, "text", "")).strip(),
                     language=segment_value(segment, "language") or self.language,
                     confidence=segment_value(segment, "avg_logprob"),
                 )
-                for segment in segments_result
+                for ordinal, segment in enumerate(segments_result)
             ], info
 
         with self._inference_lock:
@@ -140,6 +141,8 @@ class FasterWhisperEngine:
         for segment in segments:
             segment_resolution = resolver.resolve_detailed(segment.text) if resolver else None
             resolved_segment = segment_resolution.text if segment_resolution else segment.text
+            segment.raw_text = segment.text
+            segment.display_text = resolved_segment
             raw_callsigns = find_callsigns(segment.text)
             acoustic_confidence = (
                 max(0.05, min(0.98, math.exp(segment.confidence)))
@@ -181,6 +184,10 @@ class FasterWhisperEngine:
                         acoustic_confidence=acoustic_confidence,
                         recognition_confidence=recognition_confidence,
                         evidence=tuple(evidence),
+                        raw_observed_value=callsign if callsign in raw_callsigns else None,
+                        recognition_method=(
+                            "direct" if callsign in raw_callsigns else "candidate_match"
+                        ),
                     )
                 )
 

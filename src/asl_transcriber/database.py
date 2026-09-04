@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
@@ -27,6 +28,18 @@ engine = create_engine(
     poolclass=NullPool if is_sqlite else None,
     future=True,
 )
+
+
+if is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection: Any, _: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 
 
@@ -36,7 +49,7 @@ def require_current_schema() -> None:
         raise RuntimeError("Database is not migrated; run 'alembic upgrade head' before startup")
     with engine.connect() as connection:
         revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-    if revision != "archive_foundation":
+    if revision not in {"archive_foundation", "callsign_intelligence"}:
         raise RuntimeError(
             "Database migration is outdated; run 'alembic upgrade head' before startup"
         )

@@ -67,11 +67,19 @@ class Recording(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     node_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("nodes.id"), nullable=True)
+    current_transcript_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("transcripts.id"), nullable=True, index=True
+    )
 
     node: Mapped[Node | None] = relationship(back_populates="recordings")
     transmissions: Mapped[list[Transmission]] = relationship(back_populates="recording")
     ingestion_jobs: Mapped[list[IngestionJob]] = relationship(back_populates="recording")
-    transcripts: Mapped[list[Transcript]] = relationship(back_populates="recording")
+    transcripts: Mapped[list[Transcript]] = relationship(
+        back_populates="recording", foreign_keys="Transcript.recording_id"
+    )
+    current_transcript: Mapped[Transcript | None] = relationship(
+        foreign_keys=[current_transcript_id], post_update=True
+    )
 
 
 class IngestionJob(Base):
@@ -128,7 +136,110 @@ class Transcript(Base):
     )
 
     job: Mapped[IngestionJob] = relationship(back_populates="transcript")
-    recording: Mapped[Recording | None] = relationship(back_populates="transcripts")
+    recording: Mapped[Recording | None] = relationship(
+        back_populates="transcripts", foreign_keys=[recording_id]
+    )
+    segments: Mapped[list[TranscriptSegment]] = relationship(
+        back_populates="transcript", cascade="all, delete-orphan"
+    )
+    callsign_mentions: Mapped[list[CallsignMention]] = relationship(
+        back_populates="transcript", cascade="all, delete-orphan"
+    )
+
+
+class Callsign(Base):
+    __tablename__ = "callsigns"
+    __table_args__ = (UniqueConstraint("normalized_callsign", name="uq_callsigns_normalized"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    normalized_callsign: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+    qrz_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    qrz_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    qrz_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    qrz_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    qrz_profile_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    qrz_lookup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    qrz_cache_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    mentions: Mapped[list[CallsignMention]] = relationship(back_populates="callsign")
+
+
+class TranscriptSegment(Base):
+    __tablename__ = "transcript_segments"
+    __table_args__ = (
+        UniqueConstraint("transcript_id", "ordinal", name="uq_transcript_segments_ordinal"),
+        Index("ix_transcript_segments_recording", "recording_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    transcript_id: Mapped[str] = mapped_column(String(36), ForeignKey("transcripts.id"), index=True)
+    recording_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("recordings.id"), nullable=True, index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_offset: Mapped[float] = mapped_column(Float, nullable=False)
+    end_offset: Mapped[float] = mapped_column(Float, nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    display_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    language: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    avg_logprob: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+    transcript: Mapped[Transcript] = relationship(back_populates="segments")
+
+
+class CallsignMention(Base):
+    __tablename__ = "callsign_mentions"
+    __table_args__ = (
+        Index("ix_callsign_mentions_callsign_heard", "callsign_id", "heard_at"),
+        Index("ix_callsign_mentions_recording", "recording_id"),
+        Index("ix_callsign_mentions_transcript", "transcript_id"),
+        Index("ix_callsign_mentions_segment", "segment_id"),
+        Index("ix_callsign_mentions_heard_at", "heard_at"),
+        Index("ix_callsign_mentions_review_status", "review_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    callsign_id: Mapped[str] = mapped_column(String(36), ForeignKey("callsigns.id"), nullable=False)
+    transcript_id: Mapped[str] = mapped_column(String(36), ForeignKey("transcripts.id"), nullable=False)
+    recording_id: Mapped[str] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=False)
+    segment_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("transcript_segments.id"), nullable=True
+    )
+    raw_observed_value: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    canonical_callsign: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    start_offset: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_offset: Mapped[float | None] = mapped_column(Float, nullable=True)
+    heard_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    timing_precision: Mapped[str] = mapped_column(String(16), default="recording", nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    acoustic_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recognition_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recognition_method: Mapped[str] = mapped_column(String(32), default="legacy", nullable=False)
+    evidence_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    qrz_validation_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    review_status: Mapped[str] = mapped_column(String(16), default="detected", nullable=False)
+    reviewer_identity: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    callsign: Mapped[Callsign] = relationship(back_populates="mentions")
+    transcript: Mapped[Transcript] = relationship(back_populates="callsign_mentions")
+    recording: Mapped[Recording] = relationship()
+    segment: Mapped[TranscriptSegment | None] = relationship()
 
 
 class Transmission(Base):
