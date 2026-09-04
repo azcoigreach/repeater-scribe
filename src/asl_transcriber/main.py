@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Empty
-from types import SimpleNamespace
 from typing import Annotated
 from urllib.parse import quote
 
@@ -50,6 +49,7 @@ from asl_transcriber.auth import (
 )
 from asl_transcriber.callsign_service import (
     callsign_profile,
+    last_heard_rows,
     list_call_sign_mentions,
     list_callsigns,
     review_mention,
@@ -65,7 +65,7 @@ from asl_transcriber.favorites import (
     record_remote_key_transition,
     update_favorite,
 )
-from asl_transcriber.models import CallsignMention, Favorite, Recording
+from asl_transcriber.models import Favorite, Recording
 from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.qrz import QrzClient, QrzError
@@ -1324,10 +1324,16 @@ def callsign_directory(
     cursor: str | None = None, limit: int = Query(default=50, ge=1, le=100),
     alphabetical: bool = False, review_status: str | None = None,
 ) -> dict[str, object]:
-    items, next_cursor, has_more = list_callsigns(
-        db, query=q, cursor=cursor, limit=limit, alphabetical=alphabetical,
-        review_status=review_status,
-    )
+    try:
+        items, next_cursor, has_more = list_callsigns(
+            db, query=q, cursor=cursor, limit=limit, alphabetical=alphabetical,
+            review_status=review_status,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_cursor", "message": str(error)},
+        ) from error
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
@@ -1345,7 +1351,9 @@ def callsign_mentions_history(
             review_status=review_status, audio_status=audio_status,
         )
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        status = 422 if cursor else 400
+        detail = {"code": "invalid_cursor", "message": str(error)} if cursor else str(error)
+        raise HTTPException(status_code=status, detail=detail) from error
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
@@ -1449,43 +1457,24 @@ def last_heard_callsigns(
     limit: int | None = None,
     db: Annotated[Session | None, Depends(get_db)] = None,
 ) -> dict[str, object]:
+    result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
+    if db is not None and db.bind is not None and inspect(db.bind).has_table("callsign_mentions"):
+        return _last_heard_from_database(db, result_limit)
     heard: dict[str, dict[str, object]] = {}
     heard_times: dict[str, datetime | None] = {}
     observations: dict[str, list[TranscriptCallsignMention | None]] = {}
     recording_sources: dict[str, set[str]] = {}
     sources: list[tuple[str, object]] = []
-    if db is not None and db.bind is not None and inspect(db.bind).has_table("callsign_mentions"):
-        rows = db.execute(
-            select(CallsignMention, Recording)
-            .join(Recording, Recording.id == CallsignMention.recording_id)
-            .where(
-                CallsignMention.review_status != "rejected",
-                CallsignMention.transcript_id == Recording.current_transcript_id,
-            )
-            .order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
-        ).all()
-        for mention, recording in rows:
-            observed = TranscriptCallsignMention(
-                callsign=mention.canonical_callsign,
-                start=mention.start_offset or 0.0,
-                end=mention.end_offset or 0.0,
-                confidence=mention.confidence or 0.45,
-                acoustic_confidence=mention.acoustic_confidence,
-                recognition_confidence=mention.recognition_confidence or 0.5,
-                evidence=tuple(json.loads(mention.evidence_json)),
-            )
-            sources.append((recording.source_path, SimpleNamespace(callsign_mentions=[observed])))
-    else:
-        active_runtime = current_runtime()
-        sources.extend(
-            (source_path, result)
-            for source_path, result in active_runtime.live_results.items()
-        )
-        sources.extend(
-            (job.source_path, active_runtime.results[job.id])
-            for job in active_runtime.jobs()
-            if job.id in active_runtime.results
-        )
+    active_runtime = current_runtime()
+    sources.extend(
+        (source_path, result)
+        for source_path, result in active_runtime.live_results.items()
+    )
+    sources.extend(
+        (job.source_path, active_runtime.results[job.id])
+        for job in active_runtime.jobs()
+        if job.id in active_runtime.results
+    )
 
     for source_path, result in sources:
         started_at_value = recording_timestamp(source_path)
@@ -1539,6 +1528,65 @@ def last_heard_callsigns(
             heard[callsign] = item
             heard_times[callsign] = last_heard_at
 
+    return _serialize_runtime_last_heard(heard, heard_times, observations, recording_sources, result_limit)
+
+
+def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, object]:
+    snapshot_now = datetime.now(UTC)
+    client = current_qrz_client()
+    items: list[dict[str, object]] = []
+    rejected = 0
+    for database_item in last_heard_rows(db, result_limit):
+        expires_at = database_item.pop("qrz_cache_expires_at")
+        is_current = isinstance(expires_at, datetime) and (
+            expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
+        ) >= snapshot_now
+        qrz_status = database_item.pop("qrz_status") if is_current else None
+        if qrz_status == "not_found":
+            rejected += 1
+            continue
+        best_value = database_item.pop("_best_observation")
+        observation_count = database_item["observation_count"]
+        recording_count = database_item["recording_count"]
+        assert isinstance(best_value, (float, int))
+        assert isinstance(observation_count, int)
+        assert isinstance(recording_count, int)
+        best_observation = float(best_value)
+        score = callsign_confidence_score(
+            best_observation,
+            observation_count,
+            recording_count,
+            qrz_confirmed=qrz_status == "found",
+        )
+        evidence = [str(value) for value in database_item["evidence"]] if isinstance(database_item["evidence"], list) else []
+        if qrz_status == "found":
+            evidence.insert(0, "QRZ confirms this callsign exists")
+        items.append({
+            **database_item,
+            "status": qrz_status or "unavailable",
+            "name": database_item.pop("qrz_display_name") if qrz_status else None,
+            "location": database_item.pop("qrz_location") if qrz_status else None,
+            "image_url": database_item.pop("qrz_image_url") if qrz_status else None,
+            "profile_url": database_item.pop("qrz_profile_url") if qrz_status else None,
+            "confidence": round(score, 3),
+            "confidence_percent": round(score * 100),
+            "confidence_label": callsign_confidence_label(score),
+            "evidence": evidence[:6],
+        })
+    return {
+        "configured": client is not None,
+        "total": len(items),
+        "rejected": rejected,
+        "superseded": 0,
+        "items": items,
+    }
+
+
+def _serialize_runtime_last_heard(
+    heard: dict[str, dict[str, object]], heard_times: dict[str, datetime | None],
+    observations: dict[str, list[TranscriptCallsignMention | None]],
+    recording_sources: dict[str, set[str]], result_limit: int,
+) -> dict[str, object]:
     for callsign, item in heard.items():
         mentions = observations[callsign]
         timed_mentions = [mention for mention in mentions if mention is not None]
@@ -1620,7 +1668,6 @@ def last_heard_callsigns(
             }
         )
 
-    result_limit = max(1, min(limit or settings.qrz_last_heard_limit, 100))
     sorted_heard = sorted(
         heard.values(),
         key=lambda item: heard_times[str(item["callsign"])]

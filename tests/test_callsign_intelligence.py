@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
@@ -14,6 +15,7 @@ from asl_transcriber.callsign_service import (
     update_qrz_snapshot,
 )
 from asl_transcriber.database import SessionLocal, engine
+from asl_transcriber.main import app, last_heard_callsigns
 from asl_transcriber.models import (
     Callsign,
     CallsignMention,
@@ -187,3 +189,73 @@ def test_callsign_history_lookup_uses_an_index(archive_db) -> None:
         ), {"callsign": "missing"}).all()
     rendered = " ".join(str(row) for row in plan).upper()
     assert "USING INDEX" in rendered or "USING COVERING INDEX" in rendered
+
+
+def test_last_heard_uses_persisted_snapshot_without_qrz_lookup(archive_db, monkeypatch) -> None:
+    with archive_db() as session:
+        recording = Recording(
+            id="recording-last-heard", source_path="not-a-timestamp.wav", archive_root="",
+            started_at=datetime(2026, 9, 3, 12, tzinfo=UTC), status="completed",
+        )
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(
+            id="job-last-heard", source_path=recording.source_path, recording_id=recording.id
+        ))
+        session.flush()
+        transcript = Transcript(
+            id="transcript-last-heard", job_id="job-last-heard", recording_id=recording.id
+        )
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(
+            session, transcript, recording,
+            SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 1, 2)]),
+        )
+        update_qrz_snapshot(
+            session, "KM7GHS", QrzCallsign("KM7GHS", name="Cached Name"), cache_seconds=3600
+        )
+        session.commit()
+        monkeypatch.setattr("asl_transcriber.main.current_qrz_client", lambda: None)
+        response = last_heard_callsigns(db=session)
+    item = response["items"][0]
+    assert item["callsign"] == "KM7GHS"
+    assert item["last_heard_at"] == "2026-09-03T12:00:02"
+    assert item["heard_offset_seconds"] == 2.0
+    assert item["status"] == "found"
+    assert item["name"] == "Cached Name"
+    assert "QRZ confirms this callsign exists" in item["evidence"]
+
+
+def test_callsign_api_contracts_and_ui_review(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-api", source_path="api.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-api", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-api", job_id="job-api", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(
+            session, transcript, recording,
+            SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1)]),
+        )
+        session.commit()
+        mention_id = session.query(CallsignMention).one().id
+    client = TestClient(app)
+    directory = client.get("/api/v1/callsigns?limit=1")
+    assert directory.status_code == 200
+    assert directory.json()["items"][0]["callsign"] == "KM7GHS"
+    assert client.get("/api/v1/callsigns?cursor=bad").status_code == 422
+    profile = client.get("/api/v1/callsigns/KM7GHS")
+    assert profile.status_code == 200
+    assert profile.json()["attribution_complete"] is False
+    history = client.get("/api/v1/callsigns/KM7GHS/mentions?review_status=detected")
+    assert history.status_code == 200
+    assert history.json()["items"][0]["mention_id"] == mention_id
+    reviewed = client.patch(
+        f"/ui/callsign-mentions/{mention_id}", json={"action": "confirm"}
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["review_status"] == "confirmed"

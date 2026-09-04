@@ -68,7 +68,12 @@ class Recording(Base):
     expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     node_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("nodes.id"), nullable=True)
     current_transcript_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("transcripts.id"), nullable=True, index=True
+        String(36),
+        ForeignKey(
+            "transcripts.id", name="fk_recordings_current_transcript", use_alter=True
+        ),
+        nullable=True,
+        index=True,
     )
 
     node: Mapped[Node | None] = relationship(back_populates="recordings")
@@ -174,7 +179,6 @@ class TranscriptSegment(Base):
     __tablename__ = "transcript_segments"
     __table_args__ = (
         UniqueConstraint("transcript_id", "ordinal", name="uq_transcript_segments_ordinal"),
-        Index("ix_transcript_segments_recording", "recording_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -208,7 +212,9 @@ class CallsignMention(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    callsign_id: Mapped[str] = mapped_column(String(36), ForeignKey("callsigns.id"), nullable=False)
+    callsign_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("callsigns.id"), nullable=False, index=True
+    )
     transcript_id: Mapped[str] = mapped_column(String(36), ForeignKey("transcripts.id"), nullable=False)
     recording_id: Mapped[str] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=False)
     segment_id: Mapped[str | None] = mapped_column(
@@ -266,7 +272,7 @@ class Transmission(Base):
     home_node: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     source_identifier: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     associated_node_callsign: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    operator_callsign: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    operator_callsign: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     attribution_level: Mapped[str] = mapped_column(String(32), default="unknown")
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_milliseconds: Mapped[int | None] = mapped_column(Integer, nullable=True)

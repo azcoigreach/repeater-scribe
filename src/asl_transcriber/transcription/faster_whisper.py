@@ -184,9 +184,12 @@ class FasterWhisperEngine:
                         acoustic_confidence=acoustic_confidence,
                         recognition_confidence=recognition_confidence,
                         evidence=tuple(evidence),
-                        raw_observed_value=callsign if callsign in raw_callsigns else None,
+                        raw_observed_value=(corrections[-1].original if corrections else callsign),
                         recognition_method=(
-                            "direct" if callsign in raw_callsigns else "candidate_match"
+                            "direct" if callsign in raw_callsigns else (
+                                "grammar" if corrections and corrections[-1].reason == "callsign formatting"
+                                else "phonetic"
+                            )
                         ),
                     )
                 )

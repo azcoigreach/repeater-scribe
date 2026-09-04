@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -35,24 +35,44 @@ def _normalize(value: object) -> str | None:
     return normalized[0] if normalized else None
 
 
-def upgrade() -> None:
-    op.add_column(
-        "recordings",
-        sa.Column("current_transcript_id", sa.String(36), nullable=True),
-    )
-    op.create_index(
-        "ix_recordings_current_transcript_id", "recordings", ["current_transcript_id"]
-    )
-    with op.batch_alter_table("recordings") as batch:
-        batch.create_foreign_key(
-            "fk_recordings_current_transcript",
-            "transcripts",
-            ["current_transcript_id"],
-            ["id"],
-        )
+def _datetime_value(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    return None
 
-    op.create_table(
-        "callsigns",
+
+def _has_table(bind: sa.Connection, name: str) -> bool:
+    return sa.inspect(bind).has_table(name)
+
+
+def _has_index(bind: sa.Connection, table: str, name: str) -> bool:
+    return any(index["name"] == name for index in sa.inspect(bind).get_indexes(table))
+
+
+def upgrade() -> None:
+    bind = op.get_bind()
+    recording_columns = {column["name"] for column in sa.inspect(bind).get_columns("recordings")}
+    if "current_transcript_id" not in recording_columns:
+        with op.batch_alter_table("recordings") as batch:
+            batch.add_column(sa.Column("current_transcript_id", sa.String(36), nullable=True))
+    if not _has_index(bind, "recordings", "ix_recordings_current_transcript_id"):
+        op.create_index("ix_recordings_current_transcript_id", "recordings", ["current_transcript_id"])
+    recording_fks = {foreign_key["name"] for foreign_key in sa.inspect(bind).get_foreign_keys("recordings")}
+    if "fk_recordings_current_transcript" not in recording_fks:
+        with op.batch_alter_table("recordings") as batch:
+            batch.create_foreign_key(
+                "fk_recordings_current_transcript", "transcripts", ["current_transcript_id"], ["id"]
+            )
+
+    if not _has_table(bind, "callsigns"):
+        op.create_table(
+            "callsigns",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("normalized_callsign", sa.String(32), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -65,11 +85,13 @@ def upgrade() -> None:
         sa.Column("qrz_lookup_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("qrz_cache_expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("normalized_callsign", name="uq_callsigns_normalized"),
-    )
-    op.create_index("ix_callsigns_normalized_callsign", "callsigns", ["normalized_callsign"])
+        )
+    if not _has_index(bind, "callsigns", "ix_callsigns_normalized_callsign"):
+        op.create_index("ix_callsigns_normalized_callsign", "callsigns", ["normalized_callsign"])
 
-    op.create_table(
-        "transcript_segments",
+    if not _has_table(bind, "transcript_segments"):
+        op.create_table(
+            "transcript_segments",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("transcript_id", sa.String(36), nullable=False),
         sa.Column("recording_id", sa.String(36), nullable=True),
@@ -84,12 +106,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["transcript_id"], ["transcripts.id"]),
         sa.ForeignKeyConstraint(["recording_id"], ["recordings.id"]),
         sa.UniqueConstraint("transcript_id", "ordinal", name="uq_transcript_segments_ordinal"),
-    )
-    op.create_index("ix_transcript_segments_transcript_id", "transcript_segments", ["transcript_id"])
-    op.create_index("ix_transcript_segments_recording", "transcript_segments", ["recording_id"])
+        )
+    if not _has_index(bind, "transcript_segments", "ix_transcript_segments_transcript_id"):
+        op.create_index("ix_transcript_segments_transcript_id", "transcript_segments", ["transcript_id"])
+    if not _has_index(bind, "transcript_segments", "ix_transcript_segments_recording_id"):
+        op.create_index("ix_transcript_segments_recording_id", "transcript_segments", ["recording_id"])
 
-    op.create_table(
-        "callsign_mentions",
+    if not _has_table(bind, "callsign_mentions"):
+        op.create_table(
+            "callsign_mentions",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("callsign_id", sa.String(36), nullable=False),
         sa.Column("transcript_id", sa.String(36), nullable=False),
@@ -116,7 +141,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["transcript_id"], ["transcripts.id"]),
         sa.ForeignKeyConstraint(["recording_id"], ["recordings.id"]),
         sa.ForeignKeyConstraint(["segment_id"], ["transcript_segments.id"]),
-    )
+        )
     for name, columns in (
         ("ix_callsign_mentions_callsign_id", ["callsign_id"]),
         ("ix_callsign_mentions_recording", ["recording_id"]),
@@ -125,10 +150,15 @@ def upgrade() -> None:
         ("ix_callsign_mentions_heard_at", ["heard_at"]),
         ("ix_callsign_mentions_review_status", ["review_status"]),
         ("ix_callsign_mentions_callsign_heard", ["callsign_id", "heard_at"]),
+        ("ix_callsign_mentions_canonical_callsign", ["canonical_callsign"]),
     ):
-        op.create_index(name, "callsign_mentions", columns)
+        if not _has_index(bind, "callsign_mentions", name):
+            op.create_index(name, "callsign_mentions", columns)
+    if not _has_index(bind, "transmissions", "ix_transmissions_operator_callsign"):
+        op.create_index("ix_transmissions_operator_callsign", "transmissions", ["operator_callsign"])
 
-    bind = op.get_bind()
+    if _has_table(bind, "callsign_mentions"):
+        bind.execute(sa.text("DELETE FROM callsign_mentions"))
     recordings = bind.execute(sa.text("SELECT id FROM recordings")).all()
     for (recording_id,) in recordings:
         transcript = bind.execute(
@@ -146,10 +176,10 @@ def upgrade() -> None:
             sa.text("UPDATE recordings SET current_transcript_id = :transcript_id WHERE id = :recording_id"),
             {"transcript_id": transcript_id, "recording_id": recording_id},
         )
-        started = bind.execute(
+        started = _datetime_value(bind.execute(
             sa.text("SELECT started_at FROM recordings WHERE id = :recording_id"),
             {"recording_id": recording_id},
-        ).scalar()
+        ).scalar())
         raw_json = bind.execute(
             sa.text("SELECT callsign_mentions_json FROM transcripts WHERE id = :transcript_id"),
             {"transcript_id": transcript_id},

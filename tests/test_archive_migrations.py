@@ -126,7 +126,7 @@ def test_startup_schema_guard_accepts_current_and_rejects_outdated(tmp_path: Pat
     from asl_transcriber.main import app
 
     current = tmp_path / "current.db"
-    alembic(current, "archive_foundation")
+    alembic(current, "head")
     current_engine = sa.create_engine(f"sqlite:///{current}")
     monkeypatch.setattr(database_module, "engine", current_engine)
     with TestClient(app):

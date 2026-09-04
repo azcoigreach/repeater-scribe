@@ -39,8 +39,16 @@ def persist_transcript_details(
     session: Session, transcript: Transcript, recording: Recording, result: object
 ) -> None:
     """Replace durable details for a transcript inside its caller's transaction."""
-    session.query(TranscriptSegment).filter(TranscriptSegment.transcript_id == transcript.id).delete()
+    previous_reviews = {
+        (mention.raw_observed_value, mention.start_offset, mention.end_offset): (
+            mention.review_status, mention.reviewer_identity, mention.reviewed_at
+        )
+        for mention in session.query(CallsignMention).filter(
+            CallsignMention.transcript_id == transcript.id
+        )
+    }
     session.query(CallsignMention).filter(CallsignMention.transcript_id == transcript.id).delete()
+    session.query(TranscriptSegment).filter(TranscriptSegment.transcript_id == transcript.id).delete()
     segments = getattr(result, "segments", None) or []
     segment_rows: list[TranscriptSegment] = []
     for ordinal, segment in enumerate(segments):
@@ -63,37 +71,45 @@ def persist_transcript_details(
     for mention in mentions:
         value = canonical_callsign(mention.callsign)
         callsign = _get_or_create(session, value)
-        segment = next(
-            (
-                row
-                for row in segment_rows
-                if row.start_offset <= mention.start <= row.end_offset
-                or row.start_offset <= mention.end <= row.end_offset
+        segment = max(
+            segment_rows,
+            key=lambda row: max(
+                0.0,
+                min(row.end_offset, mention.end) - max(row.start_offset, mention.start),
             ),
-            None,
+            default=None,
         )
+        if segment is not None and max(
+            0.0, min(segment.end_offset, mention.end) - max(segment.start_offset, mention.start)
+        ) <= 0:
+            segment = None
         heard_at = None
         if started_at is not None:
             heard_at = started_at + timedelta(seconds=max(0.0, mention.end))
-        session.add(
-            CallsignMention(
-                callsign_id=callsign.id,
-                transcript_id=transcript.id,
-                recording_id=recording.id,
-                segment_id=segment.id if segment else None,
-                raw_observed_value=getattr(mention, "raw_observed_value", None) or mention.callsign,
-                canonical_callsign=value,
-                start_offset=mention.start,
-                end_offset=mention.end,
-                heard_at=heard_at,
-                timing_precision=getattr(mention, "timing_precision", "segment"),
-                confidence=mention.confidence,
-                acoustic_confidence=mention.acoustic_confidence,
-                recognition_confidence=mention.recognition_confidence,
-                recognition_method=getattr(mention, "recognition_method", "legacy"),
-                evidence_json=json.dumps(list(mention.evidence)),
-            )
+        mention_row = CallsignMention(
+            callsign_id=callsign.id,
+            transcript_id=transcript.id,
+            recording_id=recording.id,
+            segment_id=segment.id if segment else None,
+            raw_observed_value=getattr(mention, "raw_observed_value", None) or mention.callsign,
+            canonical_callsign=value,
+            start_offset=mention.start,
+            end_offset=mention.end,
+            heard_at=heard_at,
+            timing_precision=getattr(mention, "timing_precision", "segment"),
+            confidence=mention.confidence,
+            acoustic_confidence=mention.acoustic_confidence,
+            recognition_confidence=mention.recognition_confidence,
+            recognition_method=getattr(mention, "recognition_method", "legacy"),
+            evidence_json=json.dumps(list(mention.evidence)),
+            qrz_validation_status=callsign.qrz_status,
         )
+        review = previous_reviews.get(
+            (mention_row.raw_observed_value, mention_row.start_offset, mention_row.end_offset)
+        )
+        if review is not None:
+            mention_row.review_status, mention_row.reviewer_identity, mention_row.reviewed_at = review
+        session.add(mention_row)
     recording.current_transcript_id = transcript.id
 
 
@@ -170,7 +186,8 @@ def list_callsigns(
         elif cursor_time is not None and cursor_callsign:
             latest = func.max(CallsignMention.heard_at)
             statement = statement.having(
-                (latest < cursor_time)
+                (latest.is_(None))
+                | (latest < cursor_time)
                 | ((latest == cursor_time) & (Callsign.normalized_callsign < cursor_callsign))
             )
         statement = statement.order_by(func.max(CallsignMention.heard_at).desc(), Callsign.normalized_callsign.desc())
@@ -207,9 +224,10 @@ def list_call_sign_mentions(
 ) -> tuple[list[dict[str, object]], str | None, bool]:
     normalized = canonical_callsign(value)
     statement = (
-        select(CallsignMention, Transcript, Recording)
+        select(CallsignMention, Transcript, Recording, TranscriptSegment)
         .join(Transcript, Transcript.id == CallsignMention.transcript_id)
         .join(Recording, Recording.id == CallsignMention.recording_id)
+        .outerjoin(TranscriptSegment, TranscriptSegment.id == CallsignMention.segment_id)
         .where(
             CallsignMention.canonical_callsign == normalized,
             CallsignMention.transcript_id == Recording.current_transcript_id,
@@ -231,7 +249,8 @@ def list_call_sign_mentions(
             statement = statement.where(CallsignMention.id < mention_id)
         else:
             statement = statement.where(
-                (CallsignMention.heard_at < cursor_time)
+                (CallsignMention.heard_at.is_(None))
+                | (CallsignMention.heard_at < cursor_time)
                 | ((CallsignMention.heard_at == cursor_time) & (CallsignMention.id < mention_id))
             )
     statement = statement.order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
@@ -248,17 +267,84 @@ def list_call_sign_mentions(
             "acoustic_confidence": mention.acoustic_confidence,
             "recognition_confidence": mention.recognition_confidence,
             "evidence": json.loads(mention.evidence_json), "review_status": mention.review_status,
-            "audio_status": recording.audio_status, "excerpt": transcript.display_text,
+            "audio_status": recording.audio_status,
+            "excerpt": (
+                segment.display_text or segment.raw_text
+                if segment is not None
+                else transcript.display_text[:240]
+            ),
             "recording_url": f"/archive/recordings/{recording.id}",
             "audio_available": recording.audio_status == "available",
         }
-        for mention, transcript, recording in rows
+        for mention, transcript, recording, segment in rows
     ]
     next_cursor = None
     if has_more and rows:
         mention = rows[-1][0]
         next_cursor = _cursor_value(mention.heard_at, mention.id)
     return items, next_cursor, has_more
+
+
+def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
+    latest = (
+        select(CallsignMention)
+        .join(Recording, Recording.id == CallsignMention.recording_id)
+        .where(
+            CallsignMention.callsign_id == Callsign.id,
+            CallsignMention.review_status != "rejected",
+            CallsignMention.transcript_id == Recording.current_transcript_id,
+        )
+        .order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
+        .limit(1)
+        .correlate(Callsign)
+    )
+    latest_heard_at = latest.with_only_columns(CallsignMention.heard_at).scalar_subquery()
+    latest_end_offset = latest.with_only_columns(CallsignMention.end_offset).scalar_subquery()
+    latest_evidence = latest.with_only_columns(CallsignMention.evidence_json).scalar_subquery()
+    latest_recording = latest.with_only_columns(CallsignMention.recording_id).scalar_subquery()
+    statement = select(
+        Callsign,
+        func.min(CallsignMention.heard_at),
+        func.max(CallsignMention.heard_at),
+        func.count(CallsignMention.id),
+        func.count(func.distinct(CallsignMention.recording_id)),
+        func.max(CallsignMention.confidence),
+        func.max(CallsignMention.acoustic_confidence),
+        latest_heard_at,
+        latest_end_offset,
+        latest_evidence,
+        latest_recording,
+    ).join(CallsignMention, CallsignMention.callsign_id == Callsign.id).join(
+        Recording, Recording.id == CallsignMention.recording_id
+    ).where(
+        CallsignMention.review_status != "rejected",
+        CallsignMention.transcript_id == Recording.current_transcript_id,
+    ).group_by(Callsign.id).order_by(
+        func.max(CallsignMention.heard_at).desc(), Callsign.normalized_callsign.desc()
+    ).limit(min(max(limit, 1), 100))
+    rows = []
+    for row in session.execute(statement).all():
+        details = row[0]
+        evidence = json.loads(row[9] or "[]") if row[9] else []
+        rows.append({
+            "callsign": details.normalized_callsign,
+            "last_heard_at": row[2].isoformat() if row[2] else None,
+            "heard_offset_seconds": row[8],
+            "time_precision": "segment" if row[8] is not None else "recording",
+            "observation_count": int(row[3]), "recording_count": int(row[4]),
+            "_best_observation": float(row[5] or 0.45),
+            "acoustic_quality_percent": round(float(row[6]) * 100) if row[6] is not None else None,
+            "evidence": [*map(str, evidence), f"Heard {row[3]} times across {row[4]} recording{'s' if row[4] != 1 else ''}"],
+            "source_path": None,
+            "_recording_id": row[10],
+            "qrz_status": details.qrz_status,
+            "qrz_display_name": details.qrz_display_name,
+            "qrz_location": details.qrz_location,
+            "qrz_image_url": details.qrz_image_url,
+            "qrz_profile_url": details.qrz_profile_url,
+            "qrz_cache_expires_at": details.qrz_cache_expires_at,
+        })
+    return rows
 
 
 def callsign_profile(session: Session, value: str) -> dict[str, object] | None:
@@ -327,8 +413,8 @@ def callsign_profile(session: Session, value: str) -> dict[str, object] | None:
         "corrected_mentions": counts.get("corrected", 0), "rejected_mentions": counts.get("rejected", 0),
         "attributed_transmission_count": int(attribution[0] or 0),
         "attributed_airtime_seconds": float(attribution[1] or 0.0),
-        "attribution_status": "available" if attribution[0] else "unavailable",
-        "attribution_complete": bool(attribution[0]),
+        "attribution_status": "partial" if attribution[0] else "unavailable",
+        "attribution_complete": False,
         "confidence_summary": {
             "minimum": confidence[0], "average": confidence[1], "maximum": confidence[2],
         },
