@@ -49,6 +49,7 @@ from asl_transcriber.auth import (
 )
 from asl_transcriber.callsign_service import (
     callsign_profile,
+    canonical_callsign,
     last_heard_rows,
     list_call_sign_mentions,
     list_callsigns,
@@ -1424,13 +1425,17 @@ def refresh_callsign_qrz_api(
     db: Annotated[Session, Depends(get_db)], request: Request, callsign: str,
     principal: Annotated[Principal, Depends(require_api_operator)],
 ) -> dict[str, object]:
+    try:
+        normalized = canonical_callsign(callsign)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     client = current_qrz_client()
     if client is None:
         raise HTTPException(status_code=503, detail="QRZ is not configured")
     try:
-        details = client.lookup(callsign)
+        details = client.lookup(normalized)
         stored = update_qrz_snapshot(
-            db, callsign, details, cache_seconds=settings.qrz_cache_seconds
+            db, normalized, details, cache_seconds=settings.qrz_cache_seconds
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -1536,7 +1541,8 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
     client = current_qrz_client()
     items: list[dict[str, object]] = []
     rejected = 0
-    for database_item in last_heard_rows(db, 100):
+    refresh_attempts = 0
+    for database_item in last_heard_rows(db, result_limit):
         expires_at = database_item.pop("qrz_cache_expires_at")
         is_current = isinstance(expires_at, datetime) and (
             expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
@@ -1546,8 +1552,13 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
             rejected += 1
             continue
         qrz_status = stored_qrz_status if is_current else None
-        if qrz_status is None and client is not None:
+        if (
+            qrz_status is None
+            and client is not None
+            and refresh_attempts < settings.qrz_last_heard_refresh_limit
+        ):
             try:
+                refresh_attempts += 1
                 snapshot = client.lookup(str(database_item["callsign"]))
                 update_qrz_snapshot(
                     db, str(database_item["callsign"]), snapshot,
@@ -1564,6 +1575,7 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
                 database_item["qrz_profile_url"] = snapshot.profile_url
             except QrzError as error:
                 logger.warning("QRZ lookup failed for %s: %s", database_item["callsign"], error)
+                client = None
         best_value = database_item.pop("_best_observation")
         observation_count = database_item["observation_count"]
         recording_count = database_item["recording_count"]

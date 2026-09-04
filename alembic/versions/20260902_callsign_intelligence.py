@@ -21,6 +21,8 @@ branch_labels = None
 depends_on = None
 
 logger = logging.getLogger(__name__)
+_CALLSIGN = re.compile(r"^(?P<prefix>[A-Z0-9]{1,3})\d[A-Z]{1,4}$")
+_US_CALLSIGN = re.compile(r"^(?:[KNW][A-Z]?|A[A-L])\d[A-Z]{1,3}$")
 
 
 def _new_id() -> str:
@@ -32,8 +34,14 @@ def _normalize(value: object) -> str | None:
         return None
     for choice in value.upper().split("/"):
         candidate = re.sub(r"[^A-Z0-9]", "", choice)
-        if re.fullmatch(r"[A-Z0-9]{1,3}\d[A-Z]{1,4}", candidate) and any(
-            symbol.isalpha() for symbol in candidate[:3]
+        match = _CALLSIGN.fullmatch(candidate)
+        if (
+            match is not None
+            and any(symbol.isalpha() for symbol in match.group("prefix"))
+            and (
+                not candidate.startswith(("K", "N", "W", "A"))
+                or _US_CALLSIGN.fullmatch(candidate) is not None
+            )
         ):
             return candidate
     return None

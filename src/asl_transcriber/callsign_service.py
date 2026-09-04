@@ -48,7 +48,8 @@ def persist_transcript_details(
             mention.reviewed_at,
         )
         for mention in session.query(CallsignMention).filter(
-            CallsignMention.transcript_id == transcript.id
+            CallsignMention.transcript_id == transcript.id,
+            CallsignMention.review_status.in_(("confirmed", "corrected", "rejected")),
         )
     }
     session.query(CallsignMention).filter(CallsignMention.transcript_id == transcript.id).delete()
@@ -177,6 +178,7 @@ def list_callsigns(
     ).where(
         CallsignMention.review_status != "rejected",
         CallsignMention.transcript_id == Recording.current_transcript_id,
+        (Callsign.qrz_status.is_(None)) | (Callsign.qrz_status != "not_found"),
     ).group_by(Callsign.id)
     if query:
         statement = statement.where(Callsign.normalized_callsign.ilike(f"%{query.strip().upper()}%"))

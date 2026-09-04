@@ -301,3 +301,28 @@ def test_retranscription_preserves_corrected_assignment_and_hides_rejected_evide
         session.commit()
         session.refresh(recording)
         assert serialize_recording(recording)["transcript"]["callsign_mentions"] == []
+
+
+def test_retranscription_replaces_unreviewed_detection(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-detected", source_path="detected.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-detected", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-detected", job_id="job-detected", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(
+            session, transcript, recording,
+            SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1)]),
+        )
+        session.commit()
+        persist_transcript_details(
+            session, transcript, recording,
+            SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KE7WIL", 0, 1)]),
+        )
+        session.commit()
+        mention = session.query(CallsignMention).one()
+        assert mention.canonical_callsign == "KE7WIL"
+        assert mention.review_status == "detected"
