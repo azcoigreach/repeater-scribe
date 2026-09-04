@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Normalized callsign, transcript segment, and callsign mention persistence with
+  deterministic current-transcript selection and indexed history queries.
+- Viewer-protected callsign directory, profile, and mention-history workspace
+  routes.
+- Database-backed Last Heard results, operator review actions, explicit
+  transmission attribution statistics, QRZ snapshots, and segment-aware audio
+  seeking.
+
+## [0.7.0] - 2026-09-01
+
+### Added
+
 - A database-backed Radio Archive workspace with SQLite FTS5 transcript search,
   status/date/callsign filters, cursor pagination, recording details, saved
   callsign evidence, and retained-audio playback.

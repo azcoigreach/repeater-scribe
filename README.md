@@ -18,6 +18,28 @@ deployment profile: audio transcription uses `faster-whisper` on the
 machine running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
 
+## Callsign history
+
+Callsign mentions are durable observations from transcript audio, not proof that
+the station transmitted. The Callsigns workspace stores normalized mentions,
+timestamped transcript segments, confidence/evidence, and review state. A
+transmission count is reported separately and only includes explicit
+`Transmission.operator_callsign` attribution.
+
+The current transcript for a recording is the transcript whose job ID matches
+the recording ID; when that is unavailable, the most recently updated transcript
+is selected. Older transcript revisions remain available for audit purposes but
+are excluded from normal callsign totals.
+
+Read callsign history with `GET /api/v1/callsigns`,
+`GET /api/v1/callsigns/KM7GHS`, and
+`GET /api/v1/callsigns/KM7GHS/mentions?limit=50`. Operators review a mention
+with `PATCH /api/v1/callsign-mentions/{mention_id}` using `confirm`, `reject`,
+or `correct` and a replacement callsign. A bounded QRZ snapshot refresh is
+available at `POST /api/v1/callsigns/KM7GHS/qrz-refresh`. All reads require a
+viewer; writes require an operator and browser writes additionally require the
+existing session CSRF and exact-origin checks.
+
 ## Database migrations
 
 Run `alembic upgrade head` before starting application traffic. The reference

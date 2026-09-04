@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}"><title>Callsigns | Repeater Scribe</title>
+  <link rel="stylesheet" href="/static/archive.css">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><img class="brand-logo" src="/static/logo.png" alt="REPEATER SCRIBE"></a><nav class="workspace-nav" aria-label="Workspaces"><a class="workspace-link" href="/">Dashboard</a><a class="workspace-link" href="/archive">Archive</a><a class="workspace-link active" href="/callsigns" aria-current="page">Callsigns</a></nav><div class="identity">{{ identity }} <span>{{ role }}</span></div></header>
+  <main class="archive-shell"><section class="archive-heading"><div><p class="eyebrow">Historical Workspace</p><h1>Callsigns</h1><p>Recognized mentions, retained as navigable station history.</p></div></section>
+    <form id="callsign-search" class="filters"><label class="search-field">Search callsigns<input id="callsign-query" type="search" autocomplete="off" placeholder="KM7GHS"></label><label>Sort<select id="callsign-sort"><option value="recent">Recent activity</option><option value="alphabetical">Alphabetical</option></select></label><button class="primary-button" type="submit">Search</button></form>
+    <p id="callsign-state" class="state" role="status">Loading callsigns...</p><section id="callsign-directory" class="recording-cards"></section><button id="callsign-more" class="primary-button" type="button" hidden>Load more</button>
+  </main><script src="/static/callsigns.js" defer></script>
+</body></html>

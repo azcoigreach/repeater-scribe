@@ -42,7 +42,7 @@ remote transcription backend are not implemented. See
 - Add opt-in authenticated AMI status and AllStar function controls.
 - Associate AMI station events with archive recordings and transcripts.
 
-### Archive foundation (0.7.0 in progress)
+### Archive foundation (0.7.0 complete)
 
 - Persist archive-root/source-relative `Recording` catalog rows separately from
   ingestion jobs and retain them when read-only source audio rotates away.
@@ -51,11 +51,25 @@ remote transcription backend are not implemented. See
   `GET /api/v1/archive/recordings/{recording_id}/audio` for viewer clients.
 - Use SQLite FTS5 and opaque descending cursors for historical transcript search.
 
-### Archive workspace (0.7.0 in progress)
+### Archive workspace (0.7.0 complete)
 
 - Provide a standalone historical browser with database-backed filters, cursor
   pagination, permanent recording detail pages, audio availability states, and
   saved callsign mention evidence.
+
+### Callsign intelligence (0.8.0)
+
+- Persist normalized callsigns, transcript segments, and callsign mentions with
+  indexed current-transcript history queries.
+- Provide callsign directory, profile, mention-history, review, and bounded QRZ
+  snapshot APIs with viewer/operator authorization.
+- Keep callsign mentions separate from explicit transmission attribution.
+- Provide Callsigns workspace navigation, segment timestamps, and retained-audio
+  seeking with missing-audio fallback.
+
+Events, net/session boundaries, check-ins, annotations, tags, automatic net
+detection, topic extraction, summaries, semantic search, and general analytics
+remain future work for 0.9 and later.
 
 ### Node-control foundation
 

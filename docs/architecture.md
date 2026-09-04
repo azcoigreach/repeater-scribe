@@ -27,6 +27,8 @@ the transcription boundary:
 - `DatabaseCallsignProvider` and `CallsignResolver` for local post-decode correction
 - `ArchiveRuntime` and `ProcessingWorker` for job state and transcript persistence
 - SQLite-backed persistence with Alembic migrations
+- `Callsign`, `TranscriptSegment`, and `CallsignMention` normalized history
+   entities maintained by the callsign service
 - `AmiClient` for authenticated AMI status and constrained `rpt fun` control
 
 No cloud transcription adapter is currently implemented. The engine interface
@@ -78,6 +80,23 @@ uses only the archive APIs and database catalog: it does not read the runtime
 job list or poll on the live dashboard interval. It applies SQLite FTS5 and
 cursor pagination for historical searches, and can present transcript evidence
 when retained source audio is unavailable.
+
+## Callsign intelligence
+
+A callsign mention is a callsign decoded or reconstructed in transcript audio;
+it is not proof that the station transmitted. Explicit attribution is separate
+and is counted only from `Transmission.operator_callsign` rows with a meaningful
+attribution level. QRZ validation confirms a public callsign record exists; it
+is not human confirmation. Authorized operators can confirm, reject, or correct
+mentions while the original observed value and evidence remain unchanged.
+
+Migration `callsign_intelligence` backfills valid legacy mention JSON into
+indexed normalized rows. Malformed or invalid entries are logged and skipped;
+the compatibility JSON remains available. `Recording.current_transcript_id`
+selects the transcript whose job ID matches the recording ID, falling back to
+the most recently updated transcript and then UUID for deterministic ties.
+Normal history totals use only that current transcript. Segments and mentions
+remain when source audio becomes missing or expired.
 
 ## Runtime lifecycle
 

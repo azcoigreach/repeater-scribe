@@ -66,7 +66,10 @@ to end with:
 
 This is a new full-file decode, not a continuation of the provisional text.
 The final raw model text and callsign-corrected display text replace the live
-result and are persisted in SQLite.
+result and are persisted in SQLite. Each final result also persists timestamped
+segments and normalized callsign mentions transactionally. Segment confidence
+is Whisper's `avg_logprob`; it is not a percentage. Legacy transcripts without
+segments continue to use their full-text and compatibility JSON representations.
 
 ## Deployed 12 GB GPU profile
 
@@ -137,6 +140,18 @@ stored as `display_text`. This makes every correction reviewable.
 `ASLT_CALLSIGN_CONTEXT_CACHE_SECONDS` controls how often database context is
 refreshed. Add stable club and operator calls to `ASLT_KNOWN_CALLSIGNS`; active
 network calls are discovered automatically.
+
+Normalized mentions retain the raw observed callsign, canonical callsign,
+offsets, timing precision, acoustic and recognition confidence, recognition
+method, evidence, QRZ validation state, and review state. Review states are
+`detected`, `confirmed`, `corrected`, and `rejected`. Confirmation changes the
+mention review state only; it never infers transmitter identity or creates a
+`Transmission` operator attribution.
+
+The Callsign History workspace aggregates only mentions attached to the current
+transcript for each recording. It retains historical metadata when audio is
+missing or expired, and disables playback while leaving timestamps and recording
+links visible.
 
 The dashboard renders recognized callsigns as links inside each display
 transcript. Selecting one opens and highlights its last-heard QRZ card. Each
