@@ -166,6 +166,36 @@ def test_populated_archive_foundation_upgrades_callsign_history_safely(tmp_path:
     ).fetchone() == ("transcript",)
 
 
+def test_callsign_migration_recovers_stale_sqlite_batch_table(tmp_path: Path) -> None:
+    database = tmp_path / "stale-batch.db"
+    alembic(database, "archive_foundation")
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE TABLE _alembic_tmp_recordings (id TEXT PRIMARY KEY)")
+    connection.commit()
+    connection.close()
+
+    alembic(database, "callsign_intelligence")
+    connection = sqlite3.connect(database)
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_alembic_tmp_recordings'"
+    ).fetchone() is None
+
+
+def test_callsign_migration_repairs_missing_transmission_attribution_columns(tmp_path: Path) -> None:
+    database = tmp_path / "legacy-transmissions.db"
+    alembic(database, "archive_foundation")
+    connection = sqlite3.connect(database)
+    connection.execute("ALTER TABLE transmissions DROP COLUMN operator_callsign")
+    connection.execute("ALTER TABLE transmissions DROP COLUMN attribution_level")
+    connection.commit()
+    connection.close()
+
+    alembic(database, "callsign_intelligence")
+    connection = sqlite3.connect(database)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(transmissions)")}
+    assert {"operator_callsign", "attribution_level"} <= columns
+
+
 def test_startup_schema_guard_accepts_current_and_rejects_outdated(tmp_path: Path, monkeypatch) -> None:
     from asl_transcriber import database as database_module
     from asl_transcriber.main import app

@@ -82,6 +82,10 @@ def upgrade() -> None:
         # SQLite batch migrations recreate recordings, which cannot be dropped
         # while its existing dependents are enforced. Re-enable before backfill.
         bind.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        if _has_table(bind, "_alembic_tmp_recordings"):
+            if not _has_table(bind, "recordings"):
+                raise RuntimeError("Cannot recover incomplete recordings migration without source table")
+            bind.execute(sa.text("DROP TABLE _alembic_tmp_recordings"))
     recording_columns = {column["name"] for column in sa.inspect(bind).get_columns("recordings")}
     if "current_transcript_id" not in recording_columns:
         with op.batch_alter_table("recordings") as batch:
@@ -179,6 +183,16 @@ def upgrade() -> None:
     ):
         if not _has_index(bind, "callsign_mentions", name):
             op.create_index(name, "callsign_mentions", columns)
+    transmission_columns = {
+        column["name"] for column in sa.inspect(bind).get_columns("transmissions")
+    }
+    if "operator_callsign" not in transmission_columns:
+        op.add_column("transmissions", sa.Column("operator_callsign", sa.String(32), nullable=True))
+    if "attribution_level" not in transmission_columns:
+        op.add_column(
+            "transmissions",
+            sa.Column("attribution_level", sa.String(32), nullable=False, server_default="unknown"),
+        )
     if not _has_index(bind, "transmissions", "ix_transmissions_operator_callsign"):
         op.create_index("ix_transmissions_operator_callsign", "transmissions", ["operator_callsign"])
 
