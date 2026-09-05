@@ -39,6 +39,7 @@ def persist_transcript_details(
     session: Session, transcript: Transcript, recording: Recording, result: object
 ) -> None:
     """Replace durable details for a transcript inside its caller's transaction."""
+    session.flush()
     previous_reviews = [
         (
             mention.id,

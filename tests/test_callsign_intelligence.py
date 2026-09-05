@@ -84,6 +84,25 @@ def test_normalized_persistence_and_current_transcript_statistics(archive_db) ->
         assert mention.heard_at.replace(tzinfo=UTC) == datetime(2026, 9, 3, 12, 0, 4, tzinfo=UTC)
 
 
+def test_persistence_flushes_new_transcript_before_segments(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-unflushed", source_path="unflushed.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-unflushed", source_path=recording.source_path, recording_id=recording.id))
+        transcript = Transcript(job_id="job-unflushed", recording_id=recording.id)
+        session.add(transcript)
+        persist_transcript_details(
+            session,
+            transcript,
+            recording,
+            SimpleNamespace(segments=[TranscriptSegment(0, 1, "segment")], callsign_mentions=[]),
+        )
+        session.commit()
+        segment = session.query(DbTranscriptSegment).one()
+        assert segment.transcript_id == transcript.id
+
+
 def test_current_transcript_excludes_superseded_mentions(archive_db) -> None:
     with archive_db() as session:
         recording = Recording(id="recording-2", source_path="old.wav", archive_root="", status="completed")
