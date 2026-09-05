@@ -129,7 +129,7 @@ def test_populated_archive_foundation_upgrades_callsign_history_safely(tmp_path:
     connection = sqlite3.connect(database)
     created = datetime(2026, 9, 2, tzinfo=UTC).isoformat()
     mention_json = (
-        '[{"callsign":"KM7GHS","start":"1.5","end":"2.5",'
+        '[{"callsign":"KM7GHS","start":"1.5","end":"Infinity",'
         '"confidence":"Infinity","acoustic_confidence":"NaN",'
         '"recognition_confidence":"bad"},'
         '{"callsign":"KM7GHS","start":3,"end":4},'

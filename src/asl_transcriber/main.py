@@ -1543,13 +1543,13 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
     items: list[dict[str, object]] = []
     rejected = 0
     refresh_attempts = 0
-    for database_item in last_heard_rows(db, result_limit):
+    for database_item in last_heard_rows(db, 100):
         expires_at = database_item.pop("qrz_cache_expires_at")
         is_current = isinstance(expires_at, datetime) and (
             expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
         ) >= snapshot_now
         stored_qrz_status = database_item.pop("qrz_status")
-        if stored_qrz_status == "not_found":
+        if stored_qrz_status == "not_found" and is_current:
             rejected += 1
             continue
         qrz_status = stored_qrz_status if is_current else None

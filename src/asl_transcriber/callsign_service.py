@@ -95,16 +95,21 @@ def persist_transcript_details(
         heard_at = None
         if started_at is not None:
             heard_at = started_at + timedelta(seconds=max(0.0, mention.end))
-        review = next(
-            (
-                item
-                for item in previous_reviews
-                if item[1] == (getattr(mention, "raw_observed_value", None) or mention.callsign)
-                and abs((item[2] or 0.0) - mention.start) <= 0.25
-                and abs((item[3] or 0.0) - mention.end) <= 0.25
-            ),
-            None,
+        candidates = [
+            item
+            for item in previous_reviews
+            if item[1] == (getattr(mention, "raw_observed_value", None) or mention.callsign)
+            and abs((item[2] or 0.0) - mention.start) <= 0.25
+            and abs((item[3] or 0.0) - mention.end) <= 0.25
+        ]
+        review = min(
+            candidates,
+            key=lambda item: abs((item[2] or 0.0) - mention.start)
+            + abs((item[3] or 0.0) - mention.end),
+            default=None,
         )
+        if review is not None:
+            previous_reviews.remove(review)
         mention_row = CallsignMention(
             id=review[0] if review is not None else None,
             callsign_id=callsign.id,
@@ -352,7 +357,6 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
     ).where(
         CallsignMention.review_status != "rejected",
         CallsignMention.transcript_id == Recording.current_transcript_id,
-        (Callsign.qrz_status.is_(None)) | (Callsign.qrz_status != "not_found"),
     ).group_by(Callsign.id).order_by(
         func.max(CallsignMention.heard_at).desc(), Callsign.normalized_callsign.desc()
     ).limit(min(max(limit, 1), 100))
@@ -468,8 +472,10 @@ def review_mention(
         if corrected_callsign is None:
             raise ValueError("corrected_callsign is required")
         normalized = canonical_callsign(corrected_callsign)
-        mention.callsign_id = _get_or_create(session, normalized).id
+        callsign = _get_or_create(session, normalized)
+        mention.callsign_id = callsign.id
         mention.canonical_callsign = normalized
+        mention.qrz_validation_status = callsign.qrz_status
         mention.review_status = "corrected"
     else:
         if corrected_callsign is not None:

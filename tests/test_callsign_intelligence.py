@@ -333,6 +333,48 @@ def test_retranscription_preserves_review_identity_across_small_timing_shift(arc
         assert preserved.reviewer_identity == "operator"
 
 
+def test_retranscription_does_not_reuse_one_review_for_two_detections(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-competing", source_path="competing.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-competing", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-competing", job_id="job-competing", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1)]))
+        session.flush()
+        reviewed = session.query(CallsignMention).one()
+        review_mention(session, reviewed.id, action="confirm", corrected_callsign=None, reviewer_identity="operator")
+        session.commit()
+        persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0.05, 1.05), TranscriptCallsignMention("KM7GHS", 0.1, 1.1)]))
+        session.commit()
+        mentions = session.query(CallsignMention).order_by(CallsignMention.id).all()
+        assert len(mentions) == 2
+        assert [mention.id for mention in mentions].count(reviewed.id) == 1
+        assert sum(mention.review_status == "confirmed" for mention in mentions) == 1
+
+
+def test_correction_adopts_destination_qrz_validation(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-correction", source_path="correction.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-correction", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-correction", job_id="job-correction", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1)]))
+        update_qrz_snapshot(session, "KM7GHS", QrzCallsign("KM7GHS", status="not_found"), cache_seconds=3600)
+        update_qrz_snapshot(session, "K1AAB", QrzCallsign("K1AAB", status="found"), cache_seconds=3600)
+        mention = session.query(CallsignMention).one()
+        review_mention(session, mention.id, action="correct", corrected_callsign="K1AAB", reviewer_identity="operator")
+        session.commit()
+        assert session.query(CallsignMention).one().qrz_validation_status == "found"
+
+
 def test_directory_keeps_qrz_not_found_callsigns(archive_db) -> None:
     with archive_db() as session:
         for index, callsign in enumerate(("KM7GHS", "KE7WIL")):
@@ -352,6 +394,36 @@ def test_directory_keeps_qrz_not_found_callsigns(archive_db) -> None:
         assert {item["callsign"] for item in items} == {"KM7GHS", "KE7WIL"}
         filtered, _, _ = list_callsigns(session, query=None, cursor=None, limit=50, qrz_validation_status="not_found")
         assert [item["callsign"] for item in filtered] == ["KE7WIL"]
+
+
+def test_expired_qrz_not_found_is_refreshed_for_last_heard(archive_db, monkeypatch) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-expired-qrz", source_path="expired-qrz.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-expired-qrz", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-expired-qrz", job_id="job-expired-qrz", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1)]))
+        callsign = session.query(Callsign).one()
+        callsign.qrz_status = "not_found"
+        callsign.qrz_cache_expires_at = datetime(2020, 1, 1, tzinfo=UTC)
+        session.commit()
+
+        class RefreshingClient:
+            calls = 0
+
+            def lookup(self, value: str) -> QrzCallsign:
+                self.calls += 1
+                return QrzCallsign(value, status="found")
+
+        client = RefreshingClient()
+        monkeypatch.setattr("asl_transcriber.main.current_qrz_client", lambda: client)
+        response = last_heard_callsigns(db=session)
+        assert client.calls == 1
+        assert response["items"][0]["status"] == "found"
 
 
 def test_retranscription_replaces_unreviewed_detection(archive_db) -> None:
