@@ -119,7 +119,7 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
                 "evidence": json.loads(mention.evidence_json),
             }
             for mention in transcript.callsign_mentions
-            if mention.review_status != "rejected"
+            if mention.review_status != "rejected" and mention.is_current
         ]
         if transcript and transcript.callsign_mentions
         else json.loads(transcript.callsign_mentions_json) if transcript else []

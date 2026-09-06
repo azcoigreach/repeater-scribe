@@ -210,6 +210,24 @@ def test_forward_migration_repairs_missing_transmission_duration_column(tmp_path
     assert "duration_milliseconds" in columns
 
 
+def test_duration_repair_downgrade_preserves_existing_values(tmp_path: Path) -> None:
+    database = tmp_path / "duration.db"
+    alembic(database, "head")
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "INSERT INTO transmissions (id, created_at, updated_at, status, attribution_level, collision, duration_milliseconds) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("tx", "2026-09-05T00:00:00+00:00", "2026-09-05T00:00:00+00:00", "complete", "unknown", 0, 12345),
+    )
+    connection.commit()
+    connection.close()
+    downgrade(database, "callsign_intelligence")
+    connection = sqlite3.connect(database)
+    assert connection.execute(
+        "SELECT duration_milliseconds FROM transmissions WHERE id = 'tx'"
+    ).fetchone() == (12345,)
+
+
 def test_startup_schema_guard_accepts_current_and_rejects_outdated(tmp_path: Path, monkeypatch) -> None:
     from asl_transcriber import database as database_module
     from asl_transcriber.main import app

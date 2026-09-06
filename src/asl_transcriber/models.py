@@ -233,6 +233,7 @@ class CallsignMention(Base):
     evidence_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     qrz_validation_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     review_status: Mapped[str] = mapped_column(String(16), default="detected", nullable=False)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     reviewer_identity: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

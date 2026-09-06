@@ -55,10 +55,16 @@ def persist_transcript_details(
         for mention in session.query(CallsignMention).filter(
             CallsignMention.transcript_id == transcript.id,
             CallsignMention.review_status.in_(("confirmed", "corrected", "rejected")),
+            CallsignMention.is_current.is_(True),
         )
     ]
-    session.query(CallsignMention).filter(CallsignMention.transcript_id == transcript.id).delete()
-    session.query(TranscriptSegment).filter(TranscriptSegment.transcript_id == transcript.id).delete()
+    session.query(CallsignMention).filter(
+        CallsignMention.transcript_id == transcript.id,
+        CallsignMention.is_current.is_(True),
+    ).delete()
+    session.query(TranscriptSegment).filter(
+        TranscriptSegment.transcript_id == transcript.id
+    ).delete()
     segments = getattr(result, "segments", None) or []
     segment_rows: list[TranscriptSegment] = []
     for ordinal, segment in enumerate(segments):
@@ -139,6 +145,16 @@ def persist_transcript_details(
                 mention_row.reviewed_at,
             ) = review[4:]
         session.add(mention_row)
+    for review in previous_reviews:
+        session.add(
+            CallsignMention(
+                id=review[0], callsign_id=review[4], transcript_id=transcript.id,
+                recording_id=recording.id, raw_observed_value=review[1],
+                canonical_callsign=review[5], review_status=review[6],
+                reviewer_identity=review[7], reviewed_at=review[8],
+                is_current=False, timing_precision="segment", evidence_json="[]",
+            )
+        )
     recording.current_transcript_id = transcript.id
 
 
@@ -177,7 +193,9 @@ def list_callsigns(
         .join(Recording, Recording.id == CallsignMention.recording_id)
         .where(
             CallsignMention.callsign_id == Callsign.id,
-            CallsignMention.review_status != "rejected",
+                CallsignMention.is_current.is_(True),
+                CallsignMention.review_status != "rejected",
+            CallsignMention.is_current.is_(True),
             CallsignMention.transcript_id == Recording.current_transcript_id,
         )
         .order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
@@ -196,6 +214,7 @@ def list_callsigns(
         Recording, Recording.id == CallsignMention.recording_id
     ).where(
         CallsignMention.review_status != "rejected",
+        CallsignMention.is_current.is_(True),
         CallsignMention.transcript_id == Recording.current_transcript_id,
     ).group_by(Callsign.id)
     if query:
@@ -214,7 +233,10 @@ def list_callsigns(
         statement = statement.order_by(Callsign.normalized_callsign.asc())
     else:
         if cursor_callsign and cursor_time is None:
-            statement = statement.having(Callsign.normalized_callsign < cursor_callsign)
+            statement = statement.having(
+                func.max(CallsignMention.heard_at).is_(None)
+                & (Callsign.normalized_callsign < cursor_callsign)
+            )
         elif cursor_time is not None and cursor_callsign:
             latest = func.max(CallsignMention.heard_at)
             statement = statement.having(
@@ -262,13 +284,18 @@ def list_call_sign_mentions(
         .outerjoin(TranscriptSegment, TranscriptSegment.id == CallsignMention.segment_id)
         .where(
             CallsignMention.canonical_callsign == normalized,
+            CallsignMention.is_current.is_(True),
+            CallsignMention.review_status != "rejected",
             CallsignMention.transcript_id == Recording.current_transcript_id,
         )
     )
     if review_status:
         statement = statement.where(CallsignMention.review_status == review_status)
     else:
-        statement = statement.where(CallsignMention.review_status != "rejected")
+        statement = statement.where(
+            CallsignMention.review_status != "rejected",
+            CallsignMention.is_current.is_(True),
+        )
     if from_at:
         statement = statement.where(CallsignMention.heard_at >= from_at)
     if to_at:
@@ -281,11 +308,12 @@ def list_call_sign_mentions(
     if cursor:
         cursor_time, mention_id = _decode_cursor(cursor)
         if cursor_time is None:
-            statement = statement.where(CallsignMention.id < mention_id)
+            statement = statement.where(
+                CallsignMention.heard_at.is_(None), CallsignMention.id < mention_id
+            )
         else:
             statement = statement.where(
-                (CallsignMention.heard_at.is_(None))
-                | (CallsignMention.heard_at < cursor_time)
+                (CallsignMention.heard_at < cursor_time)
                 | ((CallsignMention.heard_at == cursor_time) & (CallsignMention.id < mention_id))
             )
     statement = statement.order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
@@ -332,6 +360,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
         .where(
             CallsignMention.callsign_id == Callsign.id,
             CallsignMention.review_status != "rejected",
+            CallsignMention.is_current.is_(True),
             CallsignMention.transcript_id == Recording.current_transcript_id,
         )
         .order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
@@ -360,6 +389,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
         Recording, Recording.id == CallsignMention.recording_id
     ).where(
         CallsignMention.review_status != "rejected",
+        CallsignMention.is_current.is_(True),
         CallsignMention.transcript_id == Recording.current_transcript_id,
     ).group_by(Callsign.id).order_by(
         func.max(CallsignMention.heard_at).desc(), Callsign.normalized_callsign.desc()
@@ -402,6 +432,7 @@ def callsign_profile(session: Session, value: str) -> dict[str, object] | None:
         ).join(Recording, Recording.id == CallsignMention.recording_id).where(
             CallsignMention.callsign_id == callsign.id,
             CallsignMention.review_status != "rejected",
+            CallsignMention.is_current.is_(True),
             CallsignMention.transcript_id == Recording.current_transcript_id,
         )
     ).one()
@@ -412,6 +443,7 @@ def callsign_profile(session: Session, value: str) -> dict[str, object] | None:
                 Recording, Recording.id == CallsignMention.recording_id
             ).where(
                 CallsignMention.callsign_id == callsign.id,
+                CallsignMention.is_current.is_(True),
                 CallsignMention.transcript_id == Recording.current_transcript_id,
             ).group_by(CallsignMention.review_status)
         ).all()
@@ -441,6 +473,7 @@ def callsign_profile(session: Session, value: str) -> dict[str, object] | None:
         ).join(Recording, Recording.id == CallsignMention.recording_id).where(
             CallsignMention.callsign_id == callsign.id,
             CallsignMention.review_status != "rejected",
+            CallsignMention.is_current.is_(True),
             CallsignMention.transcript_id == Recording.current_transcript_id,
         )
     ).one()

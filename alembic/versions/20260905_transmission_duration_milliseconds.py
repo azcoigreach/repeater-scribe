@@ -22,6 +22,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("transmissions")}
-    if "duration_milliseconds" in columns:
-        op.drop_column("transmissions", "duration_milliseconds")
+    # This repair revision may encounter a predecessor-owned column. Never
+    # destroy existing duration data during downgrade.
+    pass

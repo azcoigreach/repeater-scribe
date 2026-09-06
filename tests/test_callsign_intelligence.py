@@ -360,6 +360,58 @@ def test_retranscription_preserves_review_identity_across_small_timing_shift(arc
         assert preserved.reviewer_identity == "operator"
 
 
+def test_unmatched_review_survives_as_non_current_history(archive_db) -> None:
+    with archive_db() as session:
+        recording = Recording(id="recording-missing-review", source_path="missing-review.wav", archive_root="", status="completed")
+        session.add(recording)
+        session.flush()
+        session.add(IngestionJob(id="job-missing-review", source_path=recording.source_path, recording_id=recording.id))
+        session.flush()
+        transcript = Transcript(id="transcript-missing-review", job_id="job-missing-review", recording_id=recording.id)
+        session.add(transcript)
+        session.flush()
+        persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention("KM7GHS", 0, 1)]))
+        session.flush()
+        mention = session.query(CallsignMention).one()
+        review_mention(session, mention.id, action="confirm", corrected_callsign=None, reviewer_identity="operator")
+        session.commit()
+        persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[]))
+        session.commit()
+        historical = session.query(CallsignMention).one()
+        assert historical.id == mention.id
+        assert historical.is_current is False
+        assert historical.review_status == "confirmed"
+        assert callsign_profile(session, "KM7GHS")["total_mentions"] == 0
+
+
+def test_directory_null_cursor_phase_does_not_reintroduce_dated_rows(archive_db) -> None:
+    with archive_db() as session:
+        for index, callsign in enumerate(("K1AAB", "K1AAC", "K1AAD")):
+            recording = Recording(
+                id=f"recording-null-{index}", source_path=f"null-{index}.wav", archive_root="",
+                started_at=datetime(2026, 9, 5, 12, index, tzinfo=UTC) if index == 0 else None,
+                status="completed",
+            )
+            session.add(recording)
+            session.flush()
+            session.add(IngestionJob(id=f"job-null-{index}", source_path=recording.source_path, recording_id=recording.id))
+            session.flush()
+            transcript = Transcript(id=f"transcript-null-{index}", job_id=f"job-null-{index}", recording_id=recording.id)
+            session.add(transcript)
+            session.flush()
+            persist_transcript_details(session, transcript, recording, SimpleNamespace(segments=[], callsign_mentions=[TranscriptCallsignMention(callsign, 0, 1)]))
+        session.commit()
+        seen = []
+        cursor = None
+        for _ in range(4):
+            page, cursor, more = list_callsigns(session, query=None, cursor=cursor, limit=1)
+            seen.extend(item["callsign"] for item in page)
+            if not more:
+                break
+        assert len(seen) == 3
+        assert len(set(seen)) == 3
+
+
 def test_retranscription_does_not_reuse_one_review_for_two_detections(archive_db) -> None:
     with archive_db() as session:
         recording = Recording(id="recording-competing", source_path="competing.wav", archive_root="", status="completed")
