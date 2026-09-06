@@ -16,11 +16,11 @@
     <article id="recording-detail" hidden>
       <header class="detail-heading"><div><p class="eyebrow">Historical Recording</p><h1 id="recording-time"></h1><p id="recording-path"></p></div><div id="detail-statuses" class="status-group"></div></header>
       <section id="audio-section" class="detail-section"><h2>Audio</h2><div id="audio-content"></div></section>
-      <section class="detail-section"><h2>Transcript</h2><div id="transcript-content"></div></section>
+      <section class="detail-section"><h2>Transcript</h2>{% if role in ['operator', 'admin'] %}<button id="retry-transcription" class="control-button" type="button" disabled>Re-transcribe</button>{% endif %}<p id="retry-status" class="audio-message" role="status" aria-live="polite"></p><div id="transcript-content"></div></section>
       <section id="evidence-section" class="detail-section"><h2>Callsign mentions</h2><div id="callsign-evidence"></div></section>
       <section class="detail-section"><h2>Recording details</h2><dl id="metadata" class="metadata"></dl></section>
     </article>
   </main>
-  <script src="/static/archive_detail.js?v=20260903-1" defer></script>
+  <script src="/static/archive_detail.js?v=0.8.1" defer></script>
 </body>
 </html>

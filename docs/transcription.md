@@ -50,8 +50,32 @@ windows, held in memory, and published on `/api/v1/events` with
 removed after each attempt and the source archive remains read-only.
 
 Provisional text can change, repeat a phrase, or briefly omit speech. It is not
-written to the transcript table and is discarded when the completed recording
-enters the final path.
+written to the transcript table. It stays visible during the final pass and is
+removed only after a usable final result is saved. If the final pass fails, the
+preview remains provisional in memory; restarting the service loses that unsaved
+preview, but saved transcripts survive restarts.
+
+### Recovery and manual re-transcription (0.8.1)
+
+An empty replacement for nonempty text, or a result with fewer than one quarter
+of the previous words when the preview or saved transcript has at least ten
+words, triggers one recovery decode of the complete WAV. Recovery disables VAD,
+previous-text conditioning, and hotwords. This is a conservative text-loss
+heuristic, not a guarantee of transcription accuracy. Ordinary revisions and
+silent recordings without previous text are still accepted.
+
+If recovery still loses most of the text, the job is marked failed and the
+previous text stays visible. Operators can select **Re-transcribe** in the
+transcription log or archive recording details. The action processes the complete
+source WAV using recovery settings, works even with `ASLT_AUTO_PROCESS=false`,
+and preserves an existing saved transcript until a replacement is saved. Audio
+must still be available within the configured archive and retention policy.
+
+The dashboard shows job status and failure details; archive details refresh while
+a retry runs. Pending or processing jobs cannot be queued twice. API operators
+can use `POST /api/v1/ingestion/jobs/{job_id}/retry` (202 accepted); the browser uses
+the corresponding CSRF-protected `/ui/ingestion/jobs/{job_id}/retry` route.
+Failures are persisted, and interrupted processing jobs become pending on restart.
 
 ### Final pass
 

@@ -136,7 +136,9 @@ class LiveTranscriptionService:
             self._last_sizes.pop(stale, None)
             self._texts.pop(stale, None)
             self._mentions.pop(stale, None)
-            runtime.clear_live_result(stale)
+            # The final pass owns removal after it has saved a usable replacement.
+            if not any(job.source_path == stale for job in runtime.jobs()):
+                runtime.clear_live_result(stale)
 
         candidates: list[tuple[int, str, Path, int]] = []
         for source_path in waiting:
@@ -152,7 +154,6 @@ class LiveTranscriptionService:
 
         processed = 0
         for _, source_path, source, size in sorted(candidates, reverse=True):
-            self._last_sizes[source_path] = size
             snapshot: Path | None = None
             try:
                 snapshot = self.snapshotter.snapshot(source)
@@ -165,6 +166,7 @@ class LiveTranscriptionService:
                     snapshot.unlink(missing_ok=True)
 
             merged = merge_overlapping_text(self._texts.get(source_path, ""), result.display_text)
+            self._last_sizes[source_path] = size
             self._texts[source_path] = merged
             try:
                 source_duration = probe_audio(source).duration_seconds

@@ -28,6 +28,7 @@ def test_recordings_endpoint_filters_transcript_text(monkeypatch, tmp_path) -> N
                 "raw_text": "weather check from km7ghs",
                 "display_text": "Weather check from KM7GHS",
                 "language": "en",
+                "status": "completed",
             },
         )()
         response = client.get("/api/v1/recordings?q=weather")

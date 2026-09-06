@@ -12,7 +12,7 @@ from queue import Empty
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -291,8 +291,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 await asyncio.to_thread(active_runtime.scan_once)
                 if settings.auto_process:
                     await asyncio.to_thread(
-                        active_runtime.process_pending,
-                        transcription_engine.transcribe,
+                        process_transcription_jobs,
                         limit=1,
                     )
             except Exception:
@@ -1146,12 +1145,46 @@ def ingestion_jobs() -> dict[str, object]:
 
 @app.post("/api/v1/ingestion/process", dependencies=[Depends(require_api_admin)])
 def process_ingestion() -> dict[str, int]:
+    return process_transcription_jobs()
+
+
+def process_transcription_jobs(
+    *, limit: int | None = None, job_id: str | None = None
+) -> dict[str, int]:
     global transcription_engine
     active_runtime = current_runtime()
     if transcription_engine is None:
         transcription_engine = build_local_transcription_engine()
-    results = active_runtime.process_pending(transcription_engine.transcribe)
+    results = active_runtime.process_pending(
+        transcription_engine.transcribe,
+        limit=limit,
+        job_id=job_id,
+        recovery_transcribe=lambda path: transcription_engine.transcribe(
+            path, vad_filter=False, condition_on_previous_text=False, use_hotwords=False
+        ),
+    )
     return {"processed": len(results), "total": len(active_runtime.jobs())}
+
+
+@app.post(
+    "/api/v1/ingestion/jobs/{job_id}/retry", status_code=202,
+    dependencies=[Depends(require_api_operator)],
+)
+@app.post(
+    "/ui/ingestion/jobs/{job_id}/retry", status_code=202,
+    dependencies=[Depends(require_ui_operator)],
+)
+def retry_transcription(job_id: str, background_tasks: BackgroundTasks) -> dict[str, str]:
+    try:
+        job = current_runtime().retry(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Recording job not found") from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=409, detail="Recording audio is unavailable") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    background_tasks.add_task(process_transcription_jobs, job_id=job.id)
+    return {"id": job.id, "status": "pending"}
 
 
 @app.get("/api/v1/activity", dependencies=[Depends(require_viewer)])
@@ -1208,11 +1241,13 @@ def recordings(
             "id": job.id,
             "source_path": job.source_path,
             "status": job.status.value,
+            "last_error": job.last_error,
             "timestamp": recording_timestamp(job.source_path),
             "audio_url": f"/api/v1/audio?path={quote(job.source_path)}",
             "callsigns": (
                 list(extract_callsigns(result.display_text))
-                if (result := active_runtime.results.get(job.id)) is not None
+                if (result := active_runtime.results.get(job.id)
+                    or active_runtime.live_results.get(job.source_path)) is not None
                 else []
             ),
             "transcript": (
@@ -1220,8 +1255,10 @@ def recordings(
                     "raw_text": result.raw_text,
                     "display_text": result.display_text,
                     "language": result.language,
+                    "provisional": result.status == "live",
                 }
-                if (result := active_runtime.results.get(job.id)) is not None
+                if (result := active_runtime.results.get(job.id)
+                    or active_runtime.live_results.get(job.source_path)) is not None
                 else None
             ),
         }
@@ -1230,7 +1267,8 @@ def recordings(
     for item in all_items:
         job_source_path = str(item["source_path"])
         result = (
-            active_runtime.results.get(str(item["id"]))
+            (active_runtime.results.get(str(item["id"]))
+             or active_runtime.live_results.get(job_source_path))
             if item["id"]
             else active_runtime.live_results.get(job_source_path)
         )

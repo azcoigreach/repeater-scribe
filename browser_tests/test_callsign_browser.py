@@ -117,6 +117,7 @@ def test_viewer_controls_missing_audio_unknown_confidence_and_legacy_text(page, 
     page.get_by_role("link", name="Open recording", exact=True).click()
     expect(page).to_have_url(origin + "/archive/recordings/" + ids["K1AB"])
     expect(page.locator("#transcript-content")).to_contain_text("Legacy full text K1AB")
+    expect(page.get_by_role("button", name="Re-transcribe", exact=True)).to_have_count(0)
     expect(page.locator(".transcript-segment")).to_have_count(0)
     expect(page.locator("#audio-content")).to_contain_text("Audio is no longer available")
     expect(page.locator("#callsign-evidence")).to_contain_text("Saved evidence")
