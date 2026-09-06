@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Select, case, exists, func, select
@@ -166,6 +167,10 @@ def persist_transcript_details(
             )
         )
     recording.current_transcript_id = transcript.id
+    session.flush()
+    from asl_transcriber.transcript_corrections import replay_corrections
+
+    replay_corrections(session, transcript)
 
 
 def _cursor_value(value: datetime | None, mention_id: str) -> str:
@@ -524,6 +529,23 @@ def review_mention(
         if corrected_callsign is None:
             raise ValueError("corrected_callsign is required")
         normalized = canonical_callsign(corrected_callsign)
+        transcript = mention.transcript
+        occurrences = list(re.finditer(
+            rf"\b{re.escape(mention.canonical_callsign)}\b", transcript.display_text,
+            re.IGNORECASE,
+        ))
+        matching_mentions = [
+            item for item in transcript.callsign_mentions
+            if item.is_current and item.canonical_callsign == mention.canonical_callsign
+        ]
+        if mention.is_current and len(occurrences) == len(matching_mentions) == 1:
+            from asl_transcriber.transcript_corrections import correct_selection
+
+            correct_selection(
+                session, transcript, expected_text=transcript.display_text,
+                start=occurrences[0].start(), end=occurrences[0].end(),
+                callsign=normalized, reviewer=reviewer_identity,
+            )
         callsign = _get_or_create(session, normalized)
         mention.callsign_id = callsign.id
         mention.canonical_callsign = normalized
@@ -535,6 +557,14 @@ def review_mention(
         mention.review_status = "confirmed" if action == "confirm" else "rejected"
     mention.reviewer_identity = reviewer_identity[:255]
     mention.reviewed_at = datetime.now(UTC)
+    edits = json.loads(mention.transcript.text_corrections_json or "[]")
+    for edit in edits:
+        if edit["mention"]["id"] == mention.id:
+            edit["review_status"] = mention.review_status
+            edit["reviewed_at"] = mention.reviewed_at.isoformat()
+            edit["mention"]["reviewer_identity"] = mention.reviewer_identity
+    if edits:
+        mention.transcript.text_corrections_json = json.dumps(edits)
     return mention
 
 

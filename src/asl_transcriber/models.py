@@ -136,6 +136,7 @@ class Transcript(Base):
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     callsign_mentions_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    text_corrections_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     recording_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("recordings.id"), nullable=True, index=True
     )

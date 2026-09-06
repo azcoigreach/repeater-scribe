@@ -145,7 +145,7 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
         "updated_at": recording.updated_at.isoformat(),
         "expired_at": recording.expired_at.isoformat() if recording.expired_at else None,
         "ingestion": ({"id": job.id, "status": job.status, "attempt_count": job.attempt_count, "last_error": job.last_error, "dead_letter": job.dead_letter} if job else None),
-        "transcript": ({"raw_text": transcript.raw_text, "display_text": transcript.display_text, "language": transcript.language, "confidence": transcript.confidence, "callsign_mentions": mentions, "segments": [{"id": segment.id, "ordinal": segment.ordinal, "start": segment.start_offset, "end": segment.end_offset, "raw_text": segment.raw_text, "display_text": segment.display_text, "language": segment.language, "confidence": segment.avg_logprob} for segment in transcript.segments]} if transcript else None),
+        "transcript": ({"corrections_need_review": sum(not edit.get("applied", True) for edit in json.loads(transcript.text_corrections_json or "[]")), "raw_text": transcript.raw_text, "display_text": transcript.display_text, "language": transcript.language, "confidence": transcript.confidence, "callsign_mentions": mentions, "segments": [{"id": segment.id, "ordinal": segment.ordinal, "start": segment.start_offset, "end": segment.end_offset, "raw_text": segment.raw_text, "display_text": segment.display_text, "language": segment.language, "confidence": segment.avg_logprob} for segment in transcript.segments]} if transcript else None),
     }
 
 

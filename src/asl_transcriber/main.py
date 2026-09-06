@@ -66,7 +66,7 @@ from asl_transcriber.favorites import (
     record_remote_key_transition,
     update_favorite,
 )
-from asl_transcriber.models import CallsignMention, Favorite, Recording
+from asl_transcriber.models import CallsignMention, Favorite, Recording, Transcript
 from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.qrz import QrzClient, QrzError
@@ -77,6 +77,7 @@ from asl_transcriber.topology import (
     ensure_topology_crawl,
     serialize_topology,
 )
+from asl_transcriber.transcript_corrections import CorrectionConflict, correct_selection
 from asl_transcriber.transcription.base import TranscriptCallsignMention
 from asl_transcriber.transcription.callsigns import (
     CallsignResolver,
@@ -1074,6 +1075,13 @@ class CallsignMentionReviewRequest(BaseModel):
     corrected_callsign: str | None = None
 
 
+class TranscriptCallsignCorrectionRequest(BaseModel):
+    expected_text: str = Field(min_length=1, max_length=200000)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    callsign: str = Field(min_length=1, max_length=32)
+
+
 async def execute_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
     if not settings.ami_control_enabled:
         raise HTTPException(status_code=503, detail="AMI node control is disabled")
@@ -1201,6 +1209,47 @@ def activity_events() -> dict[str, object]:
         for event in active_runtime.activity_events()
     ]
     return {"total": len(items), "items": items}
+
+
+@app.post(
+    "/api/v1/ingestion/jobs/{job_id}/callsign-correction",
+    dependencies=[Depends(require_api_operator)],
+)
+@app.post(
+    "/ui/ingestion/jobs/{job_id}/callsign-correction",
+    dependencies=[Depends(require_ui_operator)],
+)
+def correct_transcript_callsign(
+    db: Annotated[Session, Depends(get_db)], request: Request, principal: Viewer,
+    job_id: str, payload: TranscriptCallsignCorrectionRequest,
+) -> dict[str, object]:
+    active_runtime = current_runtime()
+    with active_runtime._scan_lock:
+        transcript = db.scalar(select(Transcript).where(Transcript.job_id == job_id))
+        if transcript is None:
+            raise HTTPException(status_code=404, detail="Saved transcript not found")
+        try:
+            mention = correct_selection(
+                db, transcript, expected_text=payload.expected_text, start=payload.start,
+                end=payload.end, callsign=payload.callsign, reviewer=principal.identity,
+            )
+            db.commit()
+        except CorrectionConflict as error:
+            db.rollback()
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            db.rollback()
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        active_runtime.refresh_transcript(job_id)
+    audit_event(
+        actor=principal.identity, auth_source=principal.auth_source,
+        action="transcript_callsign_correction", outcome="success", request=request,
+        detail=json.dumps({"transcript_id": transcript.id, "mention_id": mention.id,
+                           "callsign": mention.canonical_callsign,
+                           "start": payload.start, "end": payload.end}),
+    )
+    return {"display_text": transcript.display_text, "mention_id": mention.id,
+            "callsign": mention.canonical_callsign}
 
 
 @app.get("/api/v1/recordings", dependencies=[Depends(require_viewer)])
@@ -1434,33 +1483,36 @@ def _apply_mention_review(
     db: Session, mention_id: str, payload: CallsignMentionReviewRequest, principal: Principal,
     request: Request,
 ) -> dict[str, object]:
-    previous = db.get(CallsignMention, mention_id)
-    before = (
-        {"callsign": previous.canonical_callsign, "status": previous.review_status}
-        if previous else None
-    )
-    try:
-        mention = review_mention(
-            db, mention_id, action=payload.action,
-            corrected_callsign=payload.corrected_callsign,
-            reviewer_identity=principal.identity,
+    active_runtime = current_runtime()
+    with active_runtime._scan_lock:
+        previous = db.get(CallsignMention, mention_id)
+        before = (
+            {"callsign": previous.canonical_callsign, "status": previous.review_status}
+            if previous else None
         )
-    except LookupError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    db.commit()
-    audit_event(
-        actor=principal.identity, auth_source=principal.auth_source,
-        action="callsign_mention_review", outcome="success", request=request,
-        detail=json.dumps({
-            "mention_id": mention.id, "operation": payload.action, "before": before,
-            "after": {"callsign": mention.canonical_callsign, "status": mention.review_status},
-        }),
-    )
-    return {"mention_id": mention.id, "canonical_callsign": mention.canonical_callsign,
-            "review_status": mention.review_status, "reviewer_identity": mention.reviewer_identity,
-            "reviewed_at": mention.reviewed_at.isoformat() if mention.reviewed_at else None}
+        try:
+            mention = review_mention(
+                db, mention_id, action=payload.action,
+                corrected_callsign=payload.corrected_callsign,
+                reviewer_identity=principal.identity,
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        db.commit()
+        active_runtime.refresh_transcript(mention.transcript.job_id)
+        audit_event(
+            actor=principal.identity, auth_source=principal.auth_source,
+            action="callsign_mention_review", outcome="success", request=request,
+            detail=json.dumps({
+                "mention_id": mention.id, "operation": payload.action, "before": before,
+                "after": {"callsign": mention.canonical_callsign, "status": mention.review_status},
+            }),
+        )
+        return {"mention_id": mention.id, "canonical_callsign": mention.canonical_callsign,
+                "review_status": mention.review_status, "reviewer_identity": mention.reviewer_identity,
+                "reviewed_at": mention.reviewed_at.isoformat() if mention.reviewed_at else None}
 
 
 @app.patch("/api/v1/callsign-mentions/{mention_id}", dependencies=[Depends(require_api_operator)])

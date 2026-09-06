@@ -82,6 +82,7 @@ function updateActivityState() {
 }
 
 function renderJobs(items, databaseTotals = {}) {
+  if (window.TranscriptCorrections?.busy()) return;
   const counts = items.reduce((result, item) => {
     result[item.status] = (result[item.status] || 0) + 1;
     return result;
@@ -124,7 +125,12 @@ function renderJobs(items, databaseTotals = {}) {
       card.append(retry);
     }
     const feedback = element('p', item.last_error || '', 'muted-text', { role: 'status' });
-    card.append(transcript, feedback); recordings.append(card);
+    card.append(transcript, feedback);
+    if (item.id && item.transcript && !item.transcript.provisional && !['pending', 'processing'].includes(item.status) && ['operator', 'admin'].includes(document.body.dataset.role)) {
+      TranscriptCorrections.attach(card, { jobId: item.id, text: item.transcript.display_text,
+        sources: [{ node: transcript, offset: 0 }], onSaved: async () => { await loadCallsigns(); await loadJobs(); } });
+    }
+    recordings.append(card);
   });
 }
 

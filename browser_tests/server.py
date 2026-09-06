@@ -98,6 +98,25 @@ with SessionLocal() as db:
                 ],
             ),
         )
+    for kind in ("log", "detail"):
+        identifier = str(uuid5(NAMESPACE_DNS, f"browser-correction-{kind}"))
+        ids[f"correction_{kind}"] = identifier
+        path = f"a-correction-{kind}.wav"
+        (root / path).write_bytes((root / "sample.wav").read_bytes())
+        words = "Hello Kilo Mike Seven Golf Hotel Sierra, this is the radio check."
+        recording = Recording(id=identifier, archive_root=str(root), source_path=path,
+                              started_at=NOW - timedelta(days=90), status="completed",
+                              audio_status="available")
+        db.add(recording)
+        db.flush()
+        db.add(IngestionJob(id=identifier, recording_id=identifier, source_path=path,
+                            archive_root=str(root), status="completed"))
+        db.flush()
+        transcript = Transcript(id=identifier, job_id=identifier, recording_id=identifier,
+                                raw_text=words, display_text=words)
+        db.add(transcript)
+        persist_transcript_details(db, transcript, recording, SimpleNamespace(
+            segments=[TranscriptSegment(1, 7, words)], callsign_mentions=[]))
     db.flush()
     for call in db.query(Callsign):
         call.qrz_status = "found"

@@ -55,6 +55,45 @@ removed only after a usable final result is saved. If the final pass fails, the
 preview remains provisional in memory; restarting the service loses that unsaved
 preview, but saved transcripts survive restarts.
 
+### Correcting callsign text (0.8.1)
+
+In the transcription log or archive recording details, select the mistaken words
+and choose **Correct callsign**. You can also open the editor first and select
+words in its transcript box, including on mobile or with the keyboard. Enter the
+callsign (letters and digits, for example `KM7GHS`) and choose **Save correction**.
+Only the selected occurrence is replaced. The action works for missed callsigns
+as well as callsigns that were already detected.
+
+Operators and administrators can correct saved transcripts, including recordings
+whose audio is no longer available. Provisional previews and transcripts still
+queued or processing must finish before editing. A stale text selection is
+rejected; reload and select again. Viewer accounts cannot save corrections.
+
+The raw transcript and raw segments remain unchanged. Corrected text is saved to
+the transcript and matching display segments, and a reviewed callsign mention is
+created or updated. The mention retains existing recognition evidence or records
+the operator's selected words. New mentions use segment timing when available;
+no word-level timestamps or acoustic confidence are invented. Existing mention
+**Correct** actions also update the text when one occurrence and one matching
+mention identify it unambiguously; use the text editor for repeated occurrences.
+
+Corrections survive restarts. Re-transcription replays exact matching text
+revisions and keeps the reviewed mention identity. If the new wording no longer
+matches, correction history is retained and archive details show that review is
+needed. It does not replace unrelated words. Later human confirmation or rejection
+of the mention is retained when the correction is replayed.
+
+Run `alembic upgrade head` before starting the updated application. The
+`transcript_text_corrections` migration adds correction history to existing
+transcripts without changing their text. Downgrading this migration removes that
+history; export it first if it needs to be retained.
+
+API operators can post to
+`/api/v1/ingestion/jobs/{job_id}/callsign-correction` with `expected_text`,
+zero-based Unicode character offsets `start` (inclusive) and `end` (exclusive),
+and `callsign`. The browser uses the equivalent CSRF-protected `/ui/` route.
+Stale or busy transcripts return 409; invalid selections/callsigns return 422.
+
 ### Recovery and manual re-transcription (0.8.1)
 
 An empty replacement for nonempty text, or a result with fewer than one quarter

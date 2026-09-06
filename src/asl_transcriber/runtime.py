@@ -519,6 +519,16 @@ class ArchiveRuntime:
             )
             persist_transcript_details(session, transcript, stored_job.recording, result)
             session.commit()
+            result.display_text = transcript.display_text
+
+    def refresh_transcript(self, job_id: str) -> None:
+        """Refresh the dashboard cache after a committed operator text edit."""
+        with self._scan_lock, self.session_factory() as session:
+            transcript = session.scalar(select(Transcript).where(Transcript.job_id == job_id))
+            if transcript is None or job_id not in self.results:
+                return
+            self.results[job_id].display_text = transcript.display_text
+            self._publish(self.job_store.get(job_id), self.results[job_id])
 
     @staticmethod
     def _deserialize_callsign_mentions(value: str | None) -> list[TranscriptCallsignMention]:

@@ -283,7 +283,7 @@ def test_populated_07_to_head_and_supported_cycle_preserves_duration_and_foreign
     for _ in range(2):
         alembic(database, "head")
         with closing(sqlite3.connect(database)) as connection, connection:
-            assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("current_callsign_mentions",)
+            assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("transcript_text_corrections",)
             assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
             assert connection.execute("SELECT duration_milliseconds FROM transmissions").fetchone() == (12345,)
             assert connection.execute("SELECT canonical_callsign, is_current FROM callsign_mentions").fetchall() == [("KM7GHS", 1)]
