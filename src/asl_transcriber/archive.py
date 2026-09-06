@@ -185,6 +185,7 @@ def list_recordings(
                 select(1).select_from(CallsignMention).where(
                     CallsignMention.recording_id == Recording.id,
                     CallsignMention.canonical_callsign == normalized_callsign,
+                    CallsignMention.is_current.is_(True),
                     CallsignMention.review_status != "rejected",
                     CallsignMention.transcript_id == Recording.current_transcript_id,
                 )

@@ -41,17 +41,20 @@ def persist_transcript_details(
     """Replace durable details for a transcript inside its caller's transaction."""
     session.flush()
     previous_reviews = [
-        (
-            mention.id,
-            mention.raw_observed_value,
-            mention.start_offset,
-            mention.end_offset,
-            mention.callsign_id,
-            mention.canonical_callsign,
-            mention.review_status,
-            mention.reviewer_identity,
-            mention.reviewed_at,
-        )
+        {
+            "id": mention.id, "raw_observed_value": mention.raw_observed_value,
+            "start_offset": mention.start_offset, "end_offset": mention.end_offset,
+            "callsign_id": mention.callsign_id, "canonical_callsign": mention.canonical_callsign,
+            "review_status": mention.review_status, "reviewer_identity": mention.reviewer_identity,
+            "reviewed_at": mention.reviewed_at, "heard_at": mention.heard_at,
+            "timing_precision": mention.timing_precision, "confidence": mention.confidence,
+            "acoustic_confidence": mention.acoustic_confidence,
+            "recognition_confidence": mention.recognition_confidence,
+            "recognition_method": mention.recognition_method,
+            "evidence_json": mention.evidence_json,
+            "qrz_validation_status": mention.qrz_validation_status,
+            "created_at": mention.created_at, "updated_at": mention.updated_at,
+        }
         for mention in session.query(CallsignMention).filter(
             CallsignMention.transcript_id == transcript.id,
             CallsignMention.review_status.in_(("confirmed", "corrected", "rejected")),
@@ -105,20 +108,20 @@ def persist_transcript_details(
         candidates = [
             item
             for item in previous_reviews
-            if item[1] == (getattr(mention, "raw_observed_value", None) or mention.callsign)
-            and abs((item[2] or 0.0) - mention.start) <= 0.25
-            and abs((item[3] or 0.0) - mention.end) <= 0.25
+            if item["raw_observed_value"] == (getattr(mention, "raw_observed_value", None) or mention.callsign)
+            and abs((item["start_offset"] or 0.0) - mention.start) <= 0.25
+            and abs((item["end_offset"] or 0.0) - mention.end) <= 0.25
         ]
         review = min(
             candidates,
-            key=lambda item: abs((item[2] or 0.0) - mention.start)
-            + abs((item[3] or 0.0) - mention.end),
+            key=lambda item: abs((item["start_offset"] or 0.0) - mention.start)
+            + abs((item["end_offset"] or 0.0) - mention.end),
             default=None,
         )
         if review is not None:
             previous_reviews.remove(review)
         mention_row = CallsignMention(
-            id=review[0] if review is not None else None,
+            id=review["id"] if review is not None else None,
             callsign_id=callsign.id,
             transcript_id=transcript.id,
             recording_id=recording.id,
@@ -137,22 +140,27 @@ def persist_transcript_details(
             qrz_validation_status=callsign.qrz_status,
         )
         if review is not None:
-            (
-                mention_row.callsign_id,
-                mention_row.canonical_callsign,
-                mention_row.review_status,
-                mention_row.reviewer_identity,
-                mention_row.reviewed_at,
-            ) = review[4:]
+            for field_name in (
+                "callsign_id", "canonical_callsign", "review_status", "reviewer_identity",
+                "reviewed_at", "heard_at", "timing_precision", "confidence",
+                "acoustic_confidence", "recognition_confidence", "recognition_method",
+                "evidence_json", "qrz_validation_status", "created_at", "updated_at",
+            ):
+                setattr(mention_row, field_name, review[field_name])
         session.add(mention_row)
     for review in previous_reviews:
         session.add(
             CallsignMention(
-                id=review[0], callsign_id=review[4], transcript_id=transcript.id,
-                recording_id=recording.id, raw_observed_value=review[1],
-                canonical_callsign=review[5], review_status=review[6],
-                reviewer_identity=review[7], reviewed_at=review[8],
-                is_current=False, timing_precision="segment", evidence_json="[]",
+                id=review["id"], callsign_id=review["callsign_id"], transcript_id=transcript.id,
+                recording_id=recording.id, raw_observed_value=review["raw_observed_value"],
+                canonical_callsign=review["canonical_callsign"], review_status=review["review_status"],
+                reviewer_identity=review["reviewer_identity"], reviewed_at=review["reviewed_at"],
+                heard_at=review["heard_at"], timing_precision=review["timing_precision"],
+                confidence=review["confidence"], acoustic_confidence=review["acoustic_confidence"],
+                recognition_confidence=review["recognition_confidence"],
+                recognition_method=review["recognition_method"], evidence_json=review["evidence_json"],
+                qrz_validation_status=review["qrz_validation_status"], is_current=False,
+                created_at=review["created_at"], updated_at=review["updated_at"],
             )
         )
     recording.current_transcript_id = transcript.id
@@ -285,17 +293,13 @@ def list_call_sign_mentions(
         .where(
             CallsignMention.canonical_callsign == normalized,
             CallsignMention.is_current.is_(True),
-            CallsignMention.review_status != "rejected",
             CallsignMention.transcript_id == Recording.current_transcript_id,
         )
     )
     if review_status:
         statement = statement.where(CallsignMention.review_status == review_status)
     else:
-        statement = statement.where(
-            CallsignMention.review_status != "rejected",
-            CallsignMention.is_current.is_(True),
-        )
+            statement = statement.where(CallsignMention.review_status != "rejected")
     if from_at:
         statement = statement.where(CallsignMention.heard_at >= from_at)
     if to_at:
@@ -314,6 +318,7 @@ def list_call_sign_mentions(
         else:
             statement = statement.where(
                 (CallsignMention.heard_at < cursor_time)
+                | (CallsignMention.heard_at.is_(None))
                 | ((CallsignMention.heard_at == cursor_time) & (CallsignMention.id < mention_id))
             )
     statement = statement.order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
@@ -393,7 +398,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
         CallsignMention.transcript_id == Recording.current_transcript_id,
     ).group_by(Callsign.id).order_by(
         func.max(CallsignMention.heard_at).desc(), Callsign.normalized_callsign.desc()
-    ).limit(min(max(limit, 1), 100))
+    ).limit(min(max(limit, 1), 1000))
     rows = []
     for row in session.execute(statement).all():
         details = row[0]
