@@ -1,6 +1,8 @@
 # 0.8 acceptance and migration verification
 
-Version remains 0.7.0; changes are under Unreleased. Work continues on PR #20.
+The app and package now report 0.8.0; changes remain under Unreleased.
+The acceptance implementation below was merged in PR #20. Its historical
+verification results predate the version correction.
 
 ## Migration procedure
 

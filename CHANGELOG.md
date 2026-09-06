@@ -16,6 +16,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Align the app and package version at 0.8.0 following callsign-intelligence
+  acceptance.
+
 - Restore successful callsign-history responses after error-handling edits; keep
   invalid callsign/cursor errors distinct without exposing exception details.
 - Preserve legacy Archive mentions only when no current normalized transcript is
