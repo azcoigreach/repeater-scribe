@@ -1658,7 +1658,7 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
         item.pop("qrz_image_url", None)
         item.pop("qrz_profile_url", None)
     return {
-        "configured": client is not None,
+        "configured": current_qrz_client() is not None,
         "total": len(items),
         "rejected": rejected,
         "superseded": superseded,
