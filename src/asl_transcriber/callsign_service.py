@@ -18,6 +18,7 @@ from asl_transcriber.models import (
     Transmission,
 )
 from asl_transcriber.qrz import QrzCallsign
+from asl_transcriber.time_utils import iso_utc, utc
 from asl_transcriber.transcription.callsigns import normalize_callsigns
 
 
@@ -272,8 +273,8 @@ def list_callsigns(
             "callsign": row[0].normalized_callsign,
             "qrz_display_name": row[0].qrz_display_name,
             "qrz_location": row[0].qrz_location,
-            "first_heard": row[1].isoformat() if row[1] else None,
-            "last_heard": row[2].isoformat() if row[2] else None,
+            "first_heard": iso_utc(row[1]),
+            "last_heard": iso_utc(row[2]),
             "mention_count": row[3], "recording_count": row[4], "active_days": row[5],
             "confirmed_mentions": int(row[6] or 0),
             "has_attributed_transmissions": bool(row[7]),
@@ -312,12 +313,12 @@ def list_call_sign_mentions(
     else:
             statement = statement.where(CallsignMention.review_status != "rejected")
     if from_at:
-        statement = statement.where(CallsignMention.heard_at >= from_at)
+        statement = statement.where(CallsignMention.heard_at >= utc(from_at))
     if to_at:
-        if to_at.timetz().replace(tzinfo=None) == datetime.min.time():
-            statement = statement.where(CallsignMention.heard_at < to_at + timedelta(days=1))
+        if to_at.tzinfo is None and to_at.time() == datetime.min.time():
+            statement = statement.where(CallsignMention.heard_at < utc(to_at) + timedelta(days=1))
         else:
-            statement = statement.where(CallsignMention.heard_at <= to_at)
+            statement = statement.where(CallsignMention.heard_at <= utc(to_at))
     if audio_status:
         statement = statement.where(Recording.audio_status == audio_status)
     if cursor:
@@ -340,7 +341,7 @@ def list_call_sign_mentions(
         {
             "mention_id": mention.id, "recording_id": mention.recording_id,
             "transcript_id": mention.transcript_id, "segment_id": mention.segment_id,
-            "heard_at": mention.heard_at.isoformat() if mention.heard_at else None,
+            "heard_at": iso_utc(mention.heard_at),
             "start_offset": mention.start_offset, "end_offset": mention.end_offset,
             "timing_precision": mention.timing_precision,
             "raw_observed_value": mention.raw_observed_value,
@@ -420,7 +421,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
         evidence = json.loads(row[9] or "[]") if row[9] else []
         rows.append({
             "callsign": details.normalized_callsign,
-            "last_heard_at": row[2].isoformat() if row[2] else None,
+            "last_heard_at": iso_utc(row[2]),
             "heard_offset_seconds": row[8],
             "time_precision": "segment" if row[8] is not None else "recording",
             "observation_count": int(row[3]), "recording_count": int(row[4]),
@@ -501,8 +502,8 @@ def callsign_profile(session: Session, value: str) -> dict[str, object] | None:
         "callsign": normalized, "qrz_display_name": callsign.qrz_display_name,
         "qrz_location": callsign.qrz_location, "qrz_image_url": callsign.qrz_image_url,
         "qrz_profile_url": callsign.qrz_profile_url, "qrz_status": callsign.qrz_status,
-        "first_heard": rows[0].isoformat() if rows[0] else None,
-        "last_heard": rows[1].isoformat() if rows[1] else None,
+        "first_heard": iso_utc(rows[0]),
+        "last_heard": iso_utc(rows[1]),
         "total_mentions": rows[2], "unique_recordings": rows[3], "active_days": rows[4],
         "detected_mentions": counts.get("detected", 0), "confirmed_mentions": counts.get("confirmed", 0),
         "corrected_mentions": counts.get("corrected", 0), "rejected_mentions": counts.get("rejected", 0),
@@ -561,7 +562,7 @@ def review_mention(
     for edit in edits:
         if edit["mention"]["id"] == mention.id:
             edit["review_status"] = mention.review_status
-            edit["reviewed_at"] = mention.reviewed_at.isoformat()
+            edit["reviewed_at"] = iso_utc(mention.reviewed_at)
             edit["mention"]["reviewer_identity"] = mention.reviewer_identity
     if edits:
         mention.transcript.text_corrections_json = json.dumps(edits)

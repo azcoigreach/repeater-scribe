@@ -73,6 +73,7 @@ from asl_transcriber.qrz import QrzClient, QrzError
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.security import SecurityMiddleware, sse_connections
 from asl_transcriber.session_api import router as sessions_router
+from asl_transcriber.time_utils import iso_utc
 from asl_transcriber.topology import (
     TopologyService,
     ensure_topology_crawl,
@@ -1211,7 +1212,7 @@ def activity_events() -> dict[str, object]:
     active_runtime = current_runtime()
     items = [
         {
-            "timestamp": event.timestamp.isoformat(),
+            "timestamp": iso_utc(event.timestamp),
             "node_id": event.node_id,
             "event_type": event.event_type,
             "details": event.details,
@@ -1383,7 +1384,7 @@ def archive_recordings(
         "items": items,
         "next_cursor": next_cursor,
         "has_more": has_more,
-        "filters": {"q": q, "status": status, "audio_status": audio_status, "from": from_.isoformat() if from_ else None, "to": to.isoformat() if to else None, "callsign": callsign, "source_id": source_id, "tag": tag},
+        "filters": {"q": q, "status": status, "audio_status": audio_status, "from": iso_utc(from_), "to": iso_utc(to), "callsign": callsign, "source_id": source_id, "tag": tag},
     }
 
 
@@ -1528,7 +1529,7 @@ def _apply_mention_review(
         )
         return {"mention_id": mention.id, "canonical_callsign": mention.canonical_callsign,
                 "review_status": mention.review_status, "reviewer_identity": mention.reviewer_identity,
-                "reviewed_at": mention.reviewed_at.isoformat() if mention.reviewed_at else None}
+                "reviewed_at": iso_utc(mention.reviewed_at)}
 
 
 @app.patch("/api/v1/callsign-mentions/{mention_id}", dependencies=[Depends(require_api_operator)])
@@ -1651,7 +1652,7 @@ def last_heard_callsigns(
                 continue
             item: dict[str, object] = {
                 "callsign": callsign,
-                "last_heard_at": last_heard_at.isoformat() if last_heard_at else None,
+                "last_heard_at": iso_utc(last_heard_at),
                 "source_path": source_path,
             }
             if offset is not None:

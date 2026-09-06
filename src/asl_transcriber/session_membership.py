@@ -11,12 +11,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from asl_transcriber.models import RadioSession, Recording, SessionMarker, SessionRecording
+from asl_transcriber.time_utils import utc
 
 BATCH = 200
-
-
-def utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def included():

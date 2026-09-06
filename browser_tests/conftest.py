@@ -123,10 +123,10 @@ def browser():
 
 
 @pytest.fixture
-def page(browser, application):
+def page(browser, application, request):
     origin, _ = application
     context = browser.new_context(
-        ignore_https_errors=True, timezone_id="UTC", viewport={"width": 1440, "height": 1000}
+        ignore_https_errors=True, timezone_id=getattr(request, "param", "UTC"), locale="en-US", viewport={"width": 1440, "height": 1000}
     )
     context.add_cookies(
         [

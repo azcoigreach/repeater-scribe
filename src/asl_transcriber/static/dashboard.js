@@ -99,7 +99,7 @@ function renderJobs(items, databaseTotals = {}) {
   items.forEach(item => {
     const card = element('article', '', 'recording'); card.dataset.sourcePath = item.source_path;
     const meta = element('div', '', 'recording-meta');
-    meta.append(element('span', item.source_path, 'recording-path'), element('span', item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Timestamp unavailable', 'recording-date'), element('span', item.status, `status ${item.status}`));
+    meta.append(element('span', item.source_path, 'recording-path'), element('span', item.timestamp ? UITime.format(item.timestamp) : 'Timestamp unavailable', 'recording-date'), element('span', item.status, `status ${item.status}`));
     const play = actionButton('▶ Play audio', 'play-button'); const url = safeUrl(item.audio_url, true); play.disabled = !url; if (url) play.dataset.audioUrl = url;
     play.setAttribute('aria-label', `Play ${item.source_path}`); play.addEventListener('click', () => playAudio(play));
     const transcript = element('p', '', 'transcript');
@@ -170,7 +170,7 @@ async function loadActivity() {
   document.querySelector('#activity-count').textContent = data.total;
   if (data.total) {
     activity.replaceChildren(...data.items.slice(-12).reverse().map(item => {
-      const row = element('div', '', 'activity-item'); row.append(element('time', new Date(item.timestamp).toLocaleString()), element('strong', item.event_type)); if (item.details) row.append(element('span', item.details)); return row;
+      const row = element('div', '', 'activity-item'); row.append(element('time', UITime.format(item.timestamp)), element('strong', item.event_type)); if (item.details) row.append(element('span', item.details)); return row;
     }));
   }
 }
@@ -213,7 +213,7 @@ async function loadCallsigns() {
     const meter = element('div', '', 'confidence-meter', { role: 'meter', 'aria-label': 'Estimated callsign confidence', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': confidence }); const fill = element('span'); fill.style.width = `${confidence}%`; meter.append(fill);
     details.append(score, meter, element('p', `${item.observation_count ?? 1} observations across ${item.recording_count ?? 1} recordings${item.acoustic_quality_percent != null ? ` · Best audio ${item.acoustic_quality_percent}%` : ''}`, 'confidence-observations'));
     if (item.evidence?.length) { const evidence = element('details', '', 'confidence-evidence'); evidence.open = expandedEvidence.has(String(item.callsign)); const list = element('ul'); item.evidence.forEach(reason => list.append(element('li', reason))); evidence.append(element('summary', 'Why this score'), list); details.append(evidence); }
-    details.append(element('time', `Last heard ${item.last_heard_at ? new Date(item.last_heard_at).toLocaleString() : 'Time unavailable'}`));
+    details.append(element('time', `Last heard ${item.last_heard_at ? UITime.format(item.last_heard_at) : 'Time unavailable'}`));
     if (item.source_path) { const show = actionButton('Show transcript', 'callsign-evidence'); show.addEventListener('click', () => revealTranscript(item.source_path)); details.append(show); }
     card.append(photo, details); return card;
   }));
@@ -1000,13 +1000,13 @@ function renderTopologyDetails(node) {
     details.replaceChildren(element('p', 'That node is no longer present in the latest topology.', 'empty'));
     return;
   }
-  const connectedFor = node.connected_at ? formatAge((Date.now() - new Date(node.connected_at).getTime()) / 1000).replace(' ago', '') : '—';
+  const connectedFor = node.connected_at ? formatAge((Date.now() - UITime.instant(node.connected_at).getTime()) / 1000).replace(' ago', '') : '—';
   const coordinates = node.latitude !== null && node.latitude !== undefined && node.longitude !== null && node.longitude !== undefined
     ? `${node.latitude}, ${node.longitude}` : '—';
   const favorite = favoriteItems.find(item => String(item.target_identifier) === String(node.identifier));
   const canControl = String(node.identifier) !== controlledNodeId();
   const grid = element('dl', '', 'topology-detail-grid');
-  const entries = [['Status', node.keyed ? 'Keyed now' : node.connected ? `Connected · ${node.connection_state || 'established'}` : node.active ? 'Reporting active' : 'Inactive or unknown'], ['Frequency', node.frequency], ['Tone', node.tone], ['Location', node.location], ['Site', node.site_name], ['Affiliation', node.affiliation], ['Coordinates', coordinates], ['Link mode', node.mode], ['Direction', node.direction], ['Connected for', connectedFor], ['Keyups', node.keyup_count], ['TX time', node.total_tx_milliseconds === undefined ? '—' : formatDuration(node.total_tx_milliseconds)], ['Kerchunks', node.kerchunk_count], ['Last activity', node.last_activity_at ? new Date(node.last_activity_at).toLocaleString() : '—'], ['app_rpt', node.app_rpt_version]];
+  const entries = [['Status', node.keyed ? 'Keyed now' : node.connected ? `Connected · ${node.connection_state || 'established'}` : node.active ? 'Reporting active' : 'Inactive or unknown'], ['Frequency', node.frequency], ['Tone', node.tone], ['Location', node.location], ['Site', node.site_name], ['Affiliation', node.affiliation], ['Coordinates', coordinates], ['Link mode', node.mode], ['Direction', node.direction], ['Connected for', connectedFor], ['Keyups', node.keyup_count], ['TX time', node.total_tx_milliseconds === undefined ? '—' : formatDuration(node.total_tx_milliseconds)], ['Kerchunks', node.kerchunk_count], ['Last activity', node.last_activity_at ? UITime.format(node.last_activity_at) : '—'], ['app_rpt', node.app_rpt_version]];
   entries.forEach(([label, value]) => grid.append(element('dt', label), element('dd', detailValue(value))));
   const actions = element('div', '', 'topology-detail-actions');
   if (canControl) actions.append(actionButton(node.connected ? 'Disconnect' : 'Connect', 'control-button topology-node-control', { command: node.connected ? 'Disconnect node' : 'Connect node', target: node.identifier }));

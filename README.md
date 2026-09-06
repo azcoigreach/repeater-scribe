@@ -20,6 +20,12 @@ workflows, local transcription and the fail-closed internet deployment profile. 
 running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
 
+Display times and calendar inputs use your browser’s local timezone (for Arizona,
+`America/Phoenix`, MST year-round). Each workspace identifies that timezone.
+Archive links store UTC instants and restore them in the viewing browser’s local
+timezone. Callsign date filters cover the selected local days. The application
+continues to store UTC; no container timezone change or data migration is needed.
+
 ## Events (0.9.0)
 
 Choose **Start Event** to run Groovy Late Shift live, or filter Archive by source
@@ -407,7 +413,7 @@ Missing source audio preserves history and disables playback.
 See the [callsign API contract](docs/callsign-api.md),
 [review preservation rules](docs/architecture.md#reviewed-evidence-lifecycle), and
 [migration and verification guide](docs/verification-0.8.md). The package version
-is 0.9.0; the changelog remains under Unreleased until publication.
+is 0.9.1; the changelog remains under Unreleased until publication.
 
 ## API
 

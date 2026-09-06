@@ -18,6 +18,7 @@ from asl_transcriber.node_control import (
     parse_alinks,
     parse_xstat_snapshot,
 )
+from asl_transcriber.time_utils import iso_utc
 
 REFRESH_EVENTS = {"RPT_ALINKS", "NODECONN", "NODEDISCONN", "HANGUP", "FULLYBOOTED"}
 TransitionCallback = Callable[[RemoteKeyTransition], Awaitable[None] | None]
@@ -354,7 +355,7 @@ class NodeStateService:
                 "event": transition.event,
                 "home_node": transition.home_node,
                 "remote_identifier": transition.remote_identifier,
-                "timestamp": transition.timestamp.isoformat(),
+                "timestamp": iso_utc(transition.timestamp),
                 "duration_seconds": transition.duration_seconds,
             }
         )
@@ -387,8 +388,8 @@ class NodeStateService:
             "keyed": link.keyed,
             "seconds_since_keyed": link.seconds_since_keyed,
             "seconds_since_unkeyed": link.seconds_since_unkeyed,
-            "connected_at": link.connected_at.isoformat(),
-            "updated_at": link.updated_at.isoformat(),
+            "connected_at": iso_utc(link.connected_at),
+            "updated_at": iso_utc(link.updated_at),
             "stale": link.stale,
             "source": link.source,
         }
@@ -427,7 +428,7 @@ class NodeStateService:
             "ami_state": state.ami_state,
             "ami_connected": state.ami_state == AmiConnectionState.AUTHENTICATED.value,
             "stale": state.stale,
-            "updated_at": state.updated_at.isoformat(),
+            "updated_at": iso_utc(state.updated_at),
             "keyed": bool(state.keyed_links),
             "collision": state.collision,
             "connected_nodes": connected_nodes,

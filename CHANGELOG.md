@@ -32,6 +32,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- In 0.9.1, display UTC recording, callsign, activity and event timestamps in the
+  browser’s local timezone consistently. Label the UI timezone, convert calendar
+  inputs to UTC, preserve instants in Archive/Event links, and apply Callsign
+  date filters to local days. Restore explicit UTC offsets on SQLite API output
+  and normalize offset-bearing search bounds before database queries.
+
 - Let operators select missed or incorrect callsign text in saved transcripts and
   replace it from the dashboard or recording details, preserving raw text and
   recording a reviewed callsign mention. Reject stale edits and retain correction
