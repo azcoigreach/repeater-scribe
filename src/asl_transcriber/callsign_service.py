@@ -142,7 +142,7 @@ def persist_transcript_details(
         if review is not None:
             for field_name in (
                 "callsign_id", "canonical_callsign", "review_status", "reviewer_identity",
-                "reviewed_at", "heard_at", "timing_precision", "confidence",
+                "reviewed_at", "start_offset", "end_offset", "heard_at", "timing_precision", "confidence",
                 "acoustic_confidence", "recognition_confidence", "recognition_method",
                 "evidence_json", "qrz_validation_status", "created_at", "updated_at",
             ):
@@ -155,6 +155,7 @@ def persist_transcript_details(
                 recording_id=recording.id, raw_observed_value=review["raw_observed_value"],
                 canonical_callsign=review["canonical_callsign"], review_status=review["review_status"],
                 reviewer_identity=review["reviewer_identity"], reviewed_at=review["reviewed_at"],
+                start_offset=review["start_offset"], end_offset=review["end_offset"],
                 heard_at=review["heard_at"], timing_precision=review["timing_precision"],
                 confidence=review["confidence"], acoustic_confidence=review["acoustic_confidence"],
                 recognition_confidence=review["recognition_confidence"],
@@ -396,6 +397,10 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
         CallsignMention.review_status != "rejected",
         CallsignMention.is_current.is_(True),
         CallsignMention.transcript_id == Recording.current_transcript_id,
+        (Callsign.qrz_status.is_(None))
+        | (Callsign.qrz_status != "not_found")
+        | (Callsign.qrz_cache_expires_at.is_(None))
+        | (Callsign.qrz_cache_expires_at < datetime.now(UTC)),
     ).group_by(Callsign.id).order_by(
         func.max(CallsignMention.heard_at).desc(), Callsign.normalized_callsign.desc()
     ).limit(min(max(limit, 1), 1000))
