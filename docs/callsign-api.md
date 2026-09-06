@@ -1,6 +1,6 @@
 # Callsign API (Unreleased)
 
-The package remains 0.7.0 until release. The additive callsign APIs below accompany
+The app and package version is 0.8.0. The additive callsign APIs below accompany
 migration head `current_callsign_mentions`. Dashboard recordings and Archive
 recording responses retain their existing fields.
 

@@ -13,8 +13,9 @@ It runs alongside an ASL3 node rather than replacing it. The recording archive
 is always mounted read-only. Node commands are optional and travel through a
 separately enabled Asterisk Manager Interface (AMI) connection.
 
-Version `0.7.0` keeps transcription local while adding a fail-closed internet
-deployment profile: audio transcription uses `faster-whisper` on the
+Version `0.8.0` adds durable callsign history while keeping transcription local
+and supporting the fail-closed internet deployment profile. Audio transcription
+uses `faster-whisper` on the
 machine running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
 
@@ -352,7 +353,7 @@ their panel is focused again.
   QRZ.com. QRZ credentials and session keys remain server-side; profile images are
   loaded in the browser from the HTTPS URL returned by QRZ.
 - No OpenAI token is read and no remote transcription request is made in version
-  `0.7.0`.
+  `0.8.0`.
 
 ## Security and internet access
 
@@ -392,7 +393,7 @@ Missing source audio preserves history and disables playback.
 See the [callsign API contract](docs/callsign-api.md),
 [review preservation rules](docs/architecture.md#reviewed-evidence-lifecycle), and
 [migration and verification guide](docs/verification-0.8.md). The package version
-remains 0.7.0 pending release.
+is 0.8.0; the changelog remains under Unreleased until publication.
 
 ## API
 
