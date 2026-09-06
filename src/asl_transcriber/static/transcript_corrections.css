@@ -1,0 +1,10 @@
+.callsign-correction-dialog{box-sizing:border-box;width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;border:1px solid var(--line,#777);border-radius:8px;padding:24px;background:var(--panel,#fff);color:var(--ink,#222)}
+.callsign-correction-dialog::backdrop{background:#0008}
+.callsign-correction-dialog form{display:grid;gap:16px;margin:0}
+.callsign-correction-dialog h2,.callsign-correction-dialog p{margin:0;overflow-wrap:anywhere}
+.callsign-correction-dialog label{display:grid;gap:6px}
+.callsign-correction-dialog textarea,.callsign-correction-dialog input{box-sizing:border-box;width:100%;padding:10px;border:1px solid var(--line,#777);border-radius:4px;background:var(--paper,#fff);color:var(--ink,#222);font:inherit}
+.callsign-correction-dialog textarea{resize:vertical;min-height:100px}
+.callsign-correction-dialog input{text-transform:uppercase}
+.correction-actions{display:flex;flex-wrap:wrap;gap:12px}
+.callsign-correction-button{margin:8px 8px 8px 0}

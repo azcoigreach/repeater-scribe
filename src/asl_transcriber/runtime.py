@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,7 +20,9 @@ from asl_transcriber.ingestion.service import ArchiveIngestionService
 from asl_transcriber.models import IngestionJob as DbIngestionJob
 from asl_transcriber.models import Recording, Transcript
 from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
-from asl_transcriber.workers.processor import ProcessingResult, ProcessingWorker
+from asl_transcriber.workers.processor import ProcessingResult
+
+logger = logging.getLogger(__name__)
 
 
 class ArchiveRuntime:
@@ -60,6 +63,7 @@ class ArchiveRuntime:
         ]
         self.results: dict[str, ProcessingResult] = {}
         self.live_results: dict[str, ProcessingResult] = {}
+        self._retry_jobs: set[str] = set()
         self._subscribers: set[Queue[dict[str, object]]] = set()
         self._subscriber_lock = RLock()
         self._restore_state()
@@ -184,10 +188,26 @@ class ArchiveRuntime:
         transcribe: Callable[[str], TranscriptResult],
         *,
         limit: int | None = None,
+        job_id: str | None = None,
+        recovery_transcribe: Callable[[str], TranscriptResult] | None = None,
     ) -> list[ProcessingResult]:
         def process(job: IngestionJob) -> ProcessingResult:
             source = self._resolve_source(job.source_path, job.archive_root)
-            transcript = transcribe(str(source))
+            previous = self.results.get(job.id) or self.live_results.get(job.source_path)
+            decoder = (
+                recovery_transcribe
+                if job.id in self._retry_jobs and recovery_transcribe is not None
+                else transcribe
+            )
+            transcript = decoder(str(source))
+            if self._lost_transcript_text(previous, transcript):
+                if recovery_transcribe is not None and decoder is not recovery_transcribe:
+                    transcript = recovery_transcribe(str(source))
+                if self._lost_transcript_text(previous, transcript):
+                    raise ValueError(
+                        "The final pass returned much less text than the previous transcript. "
+                        "Previous text retained; use Re-transcribe to try again."
+                    )
             return ProcessingResult(
                 source_path=job.source_path,
                 status="completed",
@@ -200,23 +220,82 @@ class ArchiveRuntime:
             )
 
         results: list[ProcessingResult] = []
-        pending_jobs = [job for job in self.job_store.list() if job.status == JobState.PENDING]
+        pending_jobs = [
+            job for job in self.job_store.list()
+            if job.status == JobState.PENDING and (job_id is None or job.id == job_id)
+        ]
         if limit is not None:
             pending_jobs = pending_jobs[: max(0, limit)]
         for job in pending_jobs:
-            job.status = JobState.PROCESSING
-            job.touch()
+            with self._scan_lock:
+                if job.status != JobState.PENDING:
+                    continue
+                job.status = JobState.PROCESSING
+                job.touch()
+                self._persist_job_state(job)
             self._publish(job)
-            def process_current(_source_path: str, current_job: IngestionJob = job) -> ProcessingResult:
-                return process(current_job)
-
-            worker = ProcessingWorker(job_store=self.job_store, process_func=process_current)
-            result = worker.process_job(job.id)
-            self.results[job.id] = result
-            self._persist_result(job, result)
+            try:
+                result = process(job)
+                with self._scan_lock:
+                    job.status = JobState.COMPLETED
+                    job.last_error = None
+                    job.touch()
+                    self._persist_result(job, result)
+                    self.results[job.id] = result
+                    self.clear_live_result(job.source_path)
+                    self._retry_jobs.discard(job.id)
+            except Exception as error:
+                logger.exception("Transcription failed for job %s", job.id)
+                with self._scan_lock:
+                    self.job_store.mark_failed(job.id, str(error))
+                    self._persist_job_state(job)
+                    self._retry_jobs.discard(job.id)
+                self._publish(job)
+                continue
             self._publish(job, result)
             results.append(result)
         return results
+
+    @staticmethod
+    def _lost_transcript_text(
+        previous: ProcessingResult | None, current: TranscriptResult
+    ) -> bool:
+        """Flag empty replacements or a severe collapse, allowing normal revisions."""
+        before = len(previous.display_text.split()) if previous else 0
+        after = len(current.display_text.split())
+        return (before > 0 and after == 0) or (before >= 10 and after * 4 < before)
+
+    def retry(self, job_id: str) -> IngestionJob:
+        with self._scan_lock:
+            job = self.job_store.get(job_id)
+            if job.status in {JobState.PENDING, JobState.PROCESSING}:
+                raise ValueError("This recording is already queued or processing")
+            self._resolve_source(job.source_path, job.archive_root)
+            job.status = JobState.PENDING
+            job.last_error = None
+            job.dead_letter = False
+            job.retry_at = None
+            job.touch()
+            self._persist_job_state(job)
+            self._retry_jobs.add(job.id)
+            self._publish(job)
+            return job
+
+    def _persist_job_state(self, job: IngestionJob) -> None:
+        if not self._database_ready:
+            return
+        with self.session_factory() as session:
+            stored = session.get(DbIngestionJob, job.id)
+            if stored is None:
+                return
+            stored.status = job.status.value
+            stored.attempt_count = job.attempt_count
+            stored.last_error = job.last_error
+            stored.dead_letter = job.dead_letter
+            stored.retry_at = job.retry_at
+            if stored.recording is not None:
+                stored.recording.status = job.status.value
+            session.commit()
 
     def subscribe(self) -> Queue[dict[str, object]]:
         subscriber: Queue[dict[str, object]] = Queue(maxsize=100)
@@ -231,26 +310,32 @@ class ArchiveRuntime:
     def set_live_result(
         self, source_path: str, transcript: TranscriptResult, *, display_text: str | None = None
     ) -> None:
-        result = ProcessingResult(
-            source_path=source_path,
-            status="live",
-            raw_text=transcript.raw_text,
-            display_text=display_text if display_text is not None else transcript.display_text,
-            language=transcript.language,
-            confidence=transcript.confidence,
-            segments=transcript.segments,
-            callsign_mentions=transcript.callsign_mentions,
-        )
-        self.live_results[source_path] = result
-        self._broadcast(
-            {
-                "id": None,
-                "source_path": source_path,
-                "status": "live",
-                "provisional": True,
-                "transcript": result.display_text,
-            }
-        )
+        with self._scan_lock:
+            if any(
+                job.source_path == source_path and job.status == JobState.COMPLETED
+                for job in self.jobs()
+            ):
+                return
+            result = ProcessingResult(
+                source_path=source_path,
+                status="live",
+                raw_text=transcript.raw_text,
+                display_text=display_text if display_text is not None else transcript.display_text,
+                language=transcript.language,
+                confidence=transcript.confidence,
+                segments=transcript.segments,
+                callsign_mentions=transcript.callsign_mentions,
+            )
+            self.live_results[source_path] = result
+            self._broadcast(
+                {
+                    "id": None,
+                    "source_path": source_path,
+                    "status": "live",
+                    "provisional": True,
+                    "transcript": result.display_text,
+                }
+            )
 
     def clear_live_result(self, source_path: str) -> None:
         self.live_results.pop(source_path, None)
@@ -266,6 +351,7 @@ class ArchiveRuntime:
         }
         if result is not None:
             payload["transcript"] = result.display_text
+        payload["last_error"] = job.last_error
         return payload
 
     def _publish(self, job: IngestionJob, result: ProcessingResult | None = None) -> None:
@@ -355,6 +441,9 @@ class ArchiveRuntime:
                     id=stored.id,
                 )
                 status = JobState(stored.status)
+                if status == JobState.PROCESSING:
+                    status = JobState.PENDING
+                    stored.status = status.value
                 if status == JobState.COMPLETED and stored.transcript is not None:
                     source = self._resolve_source(stored.source_path, stored.archive_root)
                     processed_at = stored.transcript.updated_at or stored.transcript.created_at
@@ -364,10 +453,14 @@ class ArchiveRuntime:
                         status = JobState.PENDING
                         stored.status = status.value
                 job.status = status
+                if stored.recording is not None:
+                    stored.recording.status = status.value
                 job.attempt_count = stored.attempt_count
                 job.last_error = stored.last_error
+                job.dead_letter = stored.dead_letter
+                job.retry_at = stored.retry_at
                 self.job_store.add(job)
-                if stored.transcript is not None and status == JobState.COMPLETED:
+                if stored.transcript is not None:
                     self.results[job.id] = ProcessingResult(
                         source_path=job.source_path,
                         status="completed",
@@ -426,6 +519,16 @@ class ArchiveRuntime:
             )
             persist_transcript_details(session, transcript, stored_job.recording, result)
             session.commit()
+            result.display_text = transcript.display_text
+
+    def refresh_transcript(self, job_id: str) -> None:
+        """Refresh the dashboard cache after a committed operator text edit."""
+        with self._scan_lock, self.session_factory() as session:
+            transcript = session.scalar(select(Transcript).where(Transcript.job_id == job_id))
+            if transcript is None or job_id not in self.results:
+                return
+            self.results[job_id].display_text = transcript.display_text
+            self._publish(self.job_store.get(job_id), self.results[job_id])
 
     @staticmethod
     def _deserialize_callsign_mentions(value: str | None) -> list[TranscriptCallsignMention]:

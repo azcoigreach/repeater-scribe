@@ -82,6 +82,7 @@ function updateActivityState() {
 }
 
 function renderJobs(items, databaseTotals = {}) {
+  if (window.TranscriptCorrections?.busy()) return;
   const counts = items.reduce((result, item) => {
     result[item.status] = (result[item.status] || 0) + 1;
     return result;
@@ -104,7 +105,32 @@ function renderJobs(items, databaseTotals = {}) {
     const transcript = element('p', '', 'transcript');
     if (item.transcript) { transcript.append(linkedTranscript(item.transcript.display_text, item.callsigns)); if (item.transcript.provisional) transcript.append(element('span', ' (provisional)', 'muted-text')); }
     else transcript.append(element('span', 'Awaiting local transcription', 'muted-text'));
-    card.append(meta, play, transcript); recordings.append(card);
+    card.append(meta, play);
+    if (item.id && ['operator', 'admin'].includes(document.body.dataset.role)) {
+      const retry = actionButton('Re-transcribe', 'play-button');
+      retry.disabled = ['pending', 'processing'].includes(item.status);
+      retry.addEventListener('click', async () => {
+        retry.disabled = true;
+        retry.textContent = 'Queuing…';
+        try {
+          const response = await authenticatedFetch(`/ui/ingestion/jobs/${encodeURIComponent(item.id)}/retry`, { method: 'POST' });
+          if (!response.ok) { const error = await response.json(); throw new Error(error.detail || 'Could not queue transcription.'); }
+          await loadJobs();
+        } catch (error) {
+          retry.disabled = false;
+          retry.textContent = 'Re-transcribe';
+          feedback.textContent = error.message;
+        }
+      });
+      card.append(retry);
+    }
+    const feedback = element('p', item.last_error || '', 'muted-text', { role: 'status' });
+    card.append(transcript, feedback);
+    if (item.id && item.transcript && !item.transcript.provisional && !['pending', 'processing'].includes(item.status) && ['operator', 'admin'].includes(document.body.dataset.role)) {
+      TranscriptCorrections.attach(card, { jobId: item.id, text: item.transcript.display_text,
+        sources: [{ node: transcript, offset: 0 }], onSaved: async () => { await loadCallsigns(); await loadJobs(); } });
+    }
+    recordings.append(card);
   });
 }
 

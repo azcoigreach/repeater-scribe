@@ -16,6 +16,18 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Let operators select missed or incorrect callsign text in saved transcripts and
+  replace it from the dashboard or recording details, preserving raw text and
+  recording a reviewed callsign mention. Reject stale edits and retain correction
+  history across re-transcription; replay only matching text revisions.
+
+- In 0.8.1, keep the live preview visible through final processing and retain it
+  when the final pass is empty or loses most of the words. Attempt a recovery
+  decode before rejecting a collapsed result.
+- Add operator Re-transcribe actions in the transcription log and archive details,
+  including failure feedback, duplicate-job protection, and preservation of saved
+  transcripts when retries fail. Recover interrupted jobs on restart.
+
 - Align the app and package version at 0.8.0 following callsign-intelligence
   acceptance.
 

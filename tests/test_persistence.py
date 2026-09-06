@@ -84,7 +84,7 @@ def test_runtime_requeues_recording_that_grew_after_transcription(tmp_path: Path
     second = ArchiveRuntime([archive.parent], session_factory=sessions)
 
     assert second.jobs()[0].status.value == "pending"
-    assert second.results == {}
+    assert second.results[second.jobs()[0].id].display_text == "partial"
     second.process_pending(
         lambda _: TranscriptResult(raw_text="complete", display_text="complete", language="en")
     )
