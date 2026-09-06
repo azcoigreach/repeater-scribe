@@ -11,6 +11,7 @@ from time import monotonic
 from sqlalchemy import func, inspect, select
 
 from asl_transcriber.archive import get_or_create_recording, refresh_audio
+from asl_transcriber.callsign_service import persist_transcript_details
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.ingestion.activity import ActivityLogEvent, ActivityLogParser
 from asl_transcriber.ingestion.jobs import IngestionJob, JobState, JobStore
@@ -194,6 +195,7 @@ class ArchiveRuntime:
                 display_text=transcript.display_text,
                 language=transcript.language,
                 confidence=transcript.confidence,
+                segments=transcript.segments,
                 callsign_mentions=transcript.callsign_mentions,
             )
 
@@ -236,6 +238,7 @@ class ArchiveRuntime:
             display_text=display_text if display_text is not None else transcript.display_text,
             language=transcript.language,
             confidence=transcript.confidence,
+            segments=transcript.segments,
             callsign_mentions=transcript.callsign_mentions,
         )
         self.live_results[source_path] = result
@@ -421,6 +424,7 @@ class ArchiveRuntime:
                     for mention in (result.callsign_mentions or [])
                 ]
             )
+            persist_transcript_details(session, transcript, stored_job.recording, result)
             session.commit()
 
     @staticmethod

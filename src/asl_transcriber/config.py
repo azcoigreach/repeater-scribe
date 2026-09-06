@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     qrz_timeout_seconds: float = Field(default=10.0, gt=0)
     qrz_cache_seconds: float = Field(default=86400.0, ge=60)
     qrz_last_heard_limit: int = Field(default=25, ge=1, le=100)
+    qrz_last_heard_refresh_limit: int = Field(default=10, ge=1, le=25)
     worker_concurrency: int = Field(default=1)
     archive_poll_seconds: float = Field(default=5.0)
     auto_process: bool = Field(default=False)

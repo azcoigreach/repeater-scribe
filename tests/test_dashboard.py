@@ -66,12 +66,12 @@ def test_dashboard_has_dockable_last_heard_callsign_window() -> None:
     assert "/api/v1/callsigns/last-heard" in script
     assert "callsigns: 'Last heard callsigns'" in script
     assert "Location and primary photos supplied by QRZ.com." in script
-    assert 'class="transcript-callsign"' in script
+    assert "element('a', part, 'transcript-callsign')" in script
     assert "confirmedCallsigns" in script
     assert "unconfirmed transcript fragment" in script
     assert "superseded by later audio" in script
-    assert 'class="callsign-confidence"' in script
-    assert 'class="confidence-meter"' in script
+    assert "element('div', '', 'callsign-confidence')" in script
+    assert "element('div', '', 'confidence-meter'" in script
     assert "Why this score" in script
     assert "expandedEvidence" in script
     assert ".confidence-evidence[open]" in script

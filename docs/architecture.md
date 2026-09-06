@@ -27,6 +27,8 @@ the transcription boundary:
 - `DatabaseCallsignProvider` and `CallsignResolver` for local post-decode correction
 - `ArchiveRuntime` and `ProcessingWorker` for job state and transcript persistence
 - SQLite-backed persistence with Alembic migrations
+- `Callsign`, `TranscriptSegment`, and `CallsignMention` normalized history
+   entities maintained by the callsign service
 - `AmiClient` for authenticated AMI status and constrained `rpt fun` control
 
 No cloud transcription adapter is currently implemented. The engine interface
@@ -79,6 +81,23 @@ job list or poll on the live dashboard interval. It applies SQLite FTS5 and
 cursor pagination for historical searches, and can present transcript evidence
 when retained source audio is unavailable.
 
+## Callsign intelligence
+
+A callsign mention is a callsign decoded or reconstructed in transcript audio;
+it is not proof that the station transmitted. Explicit attribution is separate
+and is counted only from `Transmission.operator_callsign` rows with a meaningful
+attribution level. QRZ validation confirms a public callsign record exists; it
+is not human confirmation. Authorized operators can confirm, reject, or correct
+mentions while the original observed value and evidence remain unchanged.
+
+Migration `callsign_intelligence` backfills valid legacy mention JSON into
+indexed normalized rows. Malformed or invalid entries are logged and skipped;
+the compatibility JSON remains available. `Recording.current_transcript_id`
+selects the transcript whose job ID matches the recording ID, falling back to
+the most recently updated transcript and then UUID for deterministic ties.
+Normal history totals use only that current transcript. Segments and mentions
+remain when source audio becomes missing or expired.
+
 ## Runtime lifecycle
 
 1. The application starts up and validates configuration.
@@ -95,3 +114,54 @@ when retained source audio is unavailable.
 
 The complete transcription contract and configuration are documented in
 [AI transcription](transcription.md).
+
+## Reviewed evidence lifecycle
+
+A recording owns transcription results; its `current_transcript_id` selects the
+current result. The migration backfill uses the legacy selection rule described
+above; a newly persisted final result becomes current. A transcript owns ordered
+`TranscriptSegment` rows and `CallsignMention` rows. Each mention points to a
+canonical `Callsign`, its recording, transcript, and optionally an overlapping
+segment. Segment boundaries are not word alignment. `heard_at` uses recording
+start plus the mention's end offset; playback starts at its start offset.
+
+When details of the same transcript are replaced, detected mentions are replaced
+by the new output. Confirmed, corrected and rejected rows are matched once each
+by original observed value and start/end offsets within 0.25 seconds. Matched
+reviews retain UUID, reviewer, review/create/update timestamps, canonical
+assignment, original evidence, recognition method, confidence, timing precision,
+and **both original offsets together with original heard_at**. A replacement
+segment association can change; its excerpt and raw segment score describe the
+current segment, while saved review evidence remains original. Corrected mentions
+retain the QRZ state for their canonical assignment. Later canonical QRZ refreshes
+update that validation state independently of human review.
+
+Unmatched reviewed rows retain their original evidence and timing as
+`is_current=false`, with no replacement segment. Repeated empty retranscription
+does not duplicate or delete them. Ordinary current APIs exclude those rows:
+directory, profile totals/review counts, Last Heard, Archive filters/serialized
+mentions and mention history. Historical review retrieval/management is not a
+supported HTTP or UI feature; rows remain in database backups. Selecting a new
+transcript also excludes all mentions of the previous transcript from current
+queries; review matching is scoped to replacement of the same transcript.
+
+Source-audio rotation and ordinary retention preserve catalog/evidence and
+change availability. An intentional catalog purge is different: it deletes the
+selected recordings and dependent transcription/mention data, including retained
+reviews. No public catalog-purge endpoint or historical-review management UI
+is provided; administrative deletion must explicitly handle dependent records.
+Back up the catalog before a deliberate purge. The application never
+requires deleting the read-only source archive to purge its derived catalog.
+
+QRZ public-record validation and operator confirmation are independent. A mention
+can be human-confirmed while QRZ-negative. Only explicit transmission attribution
+contributes transmission counts/airtime; mention review never writes that
+attribution. See the [callsign API contract](callsign-api.md) for cache states,
+expiration, lookup limits, failure behavior, permissions and write examples.
+
+Legacy Archive recordings without a selected `current_transcript_id` can still
+serialize their compatibility mention JSON when normalized mentions are absent.
+Once a current transcript is selected, its normalized mentions are authoritative,
+including an empty result; stale JSON must not revive detections. Archive list
+queries eagerly load transcripts, mentions, segments and ingestion state in
+batches, avoiding additional queries per serialized recording.

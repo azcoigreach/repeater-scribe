@@ -6,6 +6,43 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Normalized callsign, transcript segment, and callsign mention persistence with
+  deterministic current-transcript selection and indexed history queries.
+- Viewer-protected callsign directory, profile, and mention-history workspace
+  routes.
+- Database-backed Last Heard results, operator review actions, explicit
+  transmission attribution statistics, QRZ snapshots, and segment-aware audio
+  seeking.
+
+### Fixed
+
+- Restore successful callsign-history responses after error-handling edits; keep
+  invalid callsign/cursor errors distinct without exposing exception details.
+- Preserve legacy Archive mentions only when no current normalized transcript is
+  selected, and batch transcript/mention/segment loading for Archive pages.
+- Keep QRZ configuration status stable when a request stops lookups after failure.
+
+- Preserve reviewed mention identity, evidence, confidence and original offsets
+  together with heard time across same-transcript retranscription; retain
+  unmatched reviews as non-current evidence without duplication.
+- Traverse dated/undated callsign pages and skip cached QRZ-negative entries
+  before bounding Last Heard candidates.
+- Complete directory/profile/history evidence presentation, show unknown
+  confidence honestly, and label raw Whisper log probabilities separately.
+- Replace dynamic dashboard HTML-string rendering with DOM nodes, including
+  topology and favorites; validate profile/image URLs before assignment.
+- Bound history excerpts and include meaningful before/after review audit data.
+
+### Verification
+
+- Add permanent review/cache/pagination regressions, real-authorization callsign
+  route tests, and Chromium acceptance tests using migrated temporary SQLite and
+  generated audio. See `docs/verification-0.8.md` for commands and results.
+
+## [0.7.0] - 2026-09-01
+
+### Added
+
 - A database-backed Radio Archive workspace with SQLite FTS5 transcript search,
   status/date/callsign filters, cursor pagination, recording details, saved
   callsign evidence, and retained-audio playback.

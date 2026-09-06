@@ -22,13 +22,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          python -m pip install -e '.[dev,browser]'
+          python -m playwright install --with-deps chromium
       - name: Lint
         run: ruff check .
       - name: Type check
         run: mypy src
       - name: Test
-        run: pytest -q
+        run: pytest -q -W error::DeprecationWarning
+      - name: Browser acceptance
+        run: pytest browser_tests -q -W error::DeprecationWarning
       - name: Audit Python dependencies
         uses: pypa/gh-action-pip-audit@v1.1.0
         with:

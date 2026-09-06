@@ -123,3 +123,21 @@ def test_later_confirmed_extension_supersedes_valid_qrz_prefix(monkeypatch) -> N
 
     assert response["superseded"] == 1
     assert [item["callsign"] for item in response["items"]] == ["KM7GHS"]
+
+
+def test_runtime_qrz_failure_redacts_upstream_exception(monkeypatch):
+    from asl_transcriber.qrz import QrzError
+
+    class UnavailableQrz(FakeQrzClient):
+        def lookup(self, callsign):
+            raise QrzError("session-key-marker /private/archive credential-marker")
+
+    job = SimpleNamespace(id="redaction", source_path="2026083012304500.wav")
+    runtime = SimpleNamespace(live_results={}, results={job.id: SimpleNamespace(display_text="KM7GHS")}, jobs=lambda: [job])
+    monkeypatch.setattr("asl_transcriber.main.current_runtime", lambda: runtime)
+    monkeypatch.setattr("asl_transcriber.main.current_qrz_client", lambda: UnavailableQrz())
+    response = last_heard_callsigns()
+    assert response["configured"] is True
+    assert response["items"][0]["error"] == "Callsign lookup temporarily unavailable"
+    for private in ("session-key-marker", "/private/archive", "credential-marker"):
+        assert private not in str(response)

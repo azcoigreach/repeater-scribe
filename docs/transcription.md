@@ -66,7 +66,10 @@ to end with:
 
 This is a new full-file decode, not a continuation of the provisional text.
 The final raw model text and callsign-corrected display text replace the live
-result and are persisted in SQLite.
+result and are persisted in SQLite. Each final result also persists timestamped
+segments and normalized callsign mentions transactionally. Segment confidence
+is Whisper's `avg_logprob`; it is not a percentage. Legacy transcripts without
+segments continue to use their full-text and compatibility JSON representations.
 
 ## Deployed 12 GB GPU profile
 
@@ -138,6 +141,18 @@ stored as `display_text`. This makes every correction reviewable.
 refreshed. Add stable club and operator calls to `ASLT_KNOWN_CALLSIGNS`; active
 network calls are discovered automatically.
 
+Normalized mentions retain the raw observed callsign, canonical callsign,
+offsets, timing precision, acoustic and recognition confidence, recognition
+method, evidence, QRZ validation state, and review state. Review states are
+`detected`, `confirmed`, `corrected`, and `rejected`. Confirmation changes the
+mention review state only; it never infers transmitter identity or creates a
+`Transmission` operator attribution.
+
+The Callsign History workspace aggregates only mentions attached to the current
+transcript for each recording. It retains historical metadata when audio is
+missing or expired, and disables playback while leaving timestamps and recording
+links visible.
+
 The dashboard renders recognized callsigns as links inside each display
 transcript. Selecting one opens and highlights its last-heard QRZ card. Each
 card has a **Show transcript** action that returns to and highlights the source
@@ -175,6 +190,7 @@ These are the environment variables read by the current transcription path:
 | `ASLT_CALLSIGN_HOTWORD_LIMIT` | `0` | Number of ranked dynamic calls added to final-pass hotwords |
 | `ASLT_CALLSIGN_MAX_CANDIDATES` | `250` | Maximum post-decode fuzzy candidates |
 | `ASLT_CALLSIGN_CONTEXT_CACHE_SECONDS` | `30` | Dynamic candidate cache lifetime |
+| `ASLT_QRZ_LAST_HEARD_REFRESH_LIMIT` | `10` | Maximum uncached QRZ lookups during one Last Heard refresh |
 | `ASLT_AUTO_PROCESS` | `true` | Automatically runs the final pass for pending stable files |
 | `ASLT_ARCHIVE_POLL_SECONDS` | `1` | Interval for archive discovery and final-job processing |
 | `ASLT_FILE_STABILIZATION_SECONDS` | `5` | Required unchanged interval before final processing |
@@ -237,6 +253,27 @@ show an improvement.
   callsign structure cannot be recovered reliably from text alone. Add repeat
   stations to `ASLT_KNOWN_CALLSIGNS` and retain representative audio for corpus
   testing rather than enabling broad speculative substitutions.
-- Segment timestamps and correction evidence exist in the in-process result but
-  are not currently persisted in the transcript table.
+- Final segment timestamps, raw Whisper `avg_logprob`, and callsign evidence are
+  persisted in normalized segment/mention rows. Timing is at segment boundaries,
+  not precise word alignment. Provisional output remains transient.
 - No remote or OpenAI transcription backend is implemented yet.
+
+## Persisted review evidence
+
+Final results select the recording's current transcript and persist ordered
+segments plus canonical callsign mentions. Normalized overall, acoustic and
+recognition confidence remain distinct from raw Whisper segment `avg_logprob`;
+negative log probabilities are never percentages. Unknown confidence is shown as
+unavailable. Legacy recordings without segments retain full-text display.
+
+Retranscribing details of the same transcript preserves matched human reviews
+within the 0.25-second matching tolerance, including original offsets and heard
+time together. Unmatched reviews become non-current evidence, excluded from
+normal history but retained in the database; repeated empty output preserves
+them. New detected evidence replaces ordinary unreviewed detections. See
+[reviewed evidence lifecycle](architecture.md#reviewed-evidence-lifecycle) for
+identity, evidence, current transcript and purge rules.
+
+QRZ validation confirms a directory entry exists, not a transmitting operator.
+Human confirmation does not establish transmission attribution either. Missing
+audio disables seeking while leaving saved evidence and timing visible.

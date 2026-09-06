@@ -11,7 +11,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/"><img class="brand-logo" src="/static/logo.png" alt="REPEATER SCRIBE"></a>
-    <nav class="workspace-nav" aria-label="Workspaces"><a class="workspace-link" href="/">Dashboard</a><a class="workspace-link active" href="/archive" aria-current="page">Archive</a></nav>
+    <nav class="workspace-nav" aria-label="Workspaces"><a class="workspace-link" href="/">Dashboard</a><a class="workspace-link active" href="/archive" aria-current="page">Archive</a><a class="workspace-link" href="/callsigns">Callsigns</a></nav>
     <div class="identity">{{ identity }} <span>{{ role }}</span></div>
     {% if csrf_token %}<button id="sign-out" class="quiet-button" type="button">Sign out</button>{% endif %}
   </header>

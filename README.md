@@ -18,6 +18,28 @@ deployment profile: audio transcription uses `faster-whisper` on the
 machine running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
 
+## Callsign history
+
+Callsign mentions are durable observations from transcript audio, not proof that
+the station transmitted. The Callsigns workspace stores normalized mentions,
+timestamped transcript segments, confidence/evidence, and review state. A
+transmission count is reported separately and only includes explicit
+`Transmission.operator_callsign` attribution.
+
+The current transcript for a recording is the transcript whose job ID matches
+the recording ID; when that is unavailable, the most recently updated transcript
+is selected. Older transcript revisions remain available for audit purposes but
+are excluded from normal callsign totals.
+
+Read callsign history with `GET /api/v1/callsigns`,
+`GET /api/v1/callsigns/KM7GHS`, and
+`GET /api/v1/callsigns/KM7GHS/mentions?limit=50`. Operators review a mention
+with `PATCH /api/v1/callsign-mentions/{mention_id}` using `confirm`, `reject`,
+or `correct` and a replacement callsign. A bounded QRZ snapshot refresh is
+available at `POST /api/v1/callsigns/KM7GHS/qrz-refresh`. All reads require a
+viewer; writes require an operator and browser writes additionally require the
+existing session CSRF and exact-origin checks.
+
 ## Database migrations
 
 Run `alembic upgrade head` before starting application traffic. The reference
@@ -278,6 +300,7 @@ quality; benchmark representative repeater audio before choosing a model.
 | `ASLT_QRZ_USERNAME` / `ASLT_QRZ_PASSWORD` | Optional QRZ XML Logbook Data credentials used only by the server. |
 | `ASLT_QRZ_CACHE_SECONDS` | How long to reuse callsign lookup results; defaults to 24 hours. |
 | `ASLT_QRZ_LAST_HEARD_LIMIT` | Maximum recent unique callsigns shown in the dashboard. |
+| `ASLT_QRZ_LAST_HEARD_REFRESH_LIMIT` | Maximum uncached QRZ lookups attempted during one dashboard refresh. |
 
 The full transcription setting reference is in
 [docs/transcription.md](docs/transcription.md).
@@ -357,6 +380,19 @@ docker compose -f docker-compose.yml -f compose.internet.yml up -d --build
 
 Keep `.env`, AMI credentials, and API keys out of version control. See
 [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
+## Callsign history (Unreleased)
+
+The Callsigns workspace shows first/last heard, cached QRZ identity, mention and
+recording counts, confidence, saved recognition evidence, and operator review.
+Mentions describe decoded speech; explicit transmission attribution is separately
+labeled and currently incomplete. QRZ validation is separate from human review.
+Missing source audio preserves history and disables playback.
+
+See the [callsign API contract](docs/callsign-api.md),
+[review preservation rules](docs/architecture.md#reviewed-evidence-lifecycle), and
+[migration and verification guide](docs/verification-0.8.md). The package version
+remains 0.7.0 pending release.
 
 ## API
 
