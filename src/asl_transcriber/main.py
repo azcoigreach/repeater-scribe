@@ -1765,6 +1765,7 @@ def _serialize_runtime_last_heard(
         for callsign in tuple(selected_callsigns)
         for extension in possible_extensions.get(callsign, [])
     )
+    user_lookup_error = "Callsign lookup temporarily unavailable"
     for item in (
         candidate
         for candidate in sorted_heard[:100]
@@ -1809,7 +1810,7 @@ def _serialize_runtime_last_heard(
             )
         except QrzError as error:
             logger.warning("QRZ lookup failed for %s: %s", item["callsign"], error)
-            lookup_error = str(error)
+            lookup_error = user_lookup_error
             item.pop("_best_observation", None)
             items.append({**item, "status": "error", "error": lookup_error})
     confirmed_callsigns = {
