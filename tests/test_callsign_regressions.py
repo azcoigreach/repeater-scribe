@@ -299,9 +299,12 @@ def test_expired_negatives_refresh_with_attempt_bound_and_stop_on_failure(
     client.lookup.side_effect = (
         QrzError("unavailable") if failure else lambda value: QrzCallsign(value, status="found")
     )
-    monkeypatch.setattr(main, "current_qrz_client", lambda: client)
+    factory = Mock(return_value=client)
+    monkeypatch.setattr(main, "current_qrz_client", factory)
     monkeypatch.setattr(settings, "qrz_last_heard_refresh_limit", limit)
     result = main.last_heard_callsigns(db=db, limit=4)
+    assert result["configured"] is True
+    factory.assert_called_once_with()
     assert client.lookup.call_count == expected
     assert len(result["items"]) == 4
     assert sum(row["status"] == "found" for row in result["items"]) == (0 if failure else expected)

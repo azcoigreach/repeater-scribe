@@ -158,3 +158,10 @@ can be human-confirmed while QRZ-negative. Only explicit transmission attributio
 contributes transmission counts/airtime; mention review never writes that
 attribution. See the [callsign API contract](callsign-api.md) for cache states,
 expiration, lookup limits, failure behavior, permissions and write examples.
+
+Legacy Archive recordings without a selected `current_transcript_id` can still
+serialize their compatibility mention JSON when normalized mentions are absent.
+Once a current transcript is selected, its normalized mentions are authoritative,
+including an empty result; stale JSON must not revive detections. Archive list
+queries eagerly load transcripts, mentions, segments and ingestion state in
+batches, avoiding additional queries per serialized recording.

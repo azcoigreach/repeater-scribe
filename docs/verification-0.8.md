@@ -127,3 +127,26 @@ not tested. No release, tag, merge, or production migration was performed.
 Historical-review/revision management UI, automatic speaker attribution and
 complete attribution statistics remain outside 0.8 scope. Downgrade limitations
 above require retaining a backup when human reviews matter.
+
+## Follow-up review repair (2026-09-06)
+
+Pulled five commits through `79686de`. The unchanged suite reproduced three
+failures (241 passed): `66fe70f` had removed the history endpoint's successful
+return. Ruff and mypy also detected this regression. New probes reproduced lost
+legacy Archive mention display and query growth from 3 queries for one recording
+to 17 for eight. The latter predated these five commits.
+
+Restored the history response; kept callsign and cursor validation distinct using
+public error constants; restored JSON fallback only without a selected normalized
+transcript; batched Archive relationship loading; captured QRZ configuration once
+per request independently of network failure. Kept the useful QRZ redaction and
+duplicate-filter cleanup from the pulled changes. No schema or UI redesign.
+
+Verification after repair:
+
+- `pytest -q -W error::DeprecationWarning --cov=asl_transcriber --cov-report=term-missing`: **249 passed**, 16.31s, **86% coverage**; 13 unsuppressed SQLite resource warnings.
+- `PLAYWRIGHT_BROWSERS_PATH=/tmp/repeater-scribe-browsers pytest browser_tests -q -W error::DeprecationWarning`: **9 passed**, 5.64s.
+- `ruff check .`, `mypy src`, `python -m pip check`, `git diff --check`: passed.
+- New behavior tests cover legacy/current serialization distinction, bounded query
+  growth, invalid callsign versus cursor errors, internal error redaction, and QRZ
+  configuration remaining true while further network attempts stop.

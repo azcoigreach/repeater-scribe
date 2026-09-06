@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import Select, and_, exists, false, func, or_, select, text
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from asl_transcriber.models import CallsignMention, Recording, Transcript
@@ -124,6 +124,10 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
         if transcript
         else []
     )
+    # Only recordings without a selected normalized transcript use legacy JSON.
+    # An empty current result must not resurrect stale detections after retranscription.
+    if transcript and recording.current_transcript_id is None and not transcript.callsign_mentions:
+        mentions = json.loads(transcript.callsign_mentions_json)
     return {
         "id": recording.id,
         "source_path": recording.source_path,
@@ -152,7 +156,13 @@ def list_recordings(
 ) -> tuple[list[dict[str, object]], str | None, bool]:
     order_time = func.coalesce(Recording.started_at, Recording.created_at)
     statement: Select = select(Recording).options(
-        joinedload(Recording.transcripts), joinedload(Recording.ingestion_jobs)
+        joinedload(Recording.current_transcript).options(
+            selectinload(Transcript.callsign_mentions), selectinload(Transcript.segments),
+        ),
+        selectinload(Recording.transcripts).options(
+            selectinload(Transcript.callsign_mentions), selectinload(Transcript.segments),
+        ),
+        selectinload(Recording.ingestion_jobs),
     )
     conditions: list[ColumnElement[bool]] = []
     if query is not None:

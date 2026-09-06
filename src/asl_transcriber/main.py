@@ -1350,7 +1350,7 @@ def callsign_mentions_history(
     try:
         canonical_callsign(callsign)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise HTTPException(status_code=400, detail="invalid callsign") from error
 
     try:
         items, next_cursor, has_more = list_call_sign_mentions(
@@ -1366,8 +1366,9 @@ def callsign_mentions_history(
     except ValueError as error:
         raise HTTPException(
             status_code=422,
-            detail={"code": "invalid_cursor", "message": str(error)},
+            detail={"code": "invalid_cursor", "message": "cursor must be valid"},
         ) from error
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
 @app.get("/api/v1/callsigns/last-heard", dependencies=[Depends(require_viewer)])
@@ -1559,6 +1560,7 @@ def last_heard_callsigns(
 def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, object]:
     snapshot_now = datetime.now(UTC)
     client = current_qrz_client()
+    configured = client is not None
     items: list[dict[str, object]] = []
     rejected = 0
     refresh_attempts = 0
@@ -1658,7 +1660,7 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
         item.pop("qrz_image_url", None)
         item.pop("qrz_profile_url", None)
     return {
-        "configured": current_qrz_client() is not None,
+        "configured": configured,
         "total": len(items),
         "rejected": rejected,
         "superseded": superseded,

@@ -257,3 +257,23 @@ def test_contract_filters_bounded_excerpt_and_private_field_exclusion(secured):
             "qrz_username",
         ):
             assert private not in rendered
+
+
+def test_invalid_callsign_is_not_mislabeled_as_cursor_error(secured):
+    browser, _, _ = secured
+    login(browser, "viewer")
+    for cursor in (None, "bad"):
+        response = browser.get("/api/v1/callsigns/invalid!/mentions", params={"cursor": cursor} if cursor else {})
+        assert response.status_code == 400
+        assert response.json() == {"detail": "invalid callsign"}
+
+
+def test_history_cursor_error_does_not_echo_internal_exception(secured, monkeypatch):
+    browser, _, _ = secured
+    login(browser, "viewer")
+    def failure(*args, **kwargs):
+        raise ValueError("/private/archive credential-marker session-key-marker")
+    monkeypatch.setattr(main, "list_call_sign_mentions", failure)
+    response = browser.get("/api/v1/callsigns/KM7GHS/mentions?cursor=bad")
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"code": "invalid_cursor", "message": "cursor must be valid"}}

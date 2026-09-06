@@ -16,6 +16,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Restore successful callsign-history responses after error-handling edits; keep
+  invalid callsign/cursor errors distinct without exposing exception details.
+- Preserve legacy Archive mentions only when no current normalized transcript is
+  selected, and batch transcript/mention/segment loading for Archive pages.
+- Keep QRZ configuration status stable when a request stops lookups after failure.
+
 - Preserve reviewed mention identity, evidence, confidence and original offsets
   together with heard time across same-transcript retranscription; retain
   unmatched reviews as non-current evidence without duplication.
