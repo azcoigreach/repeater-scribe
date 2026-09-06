@@ -283,7 +283,7 @@ def test_populated_07_to_head_and_supported_cycle_preserves_duration_and_foreign
     for _ in range(2):
         alembic(database, "head")
         with closing(sqlite3.connect(database)) as connection, connection:
-            assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("transcript_text_corrections",)
+            assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("events_sessions",)
             assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
             assert connection.execute("SELECT duration_milliseconds FROM transmissions").fetchone() == (12345,)
             assert connection.execute("SELECT canonical_callsign, is_current FROM callsign_mentions").fetchall() == [("KM7GHS", 1)]
@@ -294,3 +294,44 @@ def test_populated_07_to_head_and_supported_cycle_preserves_duration_and_foreign
     for command in ("current", "check"):
         result = subprocess.run([sys.executable, "-m", "alembic", command], cwd=ROOT, env=environment, capture_output=True, text=True, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_upgrade_actual_081_preserves_catalog_review_and_search(tmp_path):
+    from asl_transcriber.models import (
+        Callsign,
+        CallsignMention,
+        IngestionJob,
+        Recording,
+        Transcript,
+    )
+    database = tmp_path / 'actual-081.db'
+    alembic(database, 'transcript_text_corrections')
+    engine = sa.create_engine(f'sqlite:///{database}')
+    stamp = datetime(2026, 9, 1, tzinfo=UTC)
+    # Core writes model defaults to the released schema, without running new ORM hooks.
+    with engine.begin() as db:
+        db.execute(Recording.__table__.insert().values(id='old-recording', archive_root='/source',
+                   source_path='missing.wav', started_at=stamp, duration_seconds=12,
+                   audio_status='missing', status='completed'))
+        db.execute(IngestionJob.__table__.insert().values(id='old-job', source_path='missing.wav',
+                   recording_id='old-recording', status='completed'))
+        db.execute(Transcript.__table__.insert().values(id='old-transcript', job_id='old-job',
+                   recording_id='old-recording', raw_text='old raw', display_text='KM7GHS archive',
+                   text_corrections_json='[{"callsign":"KM7GHS","applied":true}]'))
+        db.execute(Recording.__table__.update().values(current_transcript_id='old-transcript'))
+        db.execute(Callsign.__table__.insert().values(id='old-call', normalized_callsign='KM7GHS'))
+        db.execute(CallsignMention.__table__.insert().values(id='old-mention', callsign_id='old-call',
+                   transcript_id='old-transcript', recording_id='old-recording',
+                   canonical_callsign='KM7GHS', raw_observed_value='K M 7 G H S',
+                   review_status='confirmed', is_current=True, reviewer_identity='operator',
+                   reviewed_at=stamp, start_offset=1, end_offset=3, heard_at=stamp))
+    engine.dispose()
+    alembic(database, 'head')
+    with closing(sqlite3.connect(database)) as db:
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert db.execute('SELECT audio_status,current_transcript_id FROM recordings').fetchone() == ('missing','old-transcript')
+        assert db.execute('SELECT id,review_status,reviewer_identity,start_offset,end_offset FROM callsign_mentions').fetchone() == ('old-mention','confirmed','operator',1,3)
+        assert db.execute("SELECT display_text FROM transcript_fts WHERE transcript_fts MATCH 'archive'").fetchone() == ('KM7GHS archive',)
+        assert db.execute('SELECT text_corrections_json FROM transcripts').fetchone() == ('[{"callsign":"KM7GHS","applied":true}]',)
+        assert db.execute('SELECT COUNT(*) FROM radio_sessions').fetchone() == (0,)
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone() == ('events_sessions',)

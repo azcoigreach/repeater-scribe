@@ -9,9 +9,10 @@ from types import SimpleNamespace
 from uuid import NAMESPACE_DNS, uuid5
 
 import uvicorn
+from fastapi import Depends
 
 from asl_transcriber import main
-from asl_transcriber.auth import token_digest
+from asl_transcriber.auth import require_ui_operator, token_digest
 from asl_transcriber.callsign_service import persist_transcript_details
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal
@@ -151,6 +152,32 @@ class StubQrz:
         return QrzCallsign(
             value, name=f"Refreshed {HOSTILE}", location="Phoenix, Arizona", status="found"
         )
+
+
+@main.app.post("/browser/recordings", dependencies=[Depends(require_ui_operator)])
+def browser_recording():
+    """Acceptance-only late discovery with a saved transcript; never shipped in the app."""
+    identifier = str(uuid5(NAMESPACE_DNS, "browser-live-event-recording"))
+    with SessionLocal() as db:
+        if db.get(Recording, identifier) is None:
+            path = "event-live.wav"
+            (root / path).write_bytes((root / "sample.wav").read_bytes())
+            recording = Recording(id=identifier, archive_root=str(root), source_path=path,
+                                  started_at=NOW + timedelta(minutes=1), duration_seconds=12,
+                                  status="completed", audio_status="available")
+            db.add(recording)
+            db.flush()
+            db.add(IngestionJob(id=identifier, recording_id=identifier, source_path=path,
+                                archive_root=str(root), status="completed"))
+            db.flush()
+            transcript = Transcript(id=identifier, job_id=identifier, recording_id=identifier,
+                                    raw_text="KM7GHS late check in", display_text="KM7GHS late check in")
+            db.add(transcript)
+            persist_transcript_details(db, transcript, recording, SimpleNamespace(
+                segments=[TranscriptSegment(1, 4, "KM7GHS late check in")],
+                callsign_mentions=[TranscriptCallsignMention("KM7GHS", 1, 4)]))
+            db.commit()
+    return {"id": identifier}
 
 
 main.current_qrz_client = lambda: StubQrz()

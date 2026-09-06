@@ -128,8 +128,8 @@ def test_archive_assets_use_database_api_and_id_based_audio(archive_ui_db) -> No
     archive_script = client.get("/static/archive.js").text
     detail_script = client.get("/static/archive_detail.js").text
 
-    assert "/static/archive.css?v=20260903-1" in archive_html
-    assert "/static/archive.js?v=20260903-1" in archive_html
+    assert "/static/archive.css?v=0.9.0" in archive_html
+    assert "/static/archive.js?v=0.9.0" in archive_html
     assert "/api/v1/archive/recordings" in archive_script
     assert "/api/v1/archive/recordings/${encodeURIComponent(item.id)}/audio" in detail_script
     assert "/api/v1/audio?path=" not in archive_script + detail_script
@@ -149,7 +149,7 @@ def test_archive_browser_client_replaces_searches_and_keeps_cursors_out_of_urls(
     assert "query.set('cursor', cursor)" in script
     assert "query.set(field.name, field.value)" in script
     assert "form.elements[name].value = query.get(name) ?? ''" in script
-    assert "form.elements[name].value = stored ? stored.slice(0, 10) : ''" in script
+    assert "form.elements[name].value = stored ? stored.slice(0, 16) : ''" in script
     assert "window.addEventListener('popstate', () => { clearTimeout(debounce);" in script
 
 

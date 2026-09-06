@@ -53,10 +53,15 @@ is enforced at the identity provider and should be mandatory for both roles.
 5. Start the profile with:
 
    ```bash
+   docker compose -f docker-compose.yml -f compose.internet.yml build repeater-scribe
+   docker compose -f docker-compose.yml -f compose.internet.yml stop repeater-scribe
    docker compose -f docker-compose.yml -f compose.internet.yml run --rm \
      repeater-scribe alembic upgrade head
-   docker compose -f docker-compose.yml -f compose.internet.yml up -d --build
+   docker compose -f docker-compose.yml -f compose.internet.yml up -d --no-build
    ```
+
+   Build before the migration command: `run` can otherwise reuse an older image
+   that does not contain the latest Alembic revisions.
 
 6. Confirm that the public host redirects to OIDC, anonymous API/audio requests
    return 401, TLS is valid, and direct remote access to port 8088 fails.

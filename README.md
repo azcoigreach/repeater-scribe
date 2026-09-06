@@ -13,12 +13,25 @@ It runs alongside an ASL3 node rather than replacing it. The recording archive
 is always mounted read-only. Node commands are optional and travel through a
 separately enabled Asterisk Manager Interface (AMI) connection.
 
-Version `0.8.1` protects live transcripts during final processing and adds manual
-re-transcription. It includes the durable callsign history introduced in `0.8.0`,
-while keeping transcription local and supporting the fail-closed internet
-deployment profile. Audio transcription uses `faster-whisper` on the machine
+Version `0.9.0` adds durable Events: operate nets live or reconstruct them from
+Archive ranges and selected recordings, with saved markers, tags and confirmed
+check-ins. It retains the 0.8.1 transcription recovery and callsign history
+workflows, local transcription and the fail-closed internet deployment profile. Audio transcription uses `faster-whisper` on the machine
 running Repeater Scribe. No OpenAI or other hosted transcription backend
 is implemented in this release.
+
+## Events (0.9.0)
+
+Choose **Start Event** to run Groovy Late Shift live, or filter Archive by source
+and time and choose **Create event from range**. Events retain recordings,
+transcripts, markers, tags and an operator-confirmed roster across restart,
+retranscription and missing source audio. Automatic membership uses recorded
+interval overlap; manual Include/Exclude choices survive boundary changes.
+Detected callsigns are separate from confirmed attendance.
+
+See the [Events guide](docs/events.md), [session API and retry contract](docs/sessions-api.md),
+and [0.9.0 upgrade instructions](docs/upgrade-0.9.md). Run `alembic upgrade head`
+before starting the new application; the required head is `events_sessions`.
 
 ## Callsign history
 
@@ -394,7 +407,7 @@ Missing source audio preserves history and disables playback.
 See the [callsign API contract](docs/callsign-api.md),
 [review preservation rules](docs/architecture.md#reviewed-evidence-lifecycle), and
 [migration and verification guide](docs/verification-0.8.md). The package version
-is 0.8.1; the changelog remains under Unreleased until publication.
+is 0.9.0; the changelog remains under Unreleased until publication.
 
 ## API
 
@@ -437,10 +450,16 @@ docker compose logs --tail 200 repeater-scribe
 # Restart without rebuilding
 docker compose restart repeater-scribe
 
-# Rebuild after an update
+# After backing up the catalog, build the updated migration code first
+docker compose build repeater-scribe
+docker compose stop repeater-scribe
 docker compose run --rm repeater-scribe alembic upgrade head
-docker compose up -d --build --force-recreate
+docker compose up -d --no-build --force-recreate repeater-scribe
 ```
+
+Use the same Compose profile throughout; internet installations add
+`-f docker-compose.yml -f compose.internet.yml` to each command. Building the
+image before `alembic upgrade head` ensures Alembic sees the latest migrations.
 
 The persistent state is in `./data`. Create a consistent online backup with
 `asl-transcriber backup-db /data/backups/snapshot.db` and verify it with

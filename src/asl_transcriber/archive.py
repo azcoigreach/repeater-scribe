@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import wave
@@ -131,6 +132,7 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
     return {
         "id": recording.id,
         "source_path": recording.source_path,
+        "source_id": hashlib.sha256((recording.archive_root or "").encode()).hexdigest(),
         "started_at": recording.started_at.isoformat() if recording.started_at else None,
         "source_modified_at": recording.source_modified_at.isoformat() if recording.source_modified_at else None,
         "duration_seconds": recording.duration_seconds,
@@ -152,7 +154,7 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
 def list_recordings(
     session: Session, *, cursor: str | None, limit: int, query: str | None,
     status: str | None, audio_status: str | None, from_at: datetime | None, to_at: datetime | None,
-    callsign: str | None,
+    callsign: str | None, source_root: str | None = None, tag: str | None = None,
 ) -> tuple[list[dict[str, object]], str | None, bool]:
     order_time = func.coalesce(Recording.started_at, Recording.created_at)
     statement: Select = select(Recording).options(
@@ -178,6 +180,12 @@ def list_recordings(
             conditions.append(Recording.id.in_(matching_rows))
         else:
             conditions.append(false())
+    if source_root:
+        conditions.append(Recording.archive_root == source_root)
+    if tag:
+        from asl_transcriber.models import RecordingTag
+        conditions.append(Recording.id.in_(select(RecordingTag.recording_id).where(
+            RecordingTag.tag == tag.strip().lower())))
     if status:
         conditions.append(Recording.status == status)
     if audio_status:

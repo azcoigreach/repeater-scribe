@@ -126,7 +126,7 @@ def browser():
 def page(browser, application):
     origin, _ = application
     context = browser.new_context(
-        ignore_https_errors=True, viewport={"width": 1440, "height": 1000}
+        ignore_https_errors=True, timezone_id="UTC", viewport={"width": 1440, "height": 1000}
     )
     context.add_cookies(
         [

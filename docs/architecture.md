@@ -165,3 +165,35 @@ Once a current transcript is selected, its normalized mentions are authoritative
 including an empty result; stale JSON must not revive detections. Archive list
 queries eagerly load transcripts, mentions, segments and ingestion state in
 batches, avoiding additional queries per serialized recording.
+
+
+## Events and membership (0.9.0)
+
+`RadioSession` is the durable operator event, distinct from authentication and
+AMI link sessions. Its source root reuses Recording's archive-root identity;
+clients use a deterministic SHA-256 source ID, not filesystem paths. An optional
+end defines state; database checks enforce valid windows and a partial unique
+index permits only one active event per source. Historical windows may overlap.
+
+`SessionRecording` stores computed interval membership independently of nullable
+manual inclusion/exclusion decisions. SQLAlchemy flush hooks collect only new or
+changed recording source/start/duration and session boundaries. Reconciliation
+uses source/window queries with bounded batches; changing one recording queries
+affected sessions, not the entire recording catalog. Startup performs bounded
+catch-up for all saved events, including ended ones. Whole-recording membership
+never depends on transcription completion, provisional jobs or source mtime.
+
+Session markers reference stable recording IDs and audio offsets. Check-ins
+reference existing canonical Callsign rows, carry independent confirmation actor
+and time, and are never rewritten by the transcript/evidence lifecycle. Shared
+Tag rows have separate normalized session/recording associations. Recorded audio
+availability remains independent of all event relationships.
+
+The dedicated session router exposes `/api/v1/sessions` and existing-style `/ui`
+mutations; `/api/v1/events` remains untouched. Write transactions reserve SQLite's
+writer before state-dependent reads; persisted subject-scoped request fingerprints
+make creation retries safe. The plain JavaScript Events UI uses bounded five-second
+page refreshes, current saved transcript selection and separately labeled
+provisional fallback. It does not consume or change existing SSE clients.
+
+See [membership/user rules](events.md) and [API contracts](sessions-api.md).

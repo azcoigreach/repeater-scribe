@@ -78,9 +78,20 @@ Transcript revision/history management UI and complete automatic transmission
 attribution remain out of scope. See [acceptance verification](verification-0.8.md)
 for execution evidence and migration limitations.
 
-Events, net/session boundaries, check-ins, annotations, tags, automatic net
-detection, topic extraction, summaries, semantic search, and general analytics
-remain future work for 0.9 and later.
+### Events, nets and sessions (0.9.0)
+
+- Durable Events with archive-root source scopes, recorded-time membership,
+  manual Include/Exclude/Automatic controls and startup reconciliation.
+- Complete live-operation and Archive reconstruction UI, source/time/selection
+  creation, chronological and latest recording pages, and existing playback.
+- Persistent audio markers and tags, separate detected evidence and confirmed
+  attendance, editable roster and end/reopen operations.
+- Authenticated session APIs, persisted retry keys, active-source conflict
+  enforcement and additive migration from the actual 0.8.1 schema.
+- User/API/upgrade documentation and Python/Chromium verification.
+
+Automatic net detection, recurring scheduling, topic extraction, AI summaries,
+semantic search and broad historical analytics remain future work.
 
 ### Node-control foundation
 

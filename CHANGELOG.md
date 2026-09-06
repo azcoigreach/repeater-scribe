@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 0.9.0 Events workspace for live nets and historical reconstruction from Archive
+  time ranges or explicitly selected recordings, with paginated transcript/audio
+  navigation, latest-traffic following, dashboard active controls and source filters.
+- Additive `events_sessions` migration: durable sessions, independent automatic
+  membership/manual overrides, stable audio markers, shared tags and an
+  operator-confirmed roster separate from detected callsign evidence.
+- Authenticated `/api/v1/sessions` APIs with persisted creation idempotency keys,
+  transactional active-source uniqueness, end/reopen retry behavior, source
+  validation and existing viewer/operator/CSRF protections. Existing SSE is unchanged.
+- Recorded-interval reconciliation on catalog/boundary changes and startup,
+  including late discovery for ended events. Preserve history through missing audio,
+  retranscription and changed membership; show crossing audio and evidence warnings.
+- Events user/API/upgrade documentation and migration, concurrency, authorization,
+  interval, restart and Chromium live/historical acceptance tests.
+
+
 - Normalized callsign, transcript segment, and callsign mention persistence with
   deterministic current-transcript selection and indexed history queries.
 - Viewer-protected callsign directory, profile, and mention-history workspace

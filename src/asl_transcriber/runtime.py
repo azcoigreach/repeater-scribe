@@ -19,6 +19,7 @@ from asl_transcriber.ingestion.jobs import IngestionJob, JobState, JobStore
 from asl_transcriber.ingestion.service import ArchiveIngestionService
 from asl_transcriber.models import IngestionJob as DbIngestionJob
 from asl_transcriber.models import Recording, Transcript
+from asl_transcriber.session_membership import recover_sessions
 from asl_transcriber.transcription.base import TranscriptCallsignMention, TranscriptResult
 from asl_transcriber.workers.processor import ProcessingResult
 
@@ -67,6 +68,8 @@ class ArchiveRuntime:
         self._subscribers: set[Queue[dict[str, object]]] = set()
         self._subscriber_lock = RLock()
         self._restore_state()
+        if self._database_ready:
+            recover_sessions(self.session_factory)
 
     def scan_once(self) -> list[IngestionJob]:
         with self._scan_lock:
