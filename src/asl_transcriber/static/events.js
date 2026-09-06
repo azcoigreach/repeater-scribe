@@ -40,6 +40,7 @@
     $('#save-event').textContent = edit ? 'Save event' : historical ? 'Create Historical Event' : 'Start Event';
     $('#preview-event').hidden = edit;
     $('#membership-preview').replaceChildren();
+    $('#event-save-status').hidden = true;
     creationKey = crypto.randomUUID();
     form.reset();
     field(form, 'source_id').disabled = edit;
@@ -73,9 +74,15 @@
   $('#historical-event').addEventListener('click', () => editor(true));
   $('#cancel-event').addEventListener('click', () => $('#event-editor').hidden = true);
   $('#preview-event').addEventListener('click', () => run(preview));
-  form.addEventListener('submit', e => { e.preventDefault(); run(async () => {
+  form.addEventListener('submit', e => { e.preventDefault(); if ($('#save-event').disabled) return; run(async () => {
     const data = payload();
-    $('#save-event').disabled = true;
+    const save = $('#save-event');
+    const label = save.textContent;
+    const status = $('#event-save-status');
+    save.disabled = true;
+    save.textContent = editing ? 'Saving…' : 'Creating…';
+    status.textContent = editing ? 'Saving event…' : 'Creating event…';
+    status.hidden = false;
     try {
       if (editing) {
         const {tags: values, source_id, recording_ids, ...metadata} = data;
@@ -84,13 +91,14 @@
         $('#event-editor').hidden = true;
         await refreshDetail(); await loadCollection('recordings');
       } else {
-        // A preview is always shown before creation from selected recordings.
-        if (selections.length && !$('#membership-preview').children.length) { await preview(); return; }
         const result = await api('', 'POST', data, {'Idempotency-Key': creationKey});
         sessionStorage.removeItem('event-selection');
         location.assign(`/events/${result.id}`);
       }
-    } finally { $('#save-event').disabled = false; }
+    } catch (failure) {
+      status.textContent = `Could not ${editing ? 'save' : 'create'} event: ${failure.message}`;
+      throw failure;
+    } finally { save.disabled = false; save.textContent = label; }
   }); });
   form.addEventListener('input', () => $('#membership-preview').replaceChildren());
   async function loadEvents(append = false) {

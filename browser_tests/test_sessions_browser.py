@@ -3,6 +3,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from playwright.sync_api import expect
 
 
@@ -109,18 +110,27 @@ def test_archive_range_boundaries_exclusions_and_mobile_missing_audio(page, appl
     expect(page.locator("#recordings-list")).to_contain_text("Legacy full text")
 
 
+@pytest.mark.parametrize("page", ["America/Phoenix"], indirect=True)
 def test_archive_selected_preview_keeps_explicit_inclusions(page, application):
     origin, ids = application
     page.goto(origin + "/archive")
     expect(page.locator("#recordings tr").first).to_be_visible()
     page.locator(f'#recordings [data-select-recording="{ids["KM7GHS"]}"]').check()
+    page.locator(f'#recordings [data-select-recording="{ids["K1AB"]}"]').check()
     page.locator("#event-from-selection").click()
-    expect(page.locator("#selection-note")).to_contain_text("1 selected recording")
-    expect(page.locator("#membership-preview")).to_contain_text("1 explicit inclusion")
+    expect(page.locator("#selection-note")).to_contain_text("2 selected recording")
+    expect(page.locator("#membership-preview")).to_contain_text("2 explicit inclusion")
     page.locator("#event-form [name=name]").fill("Selected archive traffic")
-    page.locator("#preview-event").click()
+    page.locator("#event-form [name=type]").select_option("Testing")
+    page.locator("#event-form [name=description]").fill("Selected conversations")
+    page.locator("#event-form [name=tags]").fill("funny")
     page.locator("#save-event").click()
-    expect(page.locator("#recordings-list")).to_contain_text("include")
+    expect(page.locator("#event-detail")).to_be_visible()
+    expect(page.locator("#event-title")).to_have_text("Selected archive traffic")
+    expect(page.locator("#event-description")).to_have_text("Selected conversations")
+    expect(page.locator("#event-tags")).to_contain_text("funny")
+    for key in ["KM7GHS", "K1AB"]:
+        expect(page.locator(f'#recordings-list [data-recording-id="{ids[key]}"]')).to_contain_text("include")
     page.locator("#edit-event").click()
     page.locator("#event-form [name=started_at]").fill("2026-09-05T12:02")
     page.locator("#event-form [name=ended_at]").fill("2026-09-05T12:03")
@@ -159,3 +169,47 @@ def test_viewer_has_read_access_without_event_mutation_controls(page, applicatio
     )
     Path("/tmp/repeater-scribe-events-desktop.png").parent.mkdir(exist_ok=True)
     page.screenshot(path="/tmp/repeater-scribe-events-desktop.png", full_page=True)
+
+
+@pytest.mark.parametrize("page", ["America/Phoenix"], indirect=True)
+def test_selected_event_create_failure_keeps_form_and_can_retry(page, application):
+    origin, ids = application
+    page.goto(origin + '/archive')
+    for key in ['KM7GHS', 'K1AB']:
+        page.locator(f'#recordings [data-select-recording="{ids[key]}"]').check()
+    page.locator('#event-from-selection').click()
+    expect(page.locator('#selection-note')).to_contain_text('2 selected recording')
+    page.locator('#event-form [name=name]').fill('Retry selected conversations')
+    page.locator('#event-form [name=type]').select_option('Testing')
+    page.locator('#event-form [name=description]').fill('Keep these notes')
+    page.locator('#event-form [name=tags]').fill('funny')
+    requests = []
+    pending = []
+
+    def create(route):
+        requests.append(route.request)
+        if len(requests) == 1:
+            pending.append(route)
+        else:
+            route.continue_()
+
+    page.route('**/ui/sessions', create)
+    page.locator('#save-event').click()
+    expect(page.locator('#save-event')).to_be_disabled()
+    expect(page.locator('#event-save-status')).to_have_text('Creating event…')
+    page.wait_for_function("() => document.querySelector('#save-event').disabled")
+    assert len(pending) == 1
+    pending[0].fulfill(status=503, json={'detail': 'Temporary save failure'})
+    expect(page.locator('#event-save-status')).to_have_text('Could not create event: Temporary save failure')
+    expect(page.locator('#save-event')).to_be_enabled()
+    expect(page.locator('#save-event')).to_have_text('Create Historical Event')
+    expect(page.locator('#event-form [name=name]')).to_have_value('Retry selected conversations')
+    expect(page.locator('#event-form [name=description]')).to_have_value('Keep these notes')
+    expect(page.locator('#event-form [name=tags]')).to_have_value('funny')
+    page.locator('#save-event').click()
+    expect(page.locator('#event-detail')).to_be_visible()
+    assert len(requests) == 2
+    assert requests[0].headers['idempotency-key'] == requests[1].headers['idempotency-key']
+    assert set(requests[1].post_data_json['recording_ids']) == {ids['KM7GHS'], ids['K1AB']}
+    for key in ['KM7GHS', 'K1AB']:
+        expect(page.locator(f'#recordings-list [data-recording-id="{ids[key]}"]')).to_contain_text('include')
