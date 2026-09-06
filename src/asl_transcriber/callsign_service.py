@@ -208,9 +208,8 @@ def list_callsigns(
         .join(Recording, Recording.id == CallsignMention.recording_id)
         .where(
             CallsignMention.callsign_id == Callsign.id,
-                CallsignMention.is_current.is_(True),
-                CallsignMention.review_status != "rejected",
             CallsignMention.is_current.is_(True),
+            CallsignMention.review_status != "rejected",
             CallsignMention.transcript_id == Recording.current_transcript_id,
         )
         .order_by(CallsignMention.heard_at.desc(), CallsignMention.id.desc())
