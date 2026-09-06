@@ -1348,15 +1348,26 @@ def callsign_mentions_history(
     review_status: str | None = None, audio_status: str | None = None,
 ) -> dict[str, object]:
     try:
+        canonical_callsign(callsign)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    try:
         items, next_cursor, has_more = list_call_sign_mentions(
-            db, callsign, cursor=cursor, limit=limit, from_at=from_at, to_at=to_at,
-            review_status=review_status, audio_status=audio_status,
+            db,
+            callsign,
+            cursor=cursor,
+            limit=limit,
+            from_at=from_at,
+            to_at=to_at,
+            review_status=review_status,
+            audio_status=audio_status,
         )
     except ValueError as error:
-        status = 422 if cursor else 400
-        detail = {"code": "invalid_cursor", "message": str(error)} if cursor else str(error)
-        raise HTTPException(status_code=status, detail=detail) from error
-    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_cursor", "message": str(error)},
+        ) from error
 
 
 @app.get("/api/v1/callsigns/last-heard", dependencies=[Depends(require_viewer)])
