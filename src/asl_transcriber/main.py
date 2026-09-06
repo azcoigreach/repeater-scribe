@@ -66,7 +66,7 @@ from asl_transcriber.favorites import (
     record_remote_key_transition,
     update_favorite,
 )
-from asl_transcriber.models import Favorite, Recording
+from asl_transcriber.models import CallsignMention, Favorite, Recording
 from asl_transcriber.node_control import RemoteKeyTransition
 from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.qrz import QrzClient, QrzError
@@ -1384,6 +1384,11 @@ def _apply_mention_review(
     db: Session, mention_id: str, payload: CallsignMentionReviewRequest, principal: Principal,
     request: Request,
 ) -> dict[str, object]:
+    previous = db.get(CallsignMention, mention_id)
+    before = (
+        {"callsign": previous.canonical_callsign, "status": previous.review_status}
+        if previous else None
+    )
     try:
         mention = review_mention(
             db, mention_id, action=payload.action,
@@ -1398,7 +1403,10 @@ def _apply_mention_review(
     audit_event(
         actor=principal.identity, auth_source=principal.auth_source,
         action="callsign_mention_review", outcome="success", request=request,
-        detail=f"mention_id={mention.id};action={mention.review_status}",
+        detail=json.dumps({
+            "mention_id": mention.id, "operation": payload.action, "before": before,
+            "after": {"callsign": mention.canonical_callsign, "status": mention.review_status},
+        }),
     )
     return {"mention_id": mention.id, "canonical_callsign": mention.canonical_callsign,
             "review_status": mention.review_status, "reviewer_identity": mention.reviewer_identity,

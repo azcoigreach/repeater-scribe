@@ -39,6 +39,8 @@ dev = [
   "pre-commit>=3.3.0",
 ]
 
+browser = ["playwright>=1.50,<2"]
+
 [project.scripts]
 asl-transcriber = "asl_transcriber.cli:main"
 

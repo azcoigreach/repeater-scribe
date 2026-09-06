@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -175,9 +176,14 @@ def _cursor_value(value: datetime | None, mention_id: str) -> str:
 def _decode_cursor(value: str) -> tuple[datetime | None, str]:
     try:
         raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-        timestamp, mention_id = json.loads(raw)
+        payload = json.loads(raw)
+        if not isinstance(payload, list) or len(payload) != 2:
+            raise ValueError("invalid cursor shape")
+        timestamp, mention_id = payload
+        if not isinstance(timestamp, str) or not isinstance(mention_id, str) or not mention_id:
+            raise ValueError("invalid cursor fields")
         return (datetime.fromisoformat(timestamp) if timestamp else None), str(mention_id)
-    except (TypeError, ValueError, json.JSONDecodeError) as error:
+    except (TypeError, ValueError, binascii.Error) as error:
         raise ValueError("cursor must be valid") from error
 
 
@@ -343,10 +349,10 @@ def list_call_sign_mentions(
             "evidence": json.loads(mention.evidence_json), "review_status": mention.review_status,
             "audio_status": recording.audio_status,
             "excerpt": (
-                segment.display_text or segment.raw_text
-                if segment is not None
-                else transcript.display_text[:240]
-            ),
+                (segment.display_text or segment.raw_text)
+                if segment is not None else transcript.display_text
+            )[:240],
+            "segment_avg_logprob": segment.avg_logprob if segment is not None else None,
             "recording_url": f"/archive/recordings/{recording.id}",
             "audio_available": recording.audio_status == "available",
         }

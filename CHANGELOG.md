@@ -14,6 +14,25 @@ All notable changes to this project will be documented in this file.
   transmission attribution statistics, QRZ snapshots, and segment-aware audio
   seeking.
 
+### Fixed
+
+- Preserve reviewed mention identity, evidence, confidence and original offsets
+  together with heard time across same-transcript retranscription; retain
+  unmatched reviews as non-current evidence without duplication.
+- Traverse dated/undated callsign pages and skip cached QRZ-negative entries
+  before bounding Last Heard candidates.
+- Complete directory/profile/history evidence presentation, show unknown
+  confidence honestly, and label raw Whisper log probabilities separately.
+- Replace dynamic dashboard HTML-string rendering with DOM nodes, including
+  topology and favorites; validate profile/image URLs before assignment.
+- Bound history excerpts and include meaningful before/after review audit data.
+
+### Verification
+
+- Add permanent review/cache/pagination regressions, real-authorization callsign
+  route tests, and Chromium acceptance tests using migrated temporary SQLite and
+  generated audio. See `docs/verification-0.8.md` for commands and results.
+
 ## [0.7.0] - 2026-09-01
 
 ### Added

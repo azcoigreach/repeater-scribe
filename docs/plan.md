@@ -29,8 +29,9 @@ This phase establishes the application skeleton and operating model needed to su
 - Keep dynamic hotword prompting off by default and retain raw text for review.
 - Benchmark model speed and exact callsign accuracy against real repeater audio.
 
-Segment timestamps and callsign-correction evidence are persisted in
-`callsign_mentions_json`. Manual callsign mention review and correction are
+Final segment timestamps and callsign-correction evidence are persisted in
+normalized segment/mention rows; legacy `callsign_mentions_json` remains a
+compatibility source. Manual callsign mention review and correction are
 implemented; manual full-transcript overrides and a remote transcription backend
 remain future work. See
 [AI transcription](transcription.md) for the as-built design.
@@ -67,6 +68,15 @@ remain future work. See
 - Keep callsign mentions separate from explicit transmission attribution.
 - Provide Callsigns workspace navigation, segment timestamps, and retained-audio
   seeking with missing-audio fallback.
+- Preserve reviewed identity/evidence/timing during same-transcript replacement,
+  retaining unmatched reviews as non-current database evidence.
+- Cover internet-mode permissions, bounded QRZ behavior and callsign contracts
+  with behavioral tests and a separate Chromium acceptance suite.
+- Render dynamic dashboard data using DOM nodes and validate external URLs.
+
+Transcript revision/history management UI and complete automatic transmission
+attribution remain out of scope. See [acceptance verification](verification-0.8.md)
+for execution evidence and migration limitations.
 
 Events, net/session boundaries, check-ins, annotations, tags, automatic net
 detection, topic extraction, summaries, semantic search, and general analytics
@@ -92,8 +102,8 @@ remain future work for 0.9 and later.
   connection budgets.
 - Security audit records for authentication, authorization, throttling, and
   state-changing requests.
-- Retention enforcement that expires derived transcripts and audio visibility
-  without modifying the read-only ASL3 archive.
+- Retention enforcement that expires audio visibility while preserving the
+  catalog and transcript evidence, without modifying the read-only ASL3 archive.
 - A fail-closed internet deployment mode with HTTPS/OIDC configuration
   validation, Caddy TLS termination, file-mounted secrets, and a hardened
   non-root/read-only container profile.

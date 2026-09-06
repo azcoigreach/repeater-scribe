@@ -12,8 +12,25 @@ function authenticatedFetch(url, options = {}) {
   return fetch(url, { ...options, headers });
 }
 
-function esc(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+function element(tag, value = '', className = '', attributes = {}) {
+  const node = document.createElement(tag);
+  node.textContent = value ?? '';
+  if (className) node.className = className;
+  Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+  return node;
+}
+function safeUrl(value, localOnly = false) {
+  if (!value) return null;
+  try { const url = new URL(value, location.origin); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && (!localOnly || url.origin === location.origin) ? url.href : null; } catch (_) { return null; }
+}
+function actionButton(label, className, data = {}) {
+  const button = element('button', label, className, { type: 'button' });
+  Object.assign(button.dataset, data); return button;
+}
+function svgElement(tag, attributes = {}, value = '') {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+  node.textContent = value; return node;
 }
 
 function escRegex(value) {
@@ -24,11 +41,15 @@ function linkedTranscript(text, callsigns = []) {
   const normalized = new Set(callsigns
     .map(callsign => String(callsign).toUpperCase())
     .filter(callsign => confirmedCallsigns === null || confirmedCallsigns.has(callsign)));
-  if (!normalized.size) return esc(text);
+  const fragment = document.createDocumentFragment();
+  if (!normalized.size) { fragment.append(document.createTextNode(text)); return fragment; }
   const pattern = new RegExp(`\\b(${Array.from(normalized).sort((a, b) => b.length - a.length).map(escRegex).join('|')})\\b`, 'gi');
-  return String(text).split(pattern).map(part => normalized.has(part.toUpperCase())
-    ? `<button class="transcript-callsign" type="button" data-callsign="${esc(part.toUpperCase())}" title="Show ${esc(part.toUpperCase())} in last heard callsigns">${esc(part)}</button>`
-    : esc(part)).join('');
+  String(text).split(pattern).forEach(part => {
+    if (normalized.has(part.toUpperCase())) {
+      const link = element('a', part, 'transcript-callsign'); link.href = `/callsigns/${encodeURIComponent(part.toUpperCase())}`; fragment.append(link);
+    } else fragment.append(document.createTextNode(part));
+  });
+  return fragment;
 }
 
 // Activity states: 0 idle, 1 transcribing, 2 node keyed, 3 both.
@@ -72,18 +93,19 @@ function renderJobs(items, databaseTotals = {}) {
   document.querySelector('#completed-count').textContent = databaseTotals.transcribed ?? counts.completed ?? 0;
   document.querySelector('#processing-count').textContent = processing;
   document.querySelector('#pending-count').textContent = (counts.pending || 0) + (counts.waiting || 0);
-  if (!items.length) {
-    recordings.innerHTML = '<div class="empty">No recordings match this search.</div>';
-    return;
-  }
-  recordings.innerHTML = items.map(item => `
-    <article class="recording" data-source-path="${esc(item.source_path)}">
-      <div class="recording-meta"><span class="recording-path">${esc(item.source_path)}</span><span class="recording-date">${item.timestamp ? esc(new Date(item.timestamp).toLocaleString()) : 'Timestamp unavailable'}</span><span class="status ${item.status}">${esc(item.status)}</span></div>
-      <button class="play-button" type="button" data-audio-url="${esc(item.audio_url)}" aria-label="Play ${esc(item.source_path)}">▶ Play audio</button>
-      <p class="transcript">${item.transcript ? `${linkedTranscript(item.transcript.display_text, item.callsigns)}${item.transcript.provisional ? ' <span class="muted-text">(provisional)</span>' : ''}` : '<span class="muted-text">Awaiting local transcription</span>'}</p>
-    </article>`).join('');
-  recordings.querySelectorAll('.play-button').forEach(button => button.addEventListener('click', () => playAudio(button)));
-  recordings.querySelectorAll('.transcript-callsign').forEach(button => button.addEventListener('click', () => revealCallsign(button.dataset.callsign)));
+  recordings.replaceChildren();
+  if (!items.length) { recordings.append(element('div', 'No recordings match this search.', 'empty')); return; }
+  items.forEach(item => {
+    const card = element('article', '', 'recording'); card.dataset.sourcePath = item.source_path;
+    const meta = element('div', '', 'recording-meta');
+    meta.append(element('span', item.source_path, 'recording-path'), element('span', item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Timestamp unavailable', 'recording-date'), element('span', item.status, `status ${item.status}`));
+    const play = actionButton('▶ Play audio', 'play-button'); const url = safeUrl(item.audio_url, true); play.disabled = !url; if (url) play.dataset.audioUrl = url;
+    play.setAttribute('aria-label', `Play ${item.source_path}`); play.addEventListener('click', () => playAudio(play));
+    const transcript = element('p', '', 'transcript');
+    if (item.transcript) { transcript.append(linkedTranscript(item.transcript.display_text, item.callsigns)); if (item.transcript.provisional) transcript.append(element('span', ' (provisional)', 'muted-text')); }
+    else transcript.append(element('span', 'Awaiting local transcription', 'muted-text'));
+    card.append(meta, play, transcript); recordings.append(card);
+  });
 }
 
 const player = new Audio();
@@ -97,7 +119,9 @@ function playAudio(button) {
   }
   player.pause();
   player.src = button.dataset.audioUrl;
-  player.play();
+  player.play().catch(() => {
+    if (activeButton === button) { button.textContent = '▶ Play audio'; activeButton = null; }
+  });
   button.textContent = '❚❚ Playing';
   activeButton = button;
 }
@@ -119,8 +143,9 @@ async function loadActivity() {
   const data = await response.json();
   document.querySelector('#activity-count').textContent = data.total;
   if (data.total) {
-    activity.innerHTML = data.items.slice(-12).reverse().map(item => `
-      <div class="activity-item"><time>${esc(new Date(item.timestamp).toLocaleString())}</time><strong>${esc(item.event_type)}</strong>${item.details ? ` <span>${esc(item.details)}</span>` : ''}</div>`).join('');
+    activity.replaceChildren(...data.items.slice(-12).reverse().map(item => {
+      const row = element('div', '', 'activity-item'); row.append(element('time', new Date(item.timestamp).toLocaleString()), element('strong', item.event_type)); if (item.details) row.append(element('span', item.details)); return row;
+    }));
   }
 }
 
@@ -132,7 +157,7 @@ async function loadCallsigns() {
   const response = await fetch('/api/v1/callsigns/last-heard', { cache: 'no-store' });
   if (!response.ok) {
     source.textContent = 'QRZ lookup is temporarily unavailable.';
-    callsignCards.innerHTML = '<div class="empty">Could not load last heard callsigns.</div>';
+    callsignCards.replaceChildren(element('div', 'Could not load last heard callsigns.', 'empty'));
     return;
   }
   const data = await response.json();
@@ -144,29 +169,28 @@ async function loadCallsigns() {
     ? `Location and primary photos supplied by QRZ.com.${data.rejected ? ` ${data.rejected} unconfirmed transcript fragment${data.rejected === 1 ? '' : 's'} hidden.` : ''}${data.superseded ? ` ${data.superseded} partial callsign${data.superseded === 1 ? '' : 's'} superseded by later audio.` : ''}`
     : 'Add ASLT_QRZ_USERNAME and ASLT_QRZ_PASSWORD to enable QRZ.com details.';
   if (!data.items.length) {
-    callsignCards.innerHTML = '<div class="empty">No callsigns have been heard in transcripts yet.</div>';
+    callsignCards.replaceChildren(element('div', 'No callsigns have been heard in transcripts yet.', 'empty'));
     return;
   }
-  callsignCards.innerHTML = data.items.map(item => {
-    const heard = item.last_heard_at ? new Date(item.last_heard_at).toLocaleString() : 'Time unavailable';
-    const photo = item.image_url
-      ? `<img src="${esc(item.image_url)}" alt="QRZ profile image for ${esc(item.callsign)}" loading="lazy" referrerpolicy="no-referrer">`
-      : `<span aria-hidden="true">${esc(item.callsign.slice(0, 2))}</span>`;
-    const call = item.profile_url
-      ? `<a href="${esc(item.profile_url)}" target="_blank" rel="noopener noreferrer">${esc(item.callsign)}</a>`
-      : esc(item.callsign);
-    const detail = item.status === 'not_found' ? 'Not found on QRZ.com' : item.status === 'error' ? 'QRZ lookup unavailable' : (item.location || 'Location not listed');
+  callsignCards.replaceChildren(...data.items.map(item => {
+    const card = element('article', '', 'callsign-card'); card.dataset.callsign = item.callsign;
+    const photo = element('div', '', 'callsign-photo'); const imageUrl = safeUrl(item.image_url);
+    if (imageUrl) { const image = element('img', '', '', { src: imageUrl, alt: `QRZ profile image for ${item.callsign}`, loading: 'lazy', referrerpolicy: 'no-referrer' }); image.addEventListener('error', () => image.replaceWith(element('span', String(item.callsign).slice(0, 2)))); photo.append(image); }
+    else photo.append(element('span', String(item.callsign).slice(0, 2)));
+    const details = element('div', '', 'callsign-details'); const heading = element('h3');
+    const profileUrl = safeUrl(item.profile_url); heading.append(profileUrl ? element('a', item.callsign, '', { href: profileUrl, target: '_blank', rel: 'noopener noreferrer' }) : document.createTextNode(item.callsign));
+    const history = element('a', 'View station history', 'callsign-evidence', { href: `/callsigns/${encodeURIComponent(item.callsign)}` });
+    details.append(heading, history); if (item.name) details.append(element('p', item.name, 'callsign-name'));
+    details.append(element('p', item.status === 'not_found' ? 'Not found on QRZ.com' : item.status === 'error' ? 'QRZ lookup unavailable' : item.location || 'Location not listed'));
     const confidence = Math.max(0, Math.min(100, Number(item.confidence_percent ?? 0)));
-    const observations = `${item.observation_count ?? 1} observation${item.observation_count === 1 ? '' : 's'} across ${item.recording_count ?? 1} recording${item.recording_count === 1 ? '' : 's'}`;
-    const evidence = Array.isArray(item.evidence) && item.evidence.length
-      ? `<details class="confidence-evidence"${expandedEvidence.has(String(item.callsign)) ? ' open' : ''}><summary>Why this score</summary><ul>${item.evidence.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>`
-      : '';
-    return `<article class="callsign-card" data-callsign="${esc(item.callsign)}"><div class="callsign-photo">${photo}</div><div class="callsign-details"><h3>${call}</h3><a class="callsign-evidence" href="/callsigns/${encodeURIComponent(item.callsign)}">View station history</a>${item.name ? `<p class="callsign-name">${esc(item.name)}</p>` : ''}<p>${esc(detail)}</p><div class="callsign-confidence"><span>${esc(item.confidence_label || 'Tentative')}</span><strong>${esc(confidence)}%</strong></div><div class="confidence-meter" role="meter" aria-label="Estimated callsign confidence" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${esc(confidence)}"><span style="width:${esc(confidence)}%"></span></div><p class="confidence-observations">${esc(observations)}${item.acoustic_quality_percent !== null && item.acoustic_quality_percent !== undefined ? ` · Best audio ${esc(item.acoustic_quality_percent)}%` : ''}</p>${evidence}<time>Last heard ${esc(heard)}</time>${item.source_path ? `<button class="callsign-evidence" type="button" data-source-path="${esc(item.source_path)}">Show transcript</button>` : ''}</div></article>`;
-  }).join('');
-  callsignCards.querySelectorAll('img').forEach(image => image.addEventListener('error', () => {
-    image.replaceWith(Object.assign(document.createElement('span'), { textContent: image.alt.split(' ').at(-1).slice(0, 2) }));
+    const score = element('div', '', 'callsign-confidence'); score.append(element('span', item.confidence_label || 'Tentative'), element('strong', `${confidence}%`));
+    const meter = element('div', '', 'confidence-meter', { role: 'meter', 'aria-label': 'Estimated callsign confidence', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': confidence }); const fill = element('span'); fill.style.width = `${confidence}%`; meter.append(fill);
+    details.append(score, meter, element('p', `${item.observation_count ?? 1} observations across ${item.recording_count ?? 1} recordings${item.acoustic_quality_percent != null ? ` · Best audio ${item.acoustic_quality_percent}%` : ''}`, 'confidence-observations'));
+    if (item.evidence?.length) { const evidence = element('details', '', 'confidence-evidence'); evidence.open = expandedEvidence.has(String(item.callsign)); const list = element('ul'); item.evidence.forEach(reason => list.append(element('li', reason))); evidence.append(element('summary', 'Why this score'), list); details.append(evidence); }
+    details.append(element('time', `Last heard ${item.last_heard_at ? new Date(item.last_heard_at).toLocaleString() : 'Time unavailable'}`));
+    if (item.source_path) { const show = actionButton('Show transcript', 'callsign-evidence'); show.addEventListener('click', () => revealTranscript(item.source_path)); details.append(show); }
+    card.append(photo, details); return card;
   }));
-  callsignCards.querySelectorAll('button.callsign-evidence').forEach(button => button.addEventListener('click', () => revealTranscript(button.dataset.sourcePath)));
   if (data.configured) loadJobs();
 }
 
@@ -220,16 +244,15 @@ function renderNodeSnapshot(data) {
 function renderConnectedStations(connections) {
   const favoriteTargets = new Set(favoriteItems.map(item => String(item.target_identifier)));
   document.querySelector('#stations-count').textContent = connections.length;
-  document.querySelector('#stations').innerHTML = connections.length
-    ? connections.map(connection => {
-        const talking = connection.keyed === true;
-        const status = [connection.connection_state, connection.direction, connection.peer].filter(Boolean).join(' · ');
-        const stale = connection.stale ? ' · stale' : '';
-        const identifier = String(connection.identifier);
-        const isFavorite = favoriteTargets.has(identifier);
-        return `<tr class="station-row${talking ? ' talking' : ''}"><td><span class="status-dot ${talking ? 'talking' : 'idle'}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(connection.display_name || connection.callsign || connection.node_number || identifier)}</td><td>${esc(status)}${esc(stale)}</td><td><div class="station-actions"><button class="favorite-add${isFavorite ? ' active' : ''}" data-target="${esc(identifier)}" type="button"${isFavorite ? ' disabled' : ''} aria-label="${isFavorite ? 'Favorite node' : 'Add node to favorites'}">${isFavorite ? '&#9733; Favorite' : '&#9734; Favorite'}</button><button class="station-action" data-target="${esc(identifier)}" type="button">Disconnect</button></div></td></tr>`;
-      }).join('')
-    : '<tr><td colspan="5" class="empty">No connected nodes.</td></tr>';
+  const table = document.querySelector('#stations'); table.replaceChildren();
+  connections.forEach(connection => {
+    const talking = connection.keyed === true; const identifier = String(connection.identifier); const isFavorite = favoriteTargets.has(identifier);
+    const row = element('tr', '', `station-row${talking ? ' talking' : ''}`); const dot = element('td'); dot.append(element('span', '', `status-dot ${talking ? 'talking' : 'idle'}`)); const id = element('td'); id.append(element('strong', identifier));
+    const actions = element('div', '', 'station-actions'); const favorite = actionButton(isFavorite ? '★ Favorite' : '☆ Favorite', `favorite-add${isFavorite ? ' active' : ''}`, { target: identifier }); favorite.disabled = isFavorite; favorite.setAttribute('aria-label', isFavorite ? 'Favorite node' : 'Add node to favorites');
+    actions.append(favorite, actionButton('Disconnect', 'station-action', { target: identifier })); const cell = element('td'); cell.append(actions);
+    row.append(dot, id, element('td', connection.display_name || connection.callsign || connection.node_number || identifier), element('td', [connection.connection_state, connection.direction, connection.peer, connection.stale ? 'stale' : ''].filter(Boolean).join(' · ')), cell); table.append(row);
+  });
+  if (!connections.length) { const row = element('tr'); row.append(element('td', 'No connected nodes.', 'empty', { colspan: 5 })); table.append(row); }
   document.querySelectorAll('.station-action').forEach(button => button.addEventListener('click', () => runCommand('Disconnect node', button.dataset.target)));
   document.querySelectorAll('.favorite-add:not(:disabled)').forEach(button => button.addEventListener('click', () => addConnectedFavorite(button.dataset.target)));
 }
@@ -264,15 +287,13 @@ const FAVORITE_CONNECTION_GROUPS = [
 ];
 
 function favoriteConnectionAction(identifier, connected) {
-  if (connected) {
-    return `<button class="favorite-connect" data-target="${esc(identifier)}" data-connected="true" type="button">Disconnect</button>`;
-  }
-  const options = FAVORITE_CONNECTION_GROUPS.map(([groupLabel, modes]) =>
-    `<div class="favorite-connect-group" role="group" aria-label="${esc(groupLabel)}"><span class="favorite-connect-group-label">${esc(groupLabel)}</span>${modes.map(([command, label]) =>
-      `<button class="favorite-connect-option" data-command="${esc(command)}" data-target="${esc(identifier)}" type="button" role="menuitem">${esc(label)}</button>`
-    ).join('')}</div>`
-  ).join('');
-  return `<div class="favorite-connect-split"><button class="favorite-connect favorite-connect-primary" data-target="${esc(identifier)}" data-connected="false" type="button" title="Connect in transceive mode">Connect</button><button class="favorite-connect-toggle" type="button" aria-label="Choose connection mode for node ${esc(identifier)}" aria-expanded="false">&#9662;</button><div class="favorite-connect-options" role="menu" hidden>${options}</div></div>`;
+  const primary = actionButton(connected ? 'Disconnect' : 'Connect', `favorite-connect${connected ? '' : ' favorite-connect-primary'}`, { target: identifier, connected: String(connected) });
+  if (connected) return primary;
+  primary.title = 'Connect in transceive mode';
+  const split = element('div', '', 'favorite-connect-split'); const toggle = actionButton('▾', 'favorite-connect-toggle'); toggle.setAttribute('aria-label', `Choose connection mode for node ${identifier}`); toggle.setAttribute('aria-expanded', 'false');
+  const options = element('div', '', 'favorite-connect-options', { role: 'menu' }); options.hidden = true;
+  FAVORITE_CONNECTION_GROUPS.forEach(([label, modes]) => { const group = element('div', '', 'favorite-connect-group', { role: 'group', 'aria-label': label }); group.append(element('span', label, 'favorite-connect-group-label')); modes.forEach(([command, label]) => { const button = actionButton(label, 'favorite-connect-option', { command, target: identifier }); button.setAttribute('role', 'menuitem'); group.append(button); }); options.append(group); });
+  split.append(primary, toggle, options); return split;
 }
 
 function renderFavorites() {
@@ -280,10 +301,10 @@ function renderFavorites() {
   document.querySelector('#favorites-count').textContent = favoriteItems.length;
   const table = document.querySelector('#favorites');
   if (!favoriteItems.length) {
-    table.innerHTML = '<tr><td colspan="11" class="empty">No favorite nodes yet. Add one from Connected nodes.</td></tr>';
+    const row = element('tr'); row.append(element('td', 'No favorite nodes yet. Add one from Connected nodes.', 'empty', { colspan: 11 })); table.replaceChildren(row);
     return;
   }
-  table.innerHTML = favoriteItems.map(item => {
+  table.replaceChildren(...favoriteItems.map(item => {
     const identifier = String(item.target_identifier);
     const connection = connections.get(identifier);
     const connected = Boolean(connection || item.connected);
@@ -296,8 +317,10 @@ function renderFavorites() {
     const busy = item.reported_busy_percent === null || item.reported_busy_percent === undefined ? '—' : `${item.reported_busy_percent}%`;
     const links = item.reported_link_count === null || item.reported_link_count === undefined ? '—' : item.reported_link_count;
     const age = item.stats_stale ? `${formatAge(item.stats_age_seconds)} · stale` : formatAge(item.stats_age_seconds);
-    return `<tr class="favorite-row${keyed ? ' talking' : ''}"><td><span class="status-dot ${dotState}" title="${esc(dotTitle)}"></span></td><td><strong>${esc(identifier)}</strong></td><td>${esc(callsign)}</td><td>${esc(item.description || item.label || '—')}</td><td>${esc(item.location || '—')}</td><td>${esc(item.keyup_count || 0)}</td><td class="favorite-duration">${esc(formatDuration(item.total_tx_milliseconds))}</td><td>${esc(busy)}</td><td>${esc(links)}</td><td class="favorite-age">${esc(age)}</td><td><div class="favorite-actions">${favoriteConnectionAction(identifier, connected)}<button class="favorite-topology" data-favorite-id="${esc(item.id)}" type="button">Chart</button><button class="favorite-edit" data-favorite-id="${esc(item.id)}" type="button">Edit</button></div></td></tr>`;
-  }).join('');
+    const row = element('tr', '', `favorite-row${keyed ? ' talking' : ''}`); const dot = element('td'); dot.append(element('span', '', `status-dot ${dotState}`, { title: dotTitle })); const id = element('td'); id.append(element('strong', identifier));
+    const actions = element('div', '', 'favorite-actions'); actions.append(favoriteConnectionAction(identifier, connected), actionButton('Chart', 'favorite-topology', { favoriteId: item.id }), actionButton('Edit', 'favorite-edit', { favoriteId: item.id })); const cell = element('td'); cell.append(actions);
+    row.append(dot, id, element('td', callsign), element('td', item.description || item.label || '—'), element('td', item.location || '—'), element('td', item.keyup_count || 0), element('td', formatDuration(item.total_tx_milliseconds), 'favorite-duration'), element('td', busy), element('td', links), element('td', age, 'favorite-age'), cell); return row;
+  }));
   table.querySelectorAll('.favorite-connect').forEach(button => button.addEventListener('click', () => {
     const connected = button.dataset.connected === 'true';
     runCommand(connected ? 'Disconnect node' : 'Connect node', button.dataset.target);
@@ -394,9 +417,7 @@ function topologyFavorite() {
 
 function updateTopologyRootOptions() {
   const select = document.querySelector('#topology-root');
-  select.innerHTML = '<option value="">Choose a favorite</option>' + favoriteItems.map(item =>
-    `<option value="${esc(item.id)}">${esc(item.target_identifier)} · ${esc(item.callsign || item.label || 'Favorite')}</option>`
-  ).join('');
+  select.replaceChildren(element('option', 'Choose a favorite', '', { value: '' }), ...favoriteItems.map(item => element('option', `${item.target_identifier} · ${item.callsign || item.label || 'Favorite'}`, '', { value: item.id })));
   if (topologyFavorite()) select.value = topologyRootFavoriteId;
 }
 
@@ -757,7 +778,7 @@ function renderTopology() {
   const item = topologyFavorite();
   const chart = document.querySelector('#topology-chart');
   if (!item) {
-    chart.innerHTML = '<div class="empty">Select Chart from a favorite row.</div>';
+    chart.replaceChildren(element('div', 'Select Chart from a favorite row.', 'empty'));
     document.querySelector('#topology-summary').textContent = 'Select Chart from a favorite row.';
     document.querySelector('#topology-live-state').textContent = 'Waiting for a favorite';
     return;
@@ -781,8 +802,8 @@ function renderTopology() {
     const targetNode = nodesById.get(targetId);
     const live = (sourceId === controlledNodeId() && targetNode?.connected) || (targetId === controlledNodeId() && sourceNode?.connected);
     const state = `${live ? ' live' : ''}${edge.provisional ? ' provisional' : ''}${edge.stale ? ' stale' : ''}`;
-    return `<line class="topology-edge${state}" data-edge-source="${esc(sourceId)}" data-edge-target="${esc(targetId)}" x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}"></line>`;
-  }).join('');
+    return svgElement('line', { class: `topology-edge${state}`, 'data-edge-source': sourceId, 'data-edge-target': targetId, x1: source.x, y1: source.y, x2: target.x, y2: target.y });
+  });
   const bubbles = nodes.map(node => {
     const position = positions.get(node.identifier);
     const stateClass = topologyNodeClass(node);
@@ -791,9 +812,10 @@ function renderTopology() {
     const metadata = topologyBubbleMetadata(node);
     const [firstLine, secondLine, thirdLine] = metadata.lines;
     const accessibleDetail = [firstLine, secondLine, thirdLine].filter(line => line !== '—').join(', ');
-    return `<g class="topology-node ${stateClass}${selected}${stale}" data-node-id="${esc(node.identifier)}" tabindex="0" role="button" aria-label="${esc(accessibleDetail)}" transform="translate(${position.x} ${position.y})"><ellipse class="topology-bubble" rx="${metadata.radiusX}" ry="${metadata.radiusY}"></ellipse><text class="topology-label" y="-16">${esc(firstLine)}</text><text class="topology-meta" y="1">${esc(secondLine)}</text><text class="topology-detail" y="18">${esc(thirdLine)}</text></g>`;
-  }).join('');
-  chart.innerHTML = `<svg viewBox="${view.x} ${view.y} ${view.width} ${view.height}" data-canvas-x="${canvas.x}" data-canvas-y="${canvas.y}" data-canvas-width="${canvas.width}" data-canvas-height="${canvas.height}" preserveAspectRatio="xMidYMid meet">${edges}${bubbles}</svg>`;
+    const bubble = svgElement('g', { class: `topology-node ${stateClass}${selected}${stale}`, 'data-node-id': node.identifier, tabindex: 0, role: 'button', 'aria-label': accessibleDetail, transform: `translate(${position.x} ${position.y})` });
+    bubble.append(svgElement('ellipse', { class: 'topology-bubble', rx: metadata.radiusX, ry: metadata.radiusY }), svgElement('text', { class: 'topology-label', y: -16 }, firstLine), svgElement('text', { class: 'topology-meta', y: 1 }, secondLine), svgElement('text', { class: 'topology-detail', y: 18 }, thirdLine)); return bubble;
+  });
+  const svg = svgElement('svg', { viewBox: `${view.x} ${view.y} ${view.width} ${view.height}`, 'data-canvas-x': canvas.x, 'data-canvas-y': canvas.y, 'data-canvas-width': canvas.width, 'data-canvas-height': canvas.height, preserveAspectRatio: 'xMidYMid meet' }); svg.append(...edges, ...bubbles); chart.replaceChildren(svg);
   const progress = graph?.progress;
   document.querySelector('#topology-summary').textContent = progress
     ? `${progress.discovered} discovered · ${progress.queried} fetched · ${progress.queued} queued · ${reportedEdges.length} edges${graph.limited ? ` · ${graph.limit_reason === 'max_depth' ? `depth limit ${progress.max_depth}` : `node limit ${progress.max_nodes}`}` : ''}`
@@ -949,7 +971,7 @@ function detailValue(value, fallback = '—') {
 function renderTopologyDetails(node) {
   const details = document.querySelector('#topology-details');
   if (!node) {
-    details.innerHTML = '<p class="empty">That node is no longer present in the latest topology.</p>';
+    details.replaceChildren(element('p', 'That node is no longer present in the latest topology.', 'empty'));
     return;
   }
   const connectedFor = node.connected_at ? formatAge((Date.now() - new Date(node.connected_at).getTime()) / 1000).replace(' ago', '') : '—';
@@ -957,7 +979,13 @@ function renderTopologyDetails(node) {
     ? `${node.latitude}, ${node.longitude}` : '—';
   const favorite = favoriteItems.find(item => String(item.target_identifier) === String(node.identifier));
   const canControl = String(node.identifier) !== controlledNodeId();
-  details.innerHTML = `<h3>Node ${esc(node.identifier)}</h3><p class="node-detail-callsign">${esc(detailValue(node.callsign, node.directory_status === 'not_found' ? 'Not in AllStar directory' : 'Unknown callsign'))}</p><dl class="topology-detail-grid"><dt>Status</dt><dd>${esc(node.keyed ? 'Keyed now' : node.connected ? `Connected · ${node.connection_state || 'established'}` : node.active ? 'Reporting active' : 'Inactive or unknown')}</dd><dt>Frequency</dt><dd>${esc(detailValue(node.frequency))}</dd><dt>Tone</dt><dd>${esc(detailValue(node.tone))}</dd><dt>Location</dt><dd>${esc(detailValue(node.location))}</dd><dt>Site</dt><dd>${esc(detailValue(node.site_name))}</dd><dt>Affiliation</dt><dd>${esc(detailValue(node.affiliation))}</dd><dt>Coordinates</dt><dd>${esc(coordinates)}</dd><dt>Link mode</dt><dd>${esc(detailValue(node.mode))}</dd><dt>Direction</dt><dd>${esc(detailValue(node.direction))}</dd><dt>Connected for</dt><dd>${esc(connectedFor)}</dd><dt>Keyups</dt><dd>${esc(detailValue(node.keyup_count))}</dd><dt>TX time</dt><dd>${esc(node.total_tx_milliseconds === undefined ? '—' : formatDuration(node.total_tx_milliseconds))}</dd><dt>Kerchunks</dt><dd>${esc(detailValue(node.kerchunk_count))}</dd><dt>Last activity</dt><dd>${esc(node.last_activity_at ? new Date(node.last_activity_at).toLocaleString() : '—')}</dd><dt>app_rpt</dt><dd>${esc(detailValue(node.app_rpt_version))}</dd></dl><div class="topology-detail-actions">${canControl ? `<button class="control-button topology-node-control" data-command="${node.connected ? 'Disconnect node' : 'Connect node'}" data-target="${esc(node.identifier)}" type="button">${node.connected ? 'Disconnect' : 'Connect'}</button>` : ''}${favorite ? `<button class="control-button topology-edit-favorite" data-favorite-id="${esc(favorite.id)}" type="button">Edit favorite</button>` : `<button class="control-button topology-add-favorite" data-target="${esc(node.identifier)}" type="button">Add favorite</button>`}</div>`;
+  const grid = element('dl', '', 'topology-detail-grid');
+  const entries = [['Status', node.keyed ? 'Keyed now' : node.connected ? `Connected · ${node.connection_state || 'established'}` : node.active ? 'Reporting active' : 'Inactive or unknown'], ['Frequency', node.frequency], ['Tone', node.tone], ['Location', node.location], ['Site', node.site_name], ['Affiliation', node.affiliation], ['Coordinates', coordinates], ['Link mode', node.mode], ['Direction', node.direction], ['Connected for', connectedFor], ['Keyups', node.keyup_count], ['TX time', node.total_tx_milliseconds === undefined ? '—' : formatDuration(node.total_tx_milliseconds)], ['Kerchunks', node.kerchunk_count], ['Last activity', node.last_activity_at ? new Date(node.last_activity_at).toLocaleString() : '—'], ['app_rpt', node.app_rpt_version]];
+  entries.forEach(([label, value]) => grid.append(element('dt', label), element('dd', detailValue(value))));
+  const actions = element('div', '', 'topology-detail-actions');
+  if (canControl) actions.append(actionButton(node.connected ? 'Disconnect' : 'Connect', 'control-button topology-node-control', { command: node.connected ? 'Disconnect node' : 'Connect node', target: node.identifier }));
+  actions.append(favorite ? actionButton('Edit favorite', 'control-button topology-edit-favorite', { favoriteId: favorite.id }) : actionButton('Add favorite', 'control-button topology-add-favorite', { target: node.identifier }));
+  details.replaceChildren(element('h3', `Node ${node.identifier}`), element('p', detailValue(node.callsign, node.directory_status === 'not_found' ? 'Not in AllStar directory' : 'Unknown callsign'), 'node-detail-callsign'), grid, actions);
   details.querySelector('.topology-node-control')?.addEventListener('click', buttonEvent => {
     const button = buttonEvent.currentTarget;
     runCommand(button.dataset.command, button.dataset.target);
@@ -1728,7 +1756,7 @@ function renderAll() {
     const win = document.querySelector(`.win[data-win="${panelId}"]`);
     if (win) document.body.appendChild(win);
   });
-  dockRoot.innerHTML = '';
+  dockRoot.replaceChildren();
   if (state.tree) dockRoot.appendChild(renderNode(state.tree));
   ALL_PANELS.forEach(panelId => {
     const win = document.querySelector(`.win[data-win="${panelId}"]`);
@@ -1740,7 +1768,7 @@ function renderAll() {
       win.classList.toggle('collapsed', !!rect.collapsed);
       if (collapseButton) collapseButton.textContent = rect.collapsed ? '+' : '–';
       if (dockButton) {
-        dockButton.innerHTML = '&#8600;';
+        dockButton.textContent = '↘';
         dockButton.setAttribute('aria-label', 'Dock window');
         dockButton.title = 'Dock window';
       }
@@ -1801,8 +1829,8 @@ function renderGroup(node) {
 
     const actions = document.createElement('div');
     actions.className = 'dock-group-actions';
-    actions.appendChild(iconButton('&#8599;', 'Undock', () => undockPanel(node.active)));
-    const closeButton = iconButton('&times;', 'Close', () => closePanel(node.active));
+    actions.appendChild(iconButton('↗', 'Undock', () => undockPanel(node.active)));
+    const closeButton = iconButton('×', 'Close', () => closePanel(node.active));
     closeButton.classList.add('dock-close');
     actions.appendChild(closeButton);
     tabstrip.appendChild(actions);
@@ -1818,7 +1846,7 @@ function renderGroup(node) {
     win.style.display = panelId === node.active ? '' : 'none';
     const dockButton = win.querySelector('.win-dock');
     if (dockButton) {
-      dockButton.innerHTML = '&#8599;';
+      dockButton.textContent = '↗';
       dockButton.setAttribute('aria-label', 'Undock window');
       dockButton.title = 'Undock window';
     }
@@ -1828,10 +1856,10 @@ function renderGroup(node) {
   return wrap;
 }
 
-function iconButton(html, label, onClick) {
+function iconButton(labelText, label, onClick) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.innerHTML = html;
+  button.textContent = labelText;
   button.setAttribute('aria-label', label);
   button.title = label;
   button.addEventListener('click', onClick);
@@ -2000,14 +2028,10 @@ function renderPresetList() {
   const container = document.querySelector('#layout-preset-list');
   const names = Object.keys(presets);
   if (!names.length) {
-    container.innerHTML = '<p class="empty-note">No saved presets</p>';
+    container.replaceChildren(element('p', 'No saved presets', 'empty-note'));
     return;
   }
-  container.innerHTML = names.map(name => `
-    <div class="preset-row">
-      <button class="preset-name" type="button" data-preset="${esc(name)}">${esc(name)}</button>
-      <button class="preset-delete" type="button" data-remove-preset="${esc(name)}" aria-label="Delete preset ${esc(name)}">&times;</button>
-    </div>`).join('');
+  container.replaceChildren(...names.map(name => { const row = element('div', '', 'preset-row'); const remove = actionButton('×', 'preset-delete', { removePreset: name }); remove.setAttribute('aria-label', `Delete preset ${name}`); row.append(actionButton(name, 'preset-name', { preset: name }), remove); return row; }));
   container.querySelectorAll('.preset-name').forEach(button => button.addEventListener('click', () => {
     const preset = loadPresets()[button.dataset.preset];
     if (preset) {

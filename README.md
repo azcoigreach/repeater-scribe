@@ -381,6 +381,19 @@ docker compose -f docker-compose.yml -f compose.internet.yml up -d --build
 Keep `.env`, AMI credentials, and API keys out of version control. See
 [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
+## Callsign history (Unreleased)
+
+The Callsigns workspace shows first/last heard, cached QRZ identity, mention and
+recording counts, confidence, saved recognition evidence, and operator review.
+Mentions describe decoded speech; explicit transmission attribution is separately
+labeled and currently incomplete. QRZ validation is separate from human review.
+Missing source audio preserves history and disables playback.
+
+See the [callsign API contract](docs/callsign-api.md),
+[review preservation rules](docs/architecture.md#reviewed-evidence-lifecycle), and
+[migration and verification guide](docs/verification-0.8.md). The package version
+remains 0.7.0 pending release.
+
 ## API
 
 FastAPI exposes interactive OpenAPI documentation at <http://localhost:8088/docs>

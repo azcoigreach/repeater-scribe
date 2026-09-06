@@ -253,6 +253,27 @@ show an improvement.
   callsign structure cannot be recovered reliably from text alone. Add repeat
   stations to `ASLT_KNOWN_CALLSIGNS` and retain representative audio for corpus
   testing rather than enabling broad speculative substitutions.
-- Segment timestamps and correction evidence exist in the in-process result but
-  are not currently persisted in the transcript table.
+- Final segment timestamps, raw Whisper `avg_logprob`, and callsign evidence are
+  persisted in normalized segment/mention rows. Timing is at segment boundaries,
+  not precise word alignment. Provisional output remains transient.
 - No remote or OpenAI transcription backend is implemented yet.
+
+## Persisted review evidence
+
+Final results select the recording's current transcript and persist ordered
+segments plus canonical callsign mentions. Normalized overall, acoustic and
+recognition confidence remain distinct from raw Whisper segment `avg_logprob`;
+negative log probabilities are never percentages. Unknown confidence is shown as
+unavailable. Legacy recordings without segments retain full-text display.
+
+Retranscribing details of the same transcript preserves matched human reviews
+within the 0.25-second matching tolerance, including original offsets and heard
+time together. Unmatched reviews become non-current evidence, excluded from
+normal history but retained in the database; repeated empty output preserves
+them. New detected evidence replaces ordinary unreviewed detections. See
+[reviewed evidence lifecycle](architecture.md#reviewed-evidence-lifecycle) for
+identity, evidence, current transcript and purge rules.
+
+QRZ validation confirms a directory entry exists, not a transmitting operator.
+Human confirmation does not establish transmission attribution either. Missing
+audio disables seeking while leaving saved evidence and timing visible.

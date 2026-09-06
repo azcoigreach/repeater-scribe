@@ -149,7 +149,7 @@ def test_dashboard_exposes_favorite_controls_and_key_totals() -> None:
     assert "Add node to favorites" in script
     assert "/favorites`" in script
     assert "favorite-connect-split" in script
-    assert "title=\"Connect in transceive mode\"" in script
+    assert "primary.title = 'Connect in transceive mode'" in script
     assert "FAVORITE_CONNECTION_GROUPS" in script
     assert "favorite-connect-group-label" in script
     assert "['Connect', [" in script
