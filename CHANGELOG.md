@@ -32,6 +32,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Preserve Recording tags drafts, focus and cursor position during event refreshes,
+  including in-flight saves and failed retries. Add spacing above the tag editor.
+
 - Create historical events from selected recordings on the first Create click
   after filling out the form. Keep membership preview separate from submission,
   show saving progress and failures next to the button, and retain inputs for retry.

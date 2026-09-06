@@ -9,6 +9,7 @@
   let current = null, editing = false, creationKey = null, markerId = null, checkinId = null;
   let selections = [], listCursor = null;
   const collections = {};
+  const recordingTagEditors = new Map();
   const types = ['Net', 'Exercise', 'Club Event', 'POTA', 'Testing', 'Maintenance', 'Roundtable', 'Special Event Station', 'QSO Session', 'Custom'];
   const iso = input => UITime.inputUTC(input);
   const time = value => value ? UITime.format(value) : 'Unknown time';
@@ -135,6 +136,42 @@
   $('#reopen-event').addEventListener('click', () => run(async () => {await api(`/${id}/reopen`, 'POST', {});await refreshDetail();await loadCollection('recordings');}));
   const archiveLink = (recording, offset = 0) => `/archive/recordings/${encodeURIComponent(recording)}?offset=${Number(offset) || 0}`;
   function seek(audio, offset) { if (!audio) return; audio.currentTime = Number(offset) || 0; audio.play().catch(() => {}); }
+  function recordingTagEditor(row) {
+    let editor = recordingTagEditors.get(row.id);
+    if (!editor) {
+      const form = element('form', null, 'tag-form');
+      const label = element('label', 'Recording tags ');
+      const input = element('input');
+      const save = element('button', 'Save recording tags', 'quiet-button');
+      label.append(input); form.append(label, save);
+      editor = {form, input, save, dirty: false, saving: false, awaiting: null};
+      recordingTagEditors.set(row.id, editor);
+      input.addEventListener('input', () => {
+        editor.dirty = true;
+        if (!editor.saving) save.textContent = 'Save recording tags';
+      });
+      form.addEventListener('submit', e => {e.preventDefault(); if (editor.saving) return; run(async () => {
+        const submitted = input.value;
+        editor.saving = true; save.disabled = true; save.textContent = 'Saving tags…';
+        try {
+          const result = await api(`/${id}/recordings/${row.id}/tags`, 'PATCH', {tags: tags(submitted)});
+          editor.awaiting = result.tags.join(', ');
+          // A user can continue typing while the request is in flight.
+          if (input.value === submitted) {
+            input.value = editor.awaiting; editor.dirty = false; save.textContent = 'Tags saved';
+          } else save.textContent = 'Save recording tags';
+        } catch (failure) {
+          editor.dirty = true; save.textContent = 'Retry saving tags'; throw failure;
+        } finally {editor.saving = false; save.disabled = false;}
+      });});
+    }
+    const saved = row.tags.join(', ');
+    // Ignore older poll responses until the server echoes the completed save.
+    if (editor.awaiting === saved) editor.awaiting = null;
+    if (!editor.dirty && !editor.saving && editor.awaiting === null) editor.input.value = saved;
+    editor.input.setAttribute('aria-label', `Tags for ${row.source_path}`);
+    return editor.form;
+  }
   function renderRecording(row) {
     const card = element('article', null, 'event-card'); card.dataset.recordingId = row.id;
     const heading = element('h3'); heading.append(link(time(row.started_at), archiveLink(row.id))); card.append(heading);
@@ -162,8 +199,7 @@
         const offset = audio?.currentTime || 0; fill($('#marker-form'), {recording_id: row.id, audio_offset: offset, at: row.started_at ? new Date(UITime.instant(row.started_at).getTime() + offset * 1000) : new Date()});
         $('#marker-form').scrollIntoView({block:'center'});field($('#marker-form'), 'note').focus();
       })); card.append(actions);
-      const tagForm = element('form', null, 'tag-form'); const label = element('label', 'Recording tags '); const input = element('input'); input.value = row.tags.join(', '); input.setAttribute('aria-label', `Tags for ${row.source_path}`); label.append(input); const save = element('button', 'Save recording tags', 'quiet-button'); tagForm.append(label, save);
-      tagForm.addEventListener('submit', e => {e.preventDefault();run(async () => {await api(`/${id}/recordings/${row.id}/tags`, 'PATCH', {tags: tags(input.value)}); save.textContent = 'Tags saved';});});card.append(tagForm);
+      card.append(recordingTagEditor(row));
     } else card.append(element('p', `Tags: ${row.tags.join(', ') || 'None'}`));
     return card;
   }
@@ -211,6 +247,8 @@
       const requestQuery = background ? state.lastQuery : params.toString();
       const result = await api(`/${id}/${kind}?${requestQuery}`);
       const root = $(`#${kind}-list`);
+      const focused = root.contains(document.activeElement) && document.activeElement.matches('.tag-form input') ? document.activeElement : null;
+      const selection = focused ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
       if (!append && !background) root.replaceChildren();
       const incomingKeys = new Set(result.items.map(row => row.id || row.callsign));
       if (background) [...root.children].filter(node => state.lastKeys.includes(node.dataset.key) && !incomingKeys.has(node.dataset.key)).forEach(node => node.remove());
@@ -224,6 +262,10 @@
         node.dataset.key = key; node.dataset.signature = signature;
         if (existing) existing.replaceWith(node); else root.append(node);
       });
+      // Moving a retained editor into an updated card must not interrupt typing.
+      if (focused?.isConnected && document.activeElement !== focused) {
+        focused.focus({preventScroll: true}); focused.setSelectionRange(...selection);
+      }
       if (!root.children.length) root.append(element('p', kind === 'recordings' ? 'No recordings yet. Membership updates as recordings arrive.' : kind === 'detected' ? 'No current callsign mentions in included recordings.' : kind === 'checkins' ? 'No operator-confirmed check-ins yet.' : 'No markers yet.', 'empty-collection'));
       if (result.items.length) root.querySelector('.empty-collection')?.remove();
       state.cursor = result.next_cursor; state.lastQuery = requestQuery; state.lastKeys = [...incomingKeys];
