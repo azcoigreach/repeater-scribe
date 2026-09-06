@@ -82,6 +82,14 @@ def test_normalized_persistence_and_current_transcript_statistics(archive_db) ->
         assert profile["attributed_transmission_count"] == 0
         mention = session.query(CallsignMention).one()
         assert mention.heard_at.replace(tzinfo=UTC) == datetime(2026, 9, 3, 12, 0, 4, tzinfo=UTC)
+        items, _, _ = list_call_sign_mentions(
+            session,
+            "KM7GHS",
+            cursor=None,
+            limit=50,
+            to_at=datetime(2026, 9, 3, tzinfo=UTC),
+        )
+        assert [item["mention_id"] for item in items] == [mention.id]
 
 
 def test_persistence_flushes_new_transcript_before_segments(archive_db) -> None:

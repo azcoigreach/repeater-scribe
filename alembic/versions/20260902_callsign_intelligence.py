@@ -193,6 +193,8 @@ def upgrade() -> None:
             "transmissions",
             sa.Column("attribution_level", sa.String(32), nullable=False, server_default="unknown"),
         )
+    if "duration_milliseconds" not in transmission_columns:
+        op.add_column("transmissions", sa.Column("duration_milliseconds", sa.Integer(), nullable=True))
     if not _has_index(bind, "transmissions", "ix_transmissions_operator_callsign"):
         op.create_index("ix_transmissions_operator_callsign", "transmissions", ["operator_callsign"])
 

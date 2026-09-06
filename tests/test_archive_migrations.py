@@ -193,7 +193,21 @@ def test_callsign_migration_repairs_missing_transmission_attribution_columns(tmp
     alembic(database, "callsign_intelligence")
     connection = sqlite3.connect(database)
     columns = {row[1] for row in connection.execute("PRAGMA table_info(transmissions)")}
-    assert {"operator_callsign", "attribution_level"} <= columns
+    assert {"operator_callsign", "attribution_level", "duration_milliseconds"} <= columns
+
+
+def test_forward_migration_repairs_missing_transmission_duration_column(tmp_path: Path) -> None:
+    database = tmp_path / "legacy-transmission-duration.db"
+    alembic(database, "callsign_intelligence")
+    connection = sqlite3.connect(database)
+    connection.execute("ALTER TABLE transmissions DROP COLUMN duration_milliseconds")
+    connection.commit()
+    connection.close()
+
+    alembic(database, "head")
+    connection = sqlite3.connect(database)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(transmissions)")}
+    assert "duration_milliseconds" in columns
 
 
 def test_startup_schema_guard_accepts_current_and_rejects_outdated(tmp_path: Path, monkeypatch) -> None:

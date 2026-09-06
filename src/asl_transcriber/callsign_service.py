@@ -272,7 +272,10 @@ def list_call_sign_mentions(
     if from_at:
         statement = statement.where(CallsignMention.heard_at >= from_at)
     if to_at:
-        statement = statement.where(CallsignMention.heard_at <= to_at)
+        if to_at.timetz().replace(tzinfo=None) == datetime.min.time():
+            statement = statement.where(CallsignMention.heard_at < to_at + timedelta(days=1))
+        else:
+            statement = statement.where(CallsignMention.heard_at <= to_at)
     if audio_status:
         statement = statement.where(Recording.audio_status == audio_status)
     if cursor:

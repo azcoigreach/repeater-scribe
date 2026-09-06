@@ -88,7 +88,7 @@ class SecurityMiddleware:
         headers["X-Request-ID"] = request_id
         if settings.deployment_mode == "internet":
             headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        if path == "/" or path.startswith(("/api/", "/ui/", "/auth/")):
+        if not path.startswith("/static/"):
             headers["Cache-Control"] = "no-store"
 
     async def _reject(
