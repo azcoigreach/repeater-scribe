@@ -1,6 +1,7 @@
 const directory = document.querySelector('#callsign-directory');
 const state = document.querySelector('#callsign-state');
 const more = document.querySelector('#callsign-more');
+const callsignPattern = /^[A-Z0-9]{1,3}\d[A-Z]{1,4}$/;
 let cursor = null;
 function text(tag, value, className = '') { const node = document.createElement(tag); node.textContent = value ?? ''; if (className) node.className = className; return node; }
 async function load(reset = false) {
@@ -12,4 +13,4 @@ async function load(reset = false) {
   data.items.forEach(item => { const card = document.createElement('article'); card.className = 'recording'; const link = document.createElement('a'); link.href = `/callsigns/${encodeURIComponent(item.callsign)}`; link.append(text('h3', item.callsign)); card.append(link, text('p', `${item.mention_count} mentions across ${item.recording_count} recordings · ${item.active_days} active days`), text('p', `Last heard: ${item.last_heard ? new Date(item.last_heard).toLocaleString() : 'Time unavailable'}`)); directory.append(card); });
   cursor = data.next_cursor; more.hidden = !data.has_more;
 }
-document.querySelector('#callsign-search').addEventListener('submit', event => { event.preventDefault(); load(true); }); more.addEventListener('click', () => load()); load(true);
+document.querySelector('#callsign-search').addEventListener('submit', event => { event.preventDefault(); const query = document.querySelector('#callsign-query').value.trim().toUpperCase(); if (callsignPattern.test(query)) { location.assign(`/callsigns/${encodeURIComponent(query)}`); return; } load(true); }); more.addEventListener('click', () => load()); load(true);
