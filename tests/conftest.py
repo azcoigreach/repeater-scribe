@@ -27,4 +27,4 @@ from asl_transcriber.database import Base, engine
 Base.metadata.create_all(engine)
 with engine.begin() as connection:
 	connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-	connection.execute(text("INSERT INTO alembic_version (version_num) VALUES ('transcript_text_corrections')"))
+	connection.execute(text("INSERT INTO alembic_version (version_num) VALUES ('events_sessions')"))

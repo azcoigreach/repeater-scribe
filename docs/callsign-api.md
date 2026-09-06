@@ -1,7 +1,8 @@
 # Callsign API (Unreleased)
 
-The app and package now report 0.8.0. The additive callsign APIs below accompany
-migration head `current_callsign_mentions`. Dashboard recordings and Archive
+The app and package report 0.9.0 with migration head `events_sessions`. The
+callsign APIs introduced in 0.8 retain the contracts below. Event attendance is
+separate; see the [session API](sessions-api.md). Dashboard recordings and Archive
 recording responses retain their existing fields.
 
 ## Resources and permissions

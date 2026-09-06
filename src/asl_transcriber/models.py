@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,7 +42,10 @@ class Node(Base):
 
 class Recording(Base):
     __tablename__ = "recordings"
-    __table_args__ = (UniqueConstraint("archive_root", "source_path", name="uq_recording_root_path"),)
+    __table_args__ = (
+        UniqueConstraint("archive_root", "source_path", name="uq_recording_root_path"),
+        Index("ix_recording_source_started", "archive_root", "started_at", "id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     created_at: Mapped[datetime] = mapped_column(
@@ -535,3 +540,110 @@ class SecurityAudit(Base):
     path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class RadioSession(Base):
+    """A durable operator event; source_root is the catalog's monitored identity."""
+
+    __tablename__ = "radio_sessions"
+    __table_args__ = (
+        CheckConstraint("ended_at IS NULL OR ended_at > started_at", name="ck_session_window"),
+        Index("uq_session_active_source", "source_root", unique=True,
+              sqlite_where=text("ended_at IS NULL")),
+        Index("ix_session_source_window", "source_root", "started_at", "ended_at"),
+        Index("ix_session_started", "started_at", "id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(255))
+    type: Mapped[str] = mapped_column(String(32))
+    description: Mapped[str] = mapped_column(Text, default="")
+    source_root: Mapped[str] = mapped_column(String(1024))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    net_control: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_by: Mapped[str] = mapped_column(String(255))
+    updated_by: Mapped[str] = mapped_column(String(255))
+
+
+class SessionRequest(Base):
+    __tablename__ = "session_requests"
+    actor: Mapped[str] = mapped_column(String(255), primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    session_id: Mapped[str] = mapped_column(ForeignKey("radio_sessions.id"), index=True)
+
+
+class SessionRecording(Base):
+    __tablename__ = "session_recordings"
+    __table_args__ = (
+        CheckConstraint("decision IS NULL OR decision IN ('include', 'exclude')", name="ck_membership_decision"),
+        Index("ix_membership_recording", "recording_id", "session_id"),
+    )
+    session_id: Mapped[str] = mapped_column(ForeignKey("radio_sessions.id"), primary_key=True)
+    recording_id: Mapped[str] = mapped_column(ForeignKey("recordings.id"), primary_key=True)
+    automatic: Mapped[bool] = mapped_column(Boolean, default=False)
+    decision: Mapped[str | None] = mapped_column(String(16))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_by: Mapped[str | None] = mapped_column(String(255))
+
+
+class SessionMarker(Base):
+    __tablename__ = "session_markers"
+    __table_args__ = (
+        CheckConstraint("audio_offset IS NULL OR (recording_id IS NOT NULL AND audio_offset >= 0)", name="ck_marker_offset"),
+        Index("ix_marker_session_time", "session_id", "at", "id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    session_id: Mapped[str] = mapped_column(ForeignKey("radio_sessions.id"))
+    type: Mapped[str] = mapped_column(String(32))
+    note: Mapped[str] = mapped_column(Text)
+    callsign: Mapped[str | None] = mapped_column(String(32))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recording_id: Mapped[str | None] = mapped_column(ForeignKey("recordings.id"))
+    audio_offset: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_by: Mapped[str] = mapped_column(String(255))
+    updated_by: Mapped[str] = mapped_column(String(255))
+
+
+class SessionCheckIn(Base):
+    __tablename__ = "session_checkins"
+    __table_args__ = (
+        UniqueConstraint("session_id", "callsign_id", name="uq_checkin_station"),
+        CheckConstraint("audio_offset IS NULL OR (recording_id IS NOT NULL AND audio_offset >= 0)", name="ck_checkin_offset"),
+        Index("ix_checkin_session_time", "session_id", "at", "id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    session_id: Mapped[str] = mapped_column(ForeignKey("radio_sessions.id"))
+    callsign_id: Mapped[str] = mapped_column(ForeignKey("callsigns.id"), index=True)
+    callsign: Mapped[Callsign] = relationship()
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str] = mapped_column(Text, default="")
+    recording_id: Mapped[str | None] = mapped_column(ForeignKey("recordings.id"))
+    audio_offset: Mapped[float | None] = mapped_column(Float)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    confirmed_by: Mapped[str] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    updated_by: Mapped[str] = mapped_column(String(255))
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
+class SessionTag(Base):
+    __tablename__ = "session_tags"
+    session_id: Mapped[str] = mapped_column(ForeignKey("radio_sessions.id"), primary_key=True)
+    tag: Mapped[str] = mapped_column(ForeignKey("tags.name"), primary_key=True)
+    __table_args__ = (Index("ix_session_tag_name", "tag", "session_id"),)
+
+
+class RecordingTag(Base):
+    __tablename__ = "recording_tags"
+    recording_id: Mapped[str] = mapped_column(ForeignKey("recordings.id"), primary_key=True)
+    tag: Mapped[str] = mapped_column(ForeignKey("tags.name"), primary_key=True)
+    __table_args__ = (Index("ix_recording_tag_name", "tag", "recording_id"),)

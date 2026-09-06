@@ -72,6 +72,7 @@ from asl_transcriber.node_service import NodeStateService
 from asl_transcriber.qrz import QrzClient, QrzError
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.security import SecurityMiddleware, sse_connections
+from asl_transcriber.session_api import router as sessions_router
 from asl_transcriber.topology import (
     TopologyService,
     ensure_topology_crawl,
@@ -412,12 +413,16 @@ if settings.cors_origin_list:
         allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "Idempotency-Key"],
     )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_host_list)
 app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
+
+
+app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["sessions"])
+app.include_router(sessions_router, prefix="/ui/sessions", include_in_schema=False)
 
 
 @app.get("/")
@@ -459,6 +464,12 @@ def _workspace_context(
     if callsign is not None:
         context["callsign"] = callsign
     return templates.TemplateResponse(request=request, name=template_name, context=context)
+
+
+@app.get("/events")
+@app.get("/events/{session_id}")
+def events_workspace(request: Request, session_id: str | None = None):
+    return _workspace_context(request, "events.html")
 
 
 @app.get("/archive")
@@ -1355,11 +1366,16 @@ def archive_recordings(
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: datetime | None = None,
     callsign: str | None = None,
+    source_id: str | None = None,
+    tag: str | None = None,
 ) -> dict[str, object]:
+    from asl_transcriber.session_api import resolve_source
+    source_root = resolve_source(db, source_id) if source_id else None
     try:
         items, next_cursor, has_more = list_recordings(
             db, cursor=cursor, limit=limit, query=q, status=status,
             audio_status=audio_status, from_at=from_, to_at=to, callsign=callsign,
+            source_root=source_root, tag=tag,
         )
     except ArchiveQueryError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -1367,7 +1383,7 @@ def archive_recordings(
         "items": items,
         "next_cursor": next_cursor,
         "has_more": has_more,
-        "filters": {"q": q, "status": status, "audio_status": audio_status, "from": from_.isoformat() if from_ else None, "to": to.isoformat() if to else None, "callsign": callsign},
+        "filters": {"q": q, "status": status, "audio_status": audio_status, "from": from_.isoformat() if from_ else None, "to": to.isoformat() if to else None, "callsign": callsign, "source_id": source_id, "tag": tag},
     }
 
 

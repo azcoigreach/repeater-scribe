@@ -49,7 +49,7 @@ def require_current_schema() -> None:
         raise RuntimeError("Database is not migrated; run 'alembic upgrade head' before startup")
     with engine.connect() as connection:
         revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-    if revision != "transcript_text_corrections":
+    if revision != "events_sessions":
         raise RuntimeError(
             "Database migration is outdated; run 'alembic upgrade head' before startup"
         )
