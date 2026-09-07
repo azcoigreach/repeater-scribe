@@ -1,6 +1,6 @@
-# Callsign API (Unreleased)
+# Callsign API (0.9.1)
 
-The app and package report 0.9.0 with migration head `events_sessions`. The
+The app and package report 0.9.1 with migration head `events_sessions`. The
 callsign APIs introduced in 0.8 retain the contracts below. Event attendance is
 separate; see the [session API](sessions-api.md). Dashboard recordings and Archive
 recording responses retain their existing fields.
@@ -52,8 +52,12 @@ Each directory item contains `callsign`, nullable `qrz_display_name`,
 
 History filters: `from`, `to` (ISO dates or datetimes), `review_status`
 (`detected`, `confirmed`, `corrected`, `rejected`), and `audio_status`
-(`available`, `missing`, `expired`, `archived`, `protected`). A midnight `to` is
-inclusive of that whole calendar date; other datetimes are inclusive instants.
+(`available`, `missing`, `expired`, `archived`, `protected`). A bare date or timezone-naive midnight `to` is inclusive of that whole UTC
+calendar date for legacy clients. Offset-bearing datetimes (including midnight)
+are inclusive instants, normalized to UTC before querying. The UI converts its
+local date selections into explicit UTC bounds covering the whole local day.
+Timestamp responses include an explicit UTC offset, including SQLite-backed
+first/last-heard and mention times.
 Omitting review status excludes rejected rows. Explicit `review_status=rejected`
 returns rejected **current** rows. QRZ validation filtering is on the directory,
 not history. Unknown status values match no rows.

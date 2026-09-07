@@ -308,3 +308,55 @@ def test_expired_negatives_refresh_with_attempt_bound_and_stop_on_failure(
     assert client.lookup.call_count == expected
     assert len(result["items"]) == 4
     assert sum(row["status"] == "found" for row in result["items"]) == (0 if failure else expected)
+
+
+def test_sqlite_timestamps_have_explicit_utc_across_archive_and_callsigns(db):
+    recording, _ = seed(db)
+    db.expire_all()
+    assert db.get(Recording, recording.id).started_at.tzinfo is None
+    serialized = serialize_recording(recording)
+    assert serialized['started_at'] == '2026-09-05T12:00:00+00:00'
+    for key in ['created_at', 'updated_at']:
+        assert datetime.fromisoformat(serialized[key]).utcoffset() == timedelta(0)
+    profile = callsign_profile(db, 'KM7GHS')
+    directory, _, _ = list_callsigns(db, query=None, cursor=None, limit=50)
+    mentions, _, _ = list_call_sign_mentions(db, 'KM7GHS', cursor=None, limit=50)
+    for value in [profile['first_heard'], profile['last_heard'], directory[0]['last_heard'], mentions[0]['heard_at']]:
+        assert datetime.fromisoformat(value) == NOW + timedelta(seconds=4)
+
+
+def test_offset_search_bounds_are_normalized_before_sqlite_queries(db):
+    recording, _ = seed(db)
+    start = datetime.fromisoformat('2026-09-05T05:00:00-07:00')
+    end = datetime.fromisoformat('2026-09-05T05:00:05-07:00')
+    rows, _, _ = list_recordings(db, cursor=None, limit=50, query=None, status=None,
+                               audio_status=None, from_at=start, to_at=end, callsign=None)
+    assert [row['id'] for row in rows] == [recording.id]
+    mentions, _, _ = list_call_sign_mentions(db, 'KM7GHS', cursor=None, limit=50,
+                                           from_at=start, to_at=end)
+    assert [row['recording_id'] for row in mentions] == [recording.id]
+
+
+def test_aware_midnight_callsign_bound_is_an_instant_not_an_extra_day(db):
+    seed(db)
+    mentions, _, _ = list_call_sign_mentions(
+        db, 'KM7GHS', cursor=None, limit=50,
+        to_at=datetime(2026, 9, 5, tzinfo=UTC),
+    )
+    assert mentions == []
+    # Existing clients with bare UTC dates retain inclusive-day behavior.
+    mentions, _, _ = list_call_sign_mentions(
+        db, 'KM7GHS', cursor=None, limit=50, to_at=datetime(2026, 9, 5, tzinfo=UTC).replace(tzinfo=None),
+    )
+    assert len(mentions) == 1
+
+
+def test_callsign_local_day_bounds_include_final_microsecond_and_exclude_next_day(db):
+    last, _ = seed(db, started=datetime(2026, 9, 6, 6, 59, 55, 999999, tzinfo=UTC))
+    seed(db, started=datetime(2026, 9, 6, 6, 59, 56, tzinfo=UTC))
+    mentions, _, _ = list_call_sign_mentions(
+        db, 'KM7GHS', cursor=None, limit=50,
+        from_at=datetime.fromisoformat('2026-09-05T07:00:00Z'),
+        to_at=datetime.fromisoformat('2026-09-06T06:59:59.999999Z'),
+    )
+    assert [item['recording_id'] for item in mentions] == [last.id]

@@ -6,14 +6,15 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>Recording | Repeater Scribe</title>
   <link rel="icon" type="image/png" href="/static/repeater-scribe-state0-256px.png">
-  <link rel="stylesheet" href="/static/archive.css?v=0.9.0">
-  <link rel="stylesheet" href="/static/transcript_corrections.css?v=0.8.1-2">
-  <link rel="stylesheet" href="/static/events.css">
-  <script src="/static/event_links.js" defer></script>
+  <link rel="stylesheet" href="/static/archive.css?v=0.9.1">
+  <link rel="stylesheet" href="/static/transcript_corrections.css?v=0.9.1">
+  <link rel="stylesheet" href="/static/events.css?v=0.9.1">
+  <script src="/static/event_links.js?v=0.9.1" defer></script>
+  <script src="/static/time.js?v=0.9.1"></script>
 </head>
 <body data-role="{{ role }}">
   <header class="topbar"><a class="brand" href="/"><img class="brand-logo" src="/static/logo.png" alt="REPEATER SCRIBE"></a><nav class="workspace-nav" aria-label="Workspaces"><a class="workspace-link" href="/">Dashboard</a><a class="workspace-link active" href="/archive" aria-current="page">Archive</a><a class="workspace-link" href="/callsigns">Callsigns</a><a class="workspace-link" href="/events">Events</a></nav><div class="identity">{{ identity }} <span>{{ role }}</span></div>{% if csrf_token %}<button id="sign-out" class="quiet-button" type="button">Sign out</button>{% endif %}</header>
-  <main class="archive-shell detail-shell" data-recording-id="{{ recording_id }}">
+  <main class="archive-shell detail-shell" data-recording-id="{{ recording_id }}"><p class="timezone-help">Times use your browser’s local timezone.</p>
     <a class="back-link" href="/archive">Back to archive</a>
     <p id="detail-state" class="state" role="status" aria-live="polite">Loading recording...</p>
     <article id="recording-detail" hidden>
@@ -24,7 +25,7 @@
       <section class="detail-section"><h2>Recording details</h2><dl id="metadata" class="metadata"></dl></section>
     </article>
   </main>
-  <script src="/static/transcript_corrections.js?v=0.8.1-2" defer></script>
-  <script src="/static/archive_detail.js?v=0.9.0" defer></script>
+  <script src="/static/transcript_corrections.js?v=0.9.1" defer></script>
+  <script src="/static/archive_detail.js?v=0.9.1" defer></script>
 </body>
 </html>

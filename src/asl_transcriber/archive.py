@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from asl_transcriber.models import CallsignMention, Recording, Transcript
+from asl_transcriber.time_utils import iso_utc, utc
 
 
 class ArchiveQueryError(ValueError):
@@ -133,8 +134,8 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
         "id": recording.id,
         "source_path": recording.source_path,
         "source_id": hashlib.sha256((recording.archive_root or "").encode()).hexdigest(),
-        "started_at": recording.started_at.isoformat() if recording.started_at else None,
-        "source_modified_at": recording.source_modified_at.isoformat() if recording.source_modified_at else None,
+        "started_at": iso_utc(recording.started_at),
+        "source_modified_at": iso_utc(recording.source_modified_at),
         "duration_seconds": recording.duration_seconds,
         "file_size": recording.file_size,
         "content_hash": recording.content_hash,
@@ -143,9 +144,9 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
         "status": recording.status,
         "audio_status": recording.audio_status,
         "audio_available": recording.audio_status == "available",
-        "created_at": recording.created_at.isoformat(),
-        "updated_at": recording.updated_at.isoformat(),
-        "expired_at": recording.expired_at.isoformat() if recording.expired_at else None,
+        "created_at": iso_utc(recording.created_at),
+        "updated_at": iso_utc(recording.updated_at),
+        "expired_at": iso_utc(recording.expired_at),
         "ingestion": ({"id": job.id, "status": job.status, "attempt_count": job.attempt_count, "last_error": job.last_error, "dead_letter": job.dead_letter} if job else None),
         "transcript": ({"corrections_need_review": sum(not edit.get("applied", True) for edit in json.loads(transcript.text_corrections_json or "[]")), "raw_text": transcript.raw_text, "display_text": transcript.display_text, "language": transcript.language, "confidence": transcript.confidence, "callsign_mentions": mentions, "segments": [{"id": segment.id, "ordinal": segment.ordinal, "start": segment.start_offset, "end": segment.end_offset, "raw_text": segment.raw_text, "display_text": segment.display_text, "language": segment.language, "confidence": segment.avg_logprob} for segment in transcript.segments]} if transcript else None),
     }
@@ -191,9 +192,9 @@ def list_recordings(
     if audio_status:
         conditions.append(Recording.audio_status == audio_status)
     if from_at:
-        conditions.append(order_time >= from_at)
+        conditions.append(order_time >= utc(from_at))
     if to_at:
-        conditions.append(order_time <= to_at)
+        conditions.append(order_time <= utc(to_at))
     if callsign:
         normalized_callsign = callsign.strip().upper()
         if not normalized_callsign:

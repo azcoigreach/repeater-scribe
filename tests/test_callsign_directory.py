@@ -7,4 +7,4 @@ def test_exact_callsign_search_opens_station_history() -> None:
 
     assert "const callsignPattern = /^[A-Z0-9]{1,3}\\d[A-Z]{1,4}$/" in script
     assert "location.assign(`/callsigns/${encodeURIComponent(query)}`)" in script
-    assert 'src="/static/callsigns.js?v=2"' in template
+    assert 'src="/static/callsigns.js?v=0.9.1"' in template

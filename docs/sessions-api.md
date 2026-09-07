@@ -1,4 +1,4 @@
-# Sessions API (0.9.0)
+# Sessions API (0.9.1)
 
 The UI calls these resources **Events**. The existing `GET /api/v1/events` SSE
 stream, its payloads and node-control APIs are unchanged.

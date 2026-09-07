@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-06
+
+### Fixed
+
+- Preserve Recording tags drafts, focus and cursor position during event refreshes,
+  including in-flight saves and failed retries. Add spacing above the tag editor.
+
+- Create historical events from selected recordings on the first Create click
+  after filling out the form. Keep membership preview separate from submission,
+  show saving progress and failures next to the button, and retain inputs for retry.
+
+- Display UTC recording, callsign, activity and event timestamps in the
+  browser’s local timezone consistently. Convert calendar
+  inputs to UTC, preserve instants in Archive/Event links, and apply Callsign
+  date filters to local days. Restore explicit UTC offsets on SQLite API output
+  and normalize offset-bearing search bounds before database queries.
+
+- Remove the timezone label beneath the dashboard logo.
+
+### Changed
+
+- Align application/package metadata, UI asset versions, and current user/API
+  documentation at 0.9.1. No new database migration is required.
+
+## Earlier changes through 0.9.0
+
 ### Added
 
 - 0.9.0 Events workspace for live nets and historical reconstruction from Archive

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from asl_transcriber.models import Favorite, FavoriteStatsSnapshot, RemoteNodeStat
 from asl_transcriber.node_control import AdjacentLink, RemoteKeyTransition
+from asl_transcriber.time_utils import iso_utc
 
 
 class FavoriteNotFound(LookupError):
@@ -226,15 +227,15 @@ def serialize_favorite(
         "last_activity_at": _utc(last_activity).isoformat() if last_activity else None,
         "topology": topology,
         "directory_metadata": directory_metadata,
-        "last_keyed_at": stat.last_keyed_at.isoformat() if stat and stat.last_keyed_at else None,
+        "last_keyed_at": iso_utc(stat.last_keyed_at) if stat and stat.last_keyed_at else None,
         "last_unkeyed_at": (
-            stat.last_unkeyed_at.isoformat() if stat and stat.last_unkeyed_at else None
+            iso_utc(stat.last_unkeyed_at) if stat and stat.last_unkeyed_at else None
         ),
         "connected": connected,
         "keyed": keyed,
         "connection_state": live_link.connection_state if live_link is not None else None,
-        "created_at": favorite.created_at.isoformat(),
-        "updated_at": favorite.updated_at.isoformat(),
+        "created_at": iso_utc(favorite.created_at),
+        "updated_at": iso_utc(favorite.updated_at),
     }
 
 

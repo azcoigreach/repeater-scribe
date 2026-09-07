@@ -9,10 +9,10 @@
   let current = null, editing = false, creationKey = null, markerId = null, checkinId = null;
   let selections = [], listCursor = null;
   const collections = {};
+  const recordingTagEditors = new Map();
   const types = ['Net', 'Exercise', 'Club Event', 'POTA', 'Testing', 'Maintenance', 'Roundtable', 'Special Event Station', 'QSO Session', 'Custom'];
-  const localTime = value => { const date = value ? new Date(value) : new Date(); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 23); };
-  const iso = value => value ? new Date(value).toISOString() : null;
-  const time = value => value ? new Date(value).toLocaleString() : 'Unknown time';
+  const iso = input => UITime.inputUTC(input);
+  const time = value => value ? UITime.format(value) : 'Unknown time';
   const seconds = value => value == null ? 'Unavailable' : `${Math.round(value)} seconds`;
   const tags = value => value.split(',').map(v => v.trim()).filter(Boolean);
   const element = (tag, value, className) => { const node = document.createElement(tag); if (value != null) node.textContent = value; if (className) node.className = className; return node; };
@@ -33,7 +33,7 @@
     return response.json();
   }
   const field = (target, name) => target.elements.namedItem(name);
-  function fill(target, values) { Object.entries(values).forEach(([key, value]) => { const input = field(target, key); if (input) input.value = value ?? ''; }); }
+  function fill(target, values) { Object.entries(values).forEach(([key, value]) => { const input = field(target, key); if (input?.type === 'datetime-local') UITime.setInput(input, value); else if (input) input.value = value ?? ''; }); }
   function editor(historical = false, edit = false) {
     editing = edit;
     $('#event-editor').hidden = false;
@@ -41,24 +41,25 @@
     $('#save-event').textContent = edit ? 'Save event' : historical ? 'Create Historical Event' : 'Start Event';
     $('#preview-event').hidden = edit;
     $('#membership-preview').replaceChildren();
+    $('#event-save-status').hidden = true;
     creationKey = crypto.randomUUID();
     form.reset();
     field(form, 'source_id').disabled = edit;
     field(form, 'ended_at').required = historical;
-    fill(form, edit ? {...current, started_at: localTime(current.started_at), ended_at: current.ended_at ? localTime(current.ended_at) : '', tags: current.tags.join(', ')} : {
-      name: '', started_at: localTime(historical ? new Date(Date.now() - 3600000) : null),
-      ended_at: historical ? localTime() : '', source_id: query.get('source_id') || field(form, 'source_id').options[0]?.value,
+    fill(form, edit ? {...current, tags: current.tags.join(', ')} : {
+      name: '', started_at: new Date(Date.now() - (historical ? 3600000 : 0)),
+      ended_at: historical ? new Date() : '', source_id: query.get('source_id') || field(form, 'source_id').options[0]?.value,
     });
     if (!edit) {
-      if (query.get('from')) field(form, 'started_at').value = localTime(query.get('from'));
-      if (query.get('to')) field(form, 'ended_at').value = localTime(query.get('to'));
+      if (query.get('from')) UITime.setInput(field(form, 'started_at'), query.get('from'));
+      if (query.get('to')) UITime.setInput(field(form, 'ended_at'), query.get('to'));
     }
     $('#selection-note').textContent = selections.length && !edit ? `${selections.length} selected recording(s) will be explicit inclusions. Preview shows additional automatic membership.` : '';
     $('#event-editor').scrollIntoView({block:'start'});
   }
   function payload() {
     return { name: field(form, 'name').value, type: field(form, 'type').value, source_id: field(form, 'source_id').value,
-      started_at: iso(field(form, 'started_at').value), ended_at: iso(field(form, 'ended_at').value),
+      started_at: iso(field(form, 'started_at')), ended_at: iso(field(form, 'ended_at')),
       net_control: field(form, 'net_control').value || null, description: field(form, 'description').value,
       tags: tags(field(form, 'tags').value), recording_ids: selections };
   }
@@ -74,9 +75,15 @@
   $('#historical-event').addEventListener('click', () => editor(true));
   $('#cancel-event').addEventListener('click', () => $('#event-editor').hidden = true);
   $('#preview-event').addEventListener('click', () => run(preview));
-  form.addEventListener('submit', e => { e.preventDefault(); run(async () => {
+  form.addEventListener('submit', e => { e.preventDefault(); if ($('#save-event').disabled) return; run(async () => {
     const data = payload();
-    $('#save-event').disabled = true;
+    const save = $('#save-event');
+    const label = save.textContent;
+    const status = $('#event-save-status');
+    save.disabled = true;
+    save.textContent = editing ? 'Saving…' : 'Creating…';
+    status.textContent = editing ? 'Saving event…' : 'Creating event…';
+    status.hidden = false;
     try {
       if (editing) {
         const {tags: values, source_id, recording_ids, ...metadata} = data;
@@ -85,18 +92,19 @@
         $('#event-editor').hidden = true;
         await refreshDetail(); await loadCollection('recordings');
       } else {
-        // A preview is always shown before creation from selected recordings.
-        if (selections.length && !$('#membership-preview').children.length) { await preview(); return; }
         const result = await api('', 'POST', data, {'Idempotency-Key': creationKey});
         sessionStorage.removeItem('event-selection');
         location.assign(`/events/${result.id}`);
       }
-    } finally { $('#save-event').disabled = false; }
+    } catch (failure) {
+      status.textContent = `Could not ${editing ? 'save' : 'create'} event: ${failure.message}`;
+      throw failure;
+    } finally { save.disabled = false; save.textContent = label; }
   }); });
   form.addEventListener('input', () => $('#membership-preview').replaceChildren());
   async function loadEvents(append = false) {
     const filters = new URLSearchParams();
-    for (const [key, value] of new FormData($('#event-filters'))) if (value) filters.set(key, ['from', 'to'].includes(key) ? iso(value) : value);
+    for (const [key, value] of new FormData($('#event-filters'))) if (value) filters.set(key, ['from', 'to'].includes(key) ? iso(field($('#event-filters'), key)) : value);
     for (const key of ['recording_id', 'callsign']) if (query.get(key)) filters.set(key, query.get(key));
     if (append && listCursor) filters.set('cursor', listCursor);
     const result = await api(`?${filters}`);
@@ -128,6 +136,42 @@
   $('#reopen-event').addEventListener('click', () => run(async () => {await api(`/${id}/reopen`, 'POST', {});await refreshDetail();await loadCollection('recordings');}));
   const archiveLink = (recording, offset = 0) => `/archive/recordings/${encodeURIComponent(recording)}?offset=${Number(offset) || 0}`;
   function seek(audio, offset) { if (!audio) return; audio.currentTime = Number(offset) || 0; audio.play().catch(() => {}); }
+  function recordingTagEditor(row) {
+    let editor = recordingTagEditors.get(row.id);
+    if (!editor) {
+      const form = element('form', null, 'tag-form');
+      const label = element('label', 'Recording tags ');
+      const input = element('input');
+      const save = element('button', 'Save recording tags', 'quiet-button');
+      label.append(input); form.append(label, save);
+      editor = {form, input, save, dirty: false, saving: false, awaiting: null};
+      recordingTagEditors.set(row.id, editor);
+      input.addEventListener('input', () => {
+        editor.dirty = true;
+        if (!editor.saving) save.textContent = 'Save recording tags';
+      });
+      form.addEventListener('submit', e => {e.preventDefault(); if (editor.saving) return; run(async () => {
+        const submitted = input.value;
+        editor.saving = true; save.disabled = true; save.textContent = 'Saving tags…';
+        try {
+          const result = await api(`/${id}/recordings/${row.id}/tags`, 'PATCH', {tags: tags(submitted)});
+          editor.awaiting = result.tags.join(', ');
+          // A user can continue typing while the request is in flight.
+          if (input.value === submitted) {
+            input.value = editor.awaiting; editor.dirty = false; save.textContent = 'Tags saved';
+          } else save.textContent = 'Save recording tags';
+        } catch (failure) {
+          editor.dirty = true; save.textContent = 'Retry saving tags'; throw failure;
+        } finally {editor.saving = false; save.disabled = false;}
+      });});
+    }
+    const saved = row.tags.join(', ');
+    // Ignore older poll responses until the server echoes the completed save.
+    if (editor.awaiting === saved) editor.awaiting = null;
+    if (!editor.dirty && !editor.saving && editor.awaiting === null) editor.input.value = saved;
+    editor.input.setAttribute('aria-label', `Tags for ${row.source_path}`);
+    return editor.form;
+  }
   function renderRecording(row) {
     const card = element('article', null, 'event-card'); card.dataset.recordingId = row.id;
     const heading = element('h3'); heading.append(link(time(row.started_at), archiveLink(row.id))); card.append(heading);
@@ -152,11 +196,10 @@
         await api(`/${id}/recordings/${row.id}`, 'PATCH', {decision}); await loadCollection('recordings'); await refreshDetail(); await loadCollection('checkins'); await loadCollection('detected');
       })));
       actions.append(button('Mark audio position', () => {
-        const offset = audio?.currentTime || 0; fill($('#marker-form'), {recording_id: row.id, audio_offset: offset, at: localTime(row.started_at ? new Date(new Date(row.started_at).getTime() + offset * 1000) : null)});
+        const offset = audio?.currentTime || 0; fill($('#marker-form'), {recording_id: row.id, audio_offset: offset, at: row.started_at ? new Date(UITime.instant(row.started_at).getTime() + offset * 1000) : new Date()});
         $('#marker-form').scrollIntoView({block:'center'});field($('#marker-form'), 'note').focus();
       })); card.append(actions);
-      const tagForm = element('form', null, 'tag-form'); const label = element('label', 'Recording tags '); const input = element('input'); input.value = row.tags.join(', '); input.setAttribute('aria-label', `Tags for ${row.source_path}`); label.append(input); const save = element('button', 'Save recording tags', 'quiet-button'); tagForm.append(label, save);
-      tagForm.addEventListener('submit', e => {e.preventDefault();run(async () => {await api(`/${id}/recordings/${row.id}/tags`, 'PATCH', {tags: tags(input.value)}); save.textContent = 'Tags saved';});});card.append(tagForm);
+      card.append(recordingTagEditor(row));
     } else card.append(element('p', `Tags: ${row.tags.join(', ') || 'None'}`));
     return card;
   }
@@ -173,7 +216,7 @@
       actions.append(button(isMarker ? 'Edit marker' : 'Edit check-in', () => {
         const target = isMarker ? $('#marker-form') : $('#checkin-form');
         if (isMarker) {markerId = row.id;$('#save-marker').textContent = 'Save marker';} else {checkinId = row.id;$('#save-checkin').textContent = 'Save check-in';}
-        fill(target, {...row, at: localTime(row.at)}); target.scrollIntoView({block:'center'});
+        fill(target, row); target.scrollIntoView({block:'center'});
       }), button(isMarker ? 'Remove marker' : 'Undo check-in', async () => {await api(`/${id}/${kind}/${row.id}`, 'DELETE');await loadCollection(kind);}));
       card.append(actions);
     }
@@ -184,7 +227,7 @@
     row.evidence.forEach((evidence, index) => card.append(link(`Evidence ${index + 1} `, archiveLink(evidence.recording_id, evidence.start_offset))));
     if (canWrite) card.append(button('Confirm Check-In', () => {
       checkinId = null; $('#save-checkin').textContent = 'Confirm Check-In';
-      fill($('#checkin-form'), {callsign: row.callsign, at: localTime(row.first_mention_at), note: '', recording_id: row.evidence[0]?.recording_id, audio_offset: row.evidence[0]?.start_offset});
+      fill($('#checkin-form'), {callsign: row.callsign, at: row.first_mention_at || new Date(), note: '', recording_id: row.evidence[0]?.recording_id, audio_offset: row.evidence[0]?.start_offset});
       $('#checkin-form').scrollIntoView({block:'center'});field($('#checkin-form'), 'at').focus();
     }));
     return card;
@@ -204,6 +247,8 @@
       const requestQuery = background ? state.lastQuery : params.toString();
       const result = await api(`/${id}/${kind}?${requestQuery}`);
       const root = $(`#${kind}-list`);
+      const focused = root.contains(document.activeElement) && document.activeElement.matches('.tag-form input') ? document.activeElement : null;
+      const selection = focused ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
       if (!append && !background) root.replaceChildren();
       const incomingKeys = new Set(result.items.map(row => row.id || row.callsign));
       if (background) [...root.children].filter(node => state.lastKeys.includes(node.dataset.key) && !incomingKeys.has(node.dataset.key)).forEach(node => node.remove());
@@ -217,6 +262,10 @@
         node.dataset.key = key; node.dataset.signature = signature;
         if (existing) existing.replaceWith(node); else root.append(node);
       });
+      // Moving a retained editor into an updated card must not interrupt typing.
+      if (focused?.isConnected && document.activeElement !== focused) {
+        focused.focus({preventScroll: true}); focused.setSelectionRange(...selection);
+      }
       if (!root.children.length) root.append(element('p', kind === 'recordings' ? 'No recordings yet. Membership updates as recordings arrive.' : kind === 'detected' ? 'No current callsign mentions in included recordings.' : kind === 'checkins' ? 'No operator-confirmed check-ins yet.' : 'No markers yet.', 'empty-collection'));
       if (result.items.length) root.querySelector('.empty-collection')?.remove();
       state.cursor = result.next_cursor; state.lastQuery = requestQuery; state.lastKeys = [...incomingKeys];
@@ -231,14 +280,14 @@
   $('#include-recording').addEventListener('submit', e => {e.preventDefault();run(async () => {await api(`/${id}/recordings/${encodeURIComponent(field(e.target, 'recording_id').value)}`, 'PATCH', {decision:'include'});e.target.reset();await loadCollection('recordings');await refreshDetail();});});
   function resetAnnotation(kind) {
     const isMarker = kind === 'markers'; const target = isMarker ? $('#marker-form') : $('#checkin-form');
-    target.reset();field(target, 'at').value = localTime();
+    target.reset();UITime.setInput(field(target, 'at'), new Date());
     if (isMarker) {markerId = null;$('#save-marker').textContent = 'Add marker';} else {checkinId = null;$('#save-checkin').textContent = 'Confirm Check-In';}
   }
   for (const kind of ['markers', 'checkins']) {
     const isMarker = kind === 'markers'; const target = isMarker ? $('#marker-form') : $('#checkin-form');
     $(isMarker ? '#cancel-marker' : '#cancel-checkin').addEventListener('click', () => resetAnnotation(kind));
     target.addEventListener('submit', e => {e.preventDefault();run(async () => {
-      const values = Object.fromEntries(new FormData(target)); values.at = iso(values.at); values.recording_id ||= null; values.audio_offset = values.audio_offset === '' ? null : Number(values.audio_offset);
+      const values = Object.fromEntries(new FormData(target)); values.at = iso(field(target, 'at')); values.recording_id ||= null; values.audio_offset = values.audio_offset === '' ? null : Number(values.audio_offset);
       if (isMarker) values.callsign ||= null;
       const identifier = isMarker ? markerId : checkinId;
       await api(`/${id}/${kind}${identifier ? `/${identifier}` : ''}`, identifier ? 'PATCH' : 'POST', values);
@@ -251,7 +300,6 @@
     document.querySelectorAll('.event-types').forEach(select => types.forEach(value => select.add(new Option(value, value))));
     const sourceData = await api('/sources');
     document.querySelectorAll('.event-sources').forEach(select => sourceData.items.forEach(value => select.add(new Option(value.label, value.id))));
-    document.querySelectorAll('.timezone-help').forEach(node => node.textContent = `Times use ${Intl.DateTimeFormat().resolvedOptions().timeZone} (browser local). Stored in UTC.`);
     if (id) {
       $('#events-list-view').hidden = true;$('#event-detail').hidden = false;
       $('#start-event').hidden = true;$('#historical-event').hidden = true;
@@ -261,7 +309,7 @@
         run(async () => {await refreshDetail();$('#latest-traffic').checked = current.status === 'active';await Promise.all(['recordings','markers','detected','checkins'].map(kind => loadCollection(kind, false, true)));});
       }, 5000);
     } else {
-      for (const [key, value] of query) if (field($('#event-filters'), key)) field($('#event-filters'), key).value = value;
+      for (const [key, value] of query) if (field($('#event-filters'), key)) fill($('#event-filters'), {[key]: value});
       await loadEvents();
       if (query.get('create') && canWrite) {
         if (query.get('selection')) {try {selections = JSON.parse(sessionStorage.getItem('event-selection') || '[]');} catch (_) {selections = [];}}

@@ -5,8 +5,9 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>Events | Repeater Scribe</title>
   <link rel="icon" href="/static/repeater-scribe-state0-256px.png">
-  <link rel="stylesheet" href="/static/archive.css"><link rel="stylesheet" href="/static/events.css">
-  <script src="/static/events.js" defer></script>
+  <link rel="stylesheet" href="/static/archive.css?v=0.9.1"><link rel="stylesheet" href="/static/events.css?v=0.9.1">
+  <script src="/static/events.js?v=0.9.1" defer></script>
+  <script src="/static/time.js?v=0.9.1"></script>
 </head>
 <body data-role="{{ role }}">
 <header class="topbar">
@@ -15,7 +16,7 @@
   <div class="identity">{{ identity }} <span>{{ role }}</span></div>
   {% if csrf_token %}<button id="sign-out" class="quiet-button" type="button">Sign out</button>{% endif %}
 </header>
-<main class="archive-shell events-shell">
+<main class="archive-shell events-shell"><p class="timezone-help">Times use your browser’s local timezone.</p>
   <div class="archive-heading"><div><p class="eyebrow">Live and historical radio traffic</p><h1 id="event-title">Events</h1><p id="event-subtitle">Operate a net live or reconstruct an event from the Archive.</p></div>
     <div class="event-actions" data-write><button id="start-event" class="primary-button">Start Event</button><button id="historical-event" class="quiet-button">Create Historical Event</button></div>
   </div>
@@ -35,6 +36,7 @@
       <p class="wide timezone-help">Times use your browser's local timezone. Stored in UTC.</p>
       <p id="selection-note" class="wide"></p>
       <div class="wide event-actions"><button id="preview-event" type="button" class="quiet-button">Preview membership</button><button id="save-event" class="primary-button">Start Event</button><button id="cancel-event" type="button" class="quiet-button">Cancel</button></div>
+      <p id="event-save-status" class="wide" role="status" hidden></p>
       <div id="membership-preview" class="wide" aria-live="polite"></div>
     </form>
   </section>
@@ -44,7 +46,7 @@
       <label>Type<select name="type" class="event-types"><option value="">Any type</option></select></label>
       <label>Source<select name="source_id" class="event-sources"><option value="">Any source</option></select></label>
       <label>Status<select name="status"><option value="">Any status</option><option value="active">Active</option><option value="ended">Ended</option></select></label>
-      <label>From<input name="from" type="datetime-local"></label><label>To (exclusive)<input name="to" type="datetime-local"></label>
+      <label>From<input name="from" type="datetime-local" step="0.001"></label><label>To (exclusive)<input name="to" type="datetime-local" step="0.001"></label>
       <label>Tag<input name="tag"></label>
       <div class="event-actions"><button class="primary-button">Apply filters</button><button id="clear-event-filters" type="button" class="quiet-button">Clear</button></div>
     </form>

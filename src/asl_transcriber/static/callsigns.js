@@ -20,7 +20,7 @@ async function load(reset = false) {
       if (loaded.has(item.callsign)) return; loaded.add(item.callsign);
       const card = text('article', '', 'recording');
       const link = text('a', '', 'callsign-evidence'); link.href = `/callsigns/${encodeURIComponent(item.callsign)}`; link.append(text('h3', item.callsign));
-      const timestamp = value => value ? new Date(value).toLocaleString() : 'Time unavailable';
+      const timestamp = value => value ? UITime.format(value) : 'Time unavailable';
       card.append(link, text('p', item.qrz_display_name || 'QRZ name unavailable'), text('p', item.qrz_location || 'QRZ location unavailable'),
         text('p', `${item.mention_count} mentions across ${item.recording_count} recordings · ${item.active_days} active days`),
         text('p', `First heard: ${timestamp(item.first_heard)} · Last heard: ${timestamp(item.last_heard)}`),

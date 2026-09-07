@@ -16,7 +16,7 @@ let activePlaybackButton = null;
 const text = (tag, value, className = '') => { const node = document.createElement(tag); node.textContent = value ?? ''; if (className) node.className = className; return node; };
 const safeExternalUrl = value => { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch (_) { return null; } };
 const percent = value => value == null ? 'Unavailable' : `${(Number(value) * 100).toFixed(0)}%`;
-const timestamp = value => value ? new Date(value).toLocaleString() : 'Time unavailable';
+const timestamp = value => value ? UITime.format(value) : 'Time unavailable';
 const operator = () => role === 'operator' || role === 'admin';
 
 async function review(mention, action) {
@@ -68,12 +68,12 @@ async function loadHistory(reset = false) {
   const version = ++historyVersion; historyLoading = true; more.disabled = true;
   if (reset) { cursor = null; loadedMentions = new Set(); history.replaceChildren(); }
   try {
-    const query = new URLSearchParams({ limit: '50' }); new FormData(filters).forEach((value, key) => { if (value) query.set(key, String(value)); }); if (cursor) query.set('cursor', cursor);
+    const query = new URLSearchParams({ limit: '50' }); new FormData(filters).forEach((value, key) => { if (value) query.set(key, ['from', 'to'].includes(key) ? UITime.toUTC(String(value), key === 'to') : String(value)); }); if (cursor) query.set('cursor', cursor);
     const response = await fetch(`/api/v1/callsigns/${encodeURIComponent(name)}/mentions?${query}`);
     if (version !== historyVersion) return;
     if (!response.ok) { state.textContent = 'Could not load mention history.'; return; }
     const data = await response.json(); if (version !== historyVersion) return; data.items.forEach(mention => { if (!loadedMentions.has(mention.mention_id)) { loadedMentions.add(mention.mention_id); history.append(renderMention(mention)); } }); cursor = data.next_cursor; more.hidden = !data.has_more; state.textContent = history.children.length ? '' : 'No mention history matches these filters.';
-  } catch (_) { if (version === historyVersion) state.textContent = 'Could not load mention history.'; }
+  } catch (error) { if (version === historyVersion) state.textContent = error.message || 'Could not load mention history.'; }
   finally { if (version === historyVersion) { historyLoading = false; more.disabled = false; } }
 }
 

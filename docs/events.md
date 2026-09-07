@@ -1,4 +1,4 @@
-# Events, nets and sessions (0.9.0)
+# Events, nets and sessions (0.9.1)
 
 Use **Events** to save a named radio activity and return to its recordings,
 transcript, markers and confirmed roster later. The internal resource name is
@@ -44,6 +44,9 @@ the selected range, but the selections themselves become explicit inclusions.
 The preview shows the number and up to ten examples of additional automatic
 members. Unknown-time selections remain explicit inclusions; enter appropriate
 event boundaries yourself. Changing boundaries never removes an explicit inclusion.
+**Preview membership** is available separately; **Create Historical Event** saves
+the completed form with one click and opens the event. Save failures appear next
+to the button and preserve your entries and selected recordings for retry.
 
 On the event detail page, edit metadata, start/end boundaries and tags. Use
 **Include**, **Exclude** or **Automatic** on recordings. To restore an excluded

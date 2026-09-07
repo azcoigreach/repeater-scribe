@@ -87,7 +87,7 @@ def test_normalized_persistence_and_current_transcript_statistics(archive_db) ->
             "KM7GHS",
             cursor=None,
             limit=50,
-            to_at=datetime(2026, 9, 3, tzinfo=UTC),
+            to_at=datetime(2026, 9, 3, tzinfo=UTC).replace(tzinfo=None),
         )
         assert [item["mention_id"] for item in items] == [mention.id]
 
@@ -249,7 +249,7 @@ def test_last_heard_uses_persisted_snapshot_without_qrz_lookup(archive_db, monke
         response = last_heard_callsigns(db=session)
     item = response["items"][0]
     assert item["callsign"] == "KM7GHS"
-    assert item["last_heard_at"] == "2026-09-03T12:00:02"
+    assert item["last_heard_at"] == "2026-09-03T12:00:02+00:00"
     assert item["heard_offset_seconds"] == 2.0
     assert item["status"] == "found"
     assert item["name"] == "Cached Name"
