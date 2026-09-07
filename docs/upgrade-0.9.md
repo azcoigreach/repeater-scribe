@@ -1,4 +1,12 @@
-# Upgrade to 0.9.0
+# Upgrade to 0.9.1
+
+From 0.9.0, rebuild and restart with the 0.9.1 code. This patch adds no
+database migration: the required head remains `events_sessions`. UTC storage
+and container timezone settings stay the same. The UI follows the browser’s
+local timezone; Arizona users should use `America/Phoenix`. All UI script and
+stylesheet URLs carry the 0.9.1 version to refresh cached assets.
+
+The steps below also cover upgrades from 0.8.1, which require the Events migration.
 
 The verified baseline is 0.8.1 at `c7f98ef`, with Alembic revision
 `transcript_text_corrections`. Some earlier callsign documents still reported
@@ -64,5 +72,6 @@ older application code against a newer schema.
 The implementation task does not perform any of these deployment steps against
 your running installation and does not publish a release or create a release tag.
 
-See [the executed verification report](verification-0.9.md) for migration and
+See [0.9.1 verification](verification-0.9.1.md) and
+[the original Events verification report](verification-0.9.md) for migration and
 browser acceptance coverage and environment limits.

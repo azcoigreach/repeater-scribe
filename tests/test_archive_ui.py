@@ -128,7 +128,7 @@ def test_archive_assets_use_database_api_and_id_based_audio(archive_ui_db) -> No
     archive_script = client.get("/static/archive.js").text
     detail_script = client.get("/static/archive_detail.js").text
 
-    assert "/static/archive.css?v=0.9.0" in archive_html
+    assert "/static/archive.css?v=0.9.1" in archive_html
     assert "/static/archive.js?v=0.9.1" in archive_html
     assert "/api/v1/archive/recordings" in archive_script
     assert "/api/v1/archive/recordings/${encodeURIComponent(item.id)}/audio" in detail_script
