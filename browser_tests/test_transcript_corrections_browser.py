@@ -4,12 +4,16 @@ SELECTED = 'Kilo Mike Seven Golf Hotel Sierra'
 
 
 def select_words(locator, selected=SELECTED):
+    # Establish a visible, focused transcript before creating the selection,
+    # just as a user would when selecting text with the mouse.
+    locator.click()
     locator.evaluate('''(node, selected) => {
         const text = node.firstChild;
         const start = text.textContent.indexOf(selected);
         const range = document.createRange();
         range.setStart(text, start); range.setEnd(text, start + selected.length);
         const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        if (selection.toString() !== selected) throw new Error('Transcript selection was not established');
     }''', selected)
 
 
@@ -22,6 +26,7 @@ def test_log_selection_correction_survives_refresh_and_updates_history(page, app
     select_words(card.locator('.transcript'))
     # Polling must not replace the selected DOM node before the user clicks.
     page.evaluate('loadJobs()')
+    assert page.evaluate('window.getSelection().toString()') == SELECTED
     expect(card.locator('.transcript')).to_contain_text(SELECTED)
     card.get_by_role('button', name='Correct callsign', exact=True).click()
     dialog = page.get_by_role('dialog')
