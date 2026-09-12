@@ -101,7 +101,9 @@ function renderJobs(items, databaseTotals = {}) {
     const meta = element('div', '', 'recording-meta');
     meta.append(element('span', item.source_path, 'recording-path'), element('span', item.timestamp ? UITime.format(item.timestamp) : 'Timestamp unavailable', 'recording-date'), element('span', item.status, `status ${item.status}`));
     const play = actionButton('▶ Play audio', 'play-button'); const url = safeUrl(item.audio_url, true); play.disabled = !url; if (url) play.dataset.audioUrl = url;
-    play.setAttribute('aria-label', `Play ${item.source_path}`); play.addEventListener('click', () => playAudio(play));
+    play.dataset.recordingKey = item.source_path;
+    updatePlaybackButton(play);
+    play.addEventListener('click', () => playAudio(play));
     const transcript = element('p', '', 'transcript');
     if (item.transcript) { transcript.append(linkedTranscript(item.transcript.display_text, item.callsigns)); if (item.transcript.provisional) transcript.append(element('span', ' (provisional)', 'muted-text')); }
     else transcript.append(element('span', 'Awaiting local transcription', 'muted-text'));
@@ -135,23 +137,40 @@ function renderJobs(items, databaseTotals = {}) {
 }
 
 const player = new Audio();
-let activeButton = null;
+// Source paths are the stable archive identities used by the recordings endpoint.
+// Keep playback independent of the currently visible (and replaceable) cards.
+let activeRecordingKey = null;
+let playbackRequestVersion = 0;
+function updatePlaybackButton(button) {
+  const playing = button.dataset.recordingKey === activeRecordingKey && !player.paused && !player.ended && !player.error;
+  button.textContent = playing ? '❚❚ Playing' : '▶ Play audio';
+  button.setAttribute('aria-label', `${playing ? 'Pause' : 'Play'} ${button.dataset.recordingKey}`);
+  button.disabled = !playing && !button.dataset.audioUrl;
+}
+function updatePlaybackControls() {
+  recordings.querySelectorAll('[data-recording-key]').forEach(updatePlaybackButton);
+}
 function playAudio(button) {
-  if (activeButton) activeButton.textContent = '▶ Play audio';
-  if (activeButton === button && !player.paused) {
+  const requestVersion = ++playbackRequestVersion;
+  if (activeRecordingKey === button.dataset.recordingKey && !player.paused) {
     player.pause();
-    activeButton = null;
+    updatePlaybackControls();
     return;
   }
   player.pause();
+  activeRecordingKey = button.dataset.recordingKey;
   player.src = button.dataset.audioUrl;
   player.play().catch(() => {
-    if (activeButton === button) { button.textContent = '▶ Play audio'; activeButton = null; }
+    // An interrupted play request must not clear a newer recording's indicator.
+    if (requestVersion !== playbackRequestVersion) return;
+    activeRecordingKey = null;
+    updatePlaybackControls();
   });
-  button.textContent = '❚❚ Playing';
-  activeButton = button;
+  updatePlaybackControls();
 }
-player.addEventListener('ended', () => { if (activeButton) activeButton.textContent = '▶ Play audio'; activeButton = null; });
+['play', 'playing', 'pause', 'ended', 'error'].forEach(type => {
+  player.addEventListener(type, updatePlaybackControls);
+});
 
 async function loadJobs() {
   const requestVersion = ++jobsRequestVersion;
@@ -314,18 +333,39 @@ const FAVORITE_CONNECTION_GROUPS = [
 
 function favoriteConnectionAction(identifier, connected) {
   const primary = actionButton(connected ? 'Disconnect' : 'Connect', `favorite-connect${connected ? '' : ' favorite-connect-primary'}`, { target: identifier, connected: String(connected) });
+  primary.addEventListener('click', () => runCommand(connected ? 'Disconnect node' : 'Connect node', identifier));
   if (connected) return primary;
   primary.title = 'Connect in transceive mode';
   const split = element('div', '', 'favorite-connect-split'); const toggle = actionButton('▾', 'favorite-connect-toggle'); toggle.setAttribute('aria-label', `Choose connection mode for node ${identifier}`); toggle.setAttribute('aria-expanded', 'false');
   const options = element('div', '', 'favorite-connect-options', { role: 'menu' }); options.hidden = true;
   FAVORITE_CONNECTION_GROUPS.forEach(([label, modes]) => { const group = element('div', '', 'favorite-connect-group', { role: 'group', 'aria-label': label }); group.append(element('span', label, 'favorite-connect-group-label')); modes.forEach(([command, label]) => { const button = actionButton(label, 'favorite-connect-option', { command, target: identifier }); button.setAttribute('role', 'menuitem'); group.append(button); }); options.append(group); });
-  split.append(primary, toggle, options); return split;
+  split.append(primary, toggle, options);
+  bindFavoriteConnectionMenu(split);
+  return split;
+}
+
+function bindFavoriteConnectionMenu(control) {
+  control.querySelectorAll('.favorite-connect-toggle').forEach(button => button.addEventListener('click', event => {
+    event.stopPropagation();
+    const options = button.nextElementSibling;
+    const opening = options.hidden;
+    closeFavoriteConnectionMenus();
+    options.hidden = !opening;
+    button.setAttribute('aria-expanded', String(opening));
+  }));
+  control.querySelectorAll('.favorite-connect-option').forEach(button => button.addEventListener('click', () => {
+    closeFavoriteConnectionMenus();
+    runCommand(button.dataset.command, button.dataset.target);
+  }));
 }
 
 function renderFavorites() {
   const connections = new Map(currentConnections.map(connection => [String(connection.identifier), connection]));
   document.querySelector('#favorites-count').textContent = favoriteItems.length;
   const table = document.querySelector('#favorites');
+  const focusedControl = table.contains(document.activeElement) ? document.activeElement : null;
+  const connectionControls = new Map(Array.from(table.querySelectorAll('[data-connection-key]'))
+    .map(control => [control.dataset.connectionKey, control]));
   if (!favoriteItems.length) {
     const row = element('tr'); row.append(element('td', 'No favorite nodes yet. Add one from Connected nodes.', 'empty', { colspan: 11 })); table.replaceChildren(row);
     return;
@@ -344,25 +384,15 @@ function renderFavorites() {
     const links = item.reported_link_count === null || item.reported_link_count === undefined ? '—' : item.reported_link_count;
     const age = item.stats_stale ? `${formatAge(item.stats_age_seconds)} · stale` : formatAge(item.stats_age_seconds);
     const row = element('tr', '', `favorite-row${keyed ? ' talking' : ''}`); const dot = element('td'); dot.append(element('span', '', `status-dot ${dotState}`, { title: dotTitle })); const id = element('td'); id.append(element('strong', identifier));
-    const actions = element('div', '', 'favorite-actions'); actions.append(favoriteConnectionAction(identifier, connected), actionButton('Chart', 'favorite-topology', { favoriteId: item.id }), actionButton('Edit', 'favorite-edit', { favoriteId: item.id })); const cell = element('td'); cell.append(actions);
+    const key = JSON.stringify([controlledNodeId(), identifier, connected]);
+    const control = connectionControls.get(key) || favoriteConnectionAction(identifier, connected);
+    control.dataset.connectionKey = key;
+    const actions = element('div', '', 'favorite-actions'); actions.append(control, actionButton('Chart', 'favorite-topology', { favoriteId: item.id }), actionButton('Edit', 'favorite-edit', { favoriteId: item.id })); const cell = element('td'); cell.append(actions);
     row.append(dot, id, element('td', callsign), element('td', item.description || item.label || '—'), element('td', item.location || '—'), element('td', item.keyup_count || 0), element('td', formatDuration(item.total_tx_milliseconds), 'favorite-duration'), element('td', busy), element('td', links), element('td', age, 'favorite-age'), cell); return row;
   }));
-  table.querySelectorAll('.favorite-connect').forEach(button => button.addEventListener('click', () => {
-    const connected = button.dataset.connected === 'true';
-    runCommand(connected ? 'Disconnect node' : 'Connect node', button.dataset.target);
-  }));
-  table.querySelectorAll('.favorite-connect-toggle').forEach(button => button.addEventListener('click', event => {
-    event.stopPropagation();
-    const options = button.nextElementSibling;
-    const opening = options.hidden;
-    closeFavoriteConnectionMenus();
-    options.hidden = !opening;
-    button.setAttribute('aria-expanded', String(opening));
-  }));
-  table.querySelectorAll('.favorite-connect-option').forEach(button => button.addEventListener('click', () => {
-    closeFavoriteConnectionMenus();
-    runCommand(button.dataset.command, button.dataset.target);
-  }));
+  // Moving retained controls between rows may drop browser focus; restore only
+  // the same element if its home/target/connection state is still valid.
+  if (focusedControl?.isConnected) focusedControl.focus({ preventScroll: true });
   table.querySelectorAll('.favorite-topology').forEach(button => button.addEventListener('click', () => openTopology(button.dataset.favoriteId)));
   table.querySelectorAll('.favorite-edit').forEach(button => button.addEventListener('click', () => openFavoriteEditor(button.dataset.favoriteId)));
 }
