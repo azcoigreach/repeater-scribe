@@ -124,36 +124,41 @@ class LiveTranscriptionService:
     snapshotter: FfmpegSnapshotter
     transcribe: Callable[[str], TranscriptResult]
     min_file_bytes: int = 4096
-    _last_sizes: dict[str, int] = field(default_factory=dict, init=False)
-    _texts: dict[str, str] = field(default_factory=dict, init=False)
-    _mentions: dict[str, dict[str, TranscriptCallsignMention]] = field(
+    _last_sizes: dict[tuple[str, str], int] = field(default_factory=dict, init=False)
+    _texts: dict[tuple[str, str], str] = field(default_factory=dict, init=False)
+    _mentions: dict[tuple[str, str], dict[str, TranscriptCallsignMention]] = field(
         default_factory=dict, init=False
     )
 
     def process_once(self, runtime: ArchiveRuntime) -> int:
-        waiting = set(runtime.waiting_sources())
+        waiting = set(runtime.waiting_recordings())
         for stale in set(self._last_sizes) - waiting:
             self._last_sizes.pop(stale, None)
             self._texts.pop(stale, None)
             self._mentions.pop(stale, None)
             # The final pass owns removal after it has saved a usable replacement.
-            if not any(job.source_path == stale for job in runtime.jobs()):
-                runtime.clear_live_result(stale)
+            stale_root, stale_source_path = stale
+            if not any(
+                job.source_path == stale_source_path and job.archive_root == stale_root
+                for job in runtime.jobs()
+            ):
+                runtime.clear_live_result(stale_source_path, archive_root=stale_root)
 
-        candidates: list[tuple[int, str, Path, int]] = []
-        for source_path in waiting:
+        candidates: list[tuple[int, str, str, Path, int]] = []
+        for archive_root, source_path in waiting:
             try:
-                source = runtime._resolve_source(source_path)
+                source = runtime._resolve_source(source_path, archive_root)
                 source_stat = source.stat()
                 size = source_stat.st_size
             except (FileNotFoundError, OSError):
                 continue
-            if size < self.min_file_bytes or self._last_sizes.get(source_path) == size:
+            key = (archive_root, source_path)
+            if size < self.min_file_bytes or self._last_sizes.get(key) == size:
                 continue
-            candidates.append((source_stat.st_mtime_ns, source_path, source, size))
+            candidates.append((source_stat.st_mtime_ns, archive_root, source_path, source, size))
 
         processed = 0
-        for _, source_path, source, size in sorted(candidates, reverse=True):
+        for _, archive_root, source_path, source, size in sorted(candidates, reverse=True):
             snapshot: Path | None = None
             try:
                 snapshot = self.snapshotter.snapshot(source)
@@ -165,16 +170,17 @@ class LiveTranscriptionService:
                 if snapshot is not None:
                     snapshot.unlink(missing_ok=True)
 
-            merged = merge_overlapping_text(self._texts.get(source_path, ""), result.display_text)
-            self._last_sizes[source_path] = size
-            self._texts[source_path] = merged
+            key = (archive_root, source_path)
+            merged = merge_overlapping_text(self._texts.get(key, ""), result.display_text)
+            self._last_sizes[key] = size
+            self._texts[key] = merged
             try:
                 source_duration = probe_audio(source).duration_seconds
                 window_seconds = float(getattr(self.snapshotter, "window_seconds", 12.0))
                 window_offset = max(0.0, source_duration - window_seconds)
             except (OSError, RuntimeError, ValueError):
                 window_offset = 0.0
-            source_mentions = self._mentions.setdefault(source_path, {})
+            source_mentions = self._mentions.setdefault(key, {})
             for mention in result.callsign_mentions:
                 absolute_mention = replace(
                     mention,
@@ -185,6 +191,8 @@ class LiveTranscriptionService:
                 if previous is None or absolute_mention.end > previous.end:
                     source_mentions[mention.callsign] = absolute_mention
             result.callsign_mentions = list(source_mentions.values())
-            runtime.set_live_result(source_path, result, display_text=merged)
+            runtime.set_live_result(
+                source_path, result, archive_root=archive_root, display_text=merged
+            )
             processed += 1
         return processed

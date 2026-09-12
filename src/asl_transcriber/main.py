@@ -26,6 +26,7 @@ from asl_transcriber import __version__
 from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.archive import (
     ArchiveQueryError,
+    archive_source_id,
     list_recordings,
     refresh_audio,
     serialize_recording,
@@ -1271,14 +1272,17 @@ def recordings(
     active_runtime = current_runtime()
     normalized_query = q.casefold() if q else None
     items: list[dict[str, object]] = []
-    jobs = sorted(active_runtime.jobs(), key=lambda job: job.source_path, reverse=True)
+    jobs = active_runtime.jobs()
     waiting_items: list[dict[str, object]] = []
-    for source_path in active_runtime.waiting_sources():
-        live_result = active_runtime.live_results.get(source_path)
+    for archive_root, source_path in active_runtime.waiting_recordings():
+        source_id = archive_source_id(archive_root)
+        live_result = active_runtime.live_result_for(source_path, archive_root)
         waiting_items.append(
             {
                 "id": None,
                 "source_path": source_path,
+                "source_id": source_id,
+                "_archive_root": archive_root,
                 "status": "live" if live_result is not None else "waiting",
                 "transcript": (
                     {
@@ -1291,47 +1295,63 @@ def recordings(
                     else None
                 ),
                 "timestamp": recording_timestamp(source_path),
-                "audio_url": f"/api/v1/audio?path={quote(source_path)}",
+                "audio_url": f"/api/v1/audio?path={quote(source_path)}&source_id={source_id}",
                 "callsigns": list(extract_callsigns(live_result.display_text))
                 if live_result
                 else [],
             }
         )
-    all_items: list[dict[str, object]] = waiting_items + [
-        {
-            "id": job.id,
-            "source_path": job.source_path,
-            "status": job.status.value,
-            "last_error": job.last_error,
-            "timestamp": recording_timestamp(job.source_path),
-            "audio_url": f"/api/v1/audio?path={quote(job.source_path)}",
-            "callsigns": (
-                list(extract_callsigns(result.display_text))
-                if (result := active_runtime.results.get(job.id)
-                    or active_runtime.live_results.get(job.source_path)) is not None
-                else []
-            ),
-            "transcript": (
-                {
-                    "raw_text": result.raw_text,
-                    "display_text": result.display_text,
-                    "language": result.language,
-                    "provisional": result.status == "live",
-                }
-                if (result := active_runtime.results.get(job.id)
-                    or active_runtime.live_results.get(job.source_path)) is not None
-                else None
-            ),
-        }
-        for job in jobs
-    ]
+    all_items: list[dict[str, object]] = sorted(
+        waiting_items
+        + [
+            {
+                "id": job.id,
+                "source_path": job.source_path,
+                "source_id": archive_source_id(job.archive_root) if job.archive_root else None,
+                "_archive_root": job.archive_root,
+                "status": job.status.value,
+                "last_error": job.last_error,
+                "timestamp": recording_timestamp(job.source_path),
+                "audio_url": (
+                    f"/api/v1/audio?path={quote(job.source_path)}"
+                    + (f"&source_id={archive_source_id(job.archive_root)}" if job.archive_root else "")
+                ),
+                "callsigns": (
+                    list(extract_callsigns(result.display_text))
+                    if (result := active_runtime.results.get(job.id)
+                        or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
+                    else []
+                ),
+                "transcript": (
+                    {
+                        "raw_text": result.raw_text,
+                        "display_text": result.display_text,
+                        "language": result.language,
+                        "provisional": result.status == "live",
+                    }
+                    if (result := active_runtime.results.get(job.id)
+                        or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
+                    else None
+                ),
+            }
+            for job in jobs
+        ],
+        key=lambda item: (
+            str(item["timestamp"] or ""),
+            str(item["source_path"]),
+            str(item["source_id"] or ""),
+        ),
+        reverse=True,
+    )
     for item in all_items:
         job_source_path = str(item["source_path"])
+        archive_root_value = item.pop("_archive_root", None)
+        item_archive_root = str(archive_root_value) if archive_root_value is not None else None
         result = (
             (active_runtime.results.get(str(item["id"]))
-             or active_runtime.live_results.get(job_source_path))
+             or active_runtime.live_result_for(job_source_path, item_archive_root))
             if item["id"]
-            else active_runtime.live_results.get(job_source_path)
+            else active_runtime.live_result_for(job_source_path, item_archive_root)
         )
         searchable = f"{job_source_path} {result.raw_text if result else ''} {result.display_text if result else ''}".casefold()
         if normalized_query and normalized_query not in searchable:
@@ -1348,9 +1368,19 @@ def recordings(
 
 
 @app.get("/api/v1/audio", dependencies=[Depends(require_viewer)])
-def audio(path: str) -> FileResponse:
+def audio(path: str, source_id: str | None = None) -> FileResponse:
+    runtime = current_runtime()
+    archive_root = None
+    if source_id is not None:
+        archive_root = next(
+            (str(root.resolve()) for root in runtime.roots
+             if archive_source_id(str(root.resolve())) == source_id),
+            None,
+        )
+        if archive_root is None:
+            raise HTTPException(status_code=404, detail="Audio recording not found")
     try:
-        source = current_runtime()._resolve_source(path)
+        source = runtime._resolve_source(path, archive_root)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Audio recording not found") from error
     return FileResponse(source, media_type="audio/wav", filename=source.name)
@@ -1596,20 +1626,16 @@ def last_heard_callsigns(
     heard: dict[str, dict[str, object]] = {}
     heard_times: dict[str, datetime | None] = {}
     observations: dict[str, list[TranscriptCallsignMention | None]] = {}
-    recording_sources: dict[str, set[str]] = {}
-    sources: list[tuple[str, object]] = []
+    recording_sources: dict[str, set[tuple[str | None, str]]] = {}
     active_runtime = current_runtime()
+    sources: list[tuple[tuple[str | None, str], object]] = list(active_runtime.live_results.items())
     sources.extend(
-        (source_path, result)
-        for source_path, result in active_runtime.live_results.items()
-    )
-    sources.extend(
-        (job.source_path, active_runtime.results[job.id])
+        ((job.archive_root, job.source_path), active_runtime.results[job.id])
         for job in active_runtime.jobs()
         if job.id in active_runtime.results
     )
 
-    for source_path, result in sources:
+    for (archive_root, source_path), result in sources:
         started_at_value = recording_timestamp(source_path)
         started_at = datetime.fromisoformat(started_at_value) if started_at_value else None
         mentions = getattr(result, "callsign_mentions", None) or []
@@ -1643,7 +1669,7 @@ def last_heard_callsigns(
 
         for callsign, last_heard_at, offset, precision, mention in candidates:
             observations.setdefault(callsign, []).append(mention)
-            recording_sources.setdefault(callsign, set()).add(source_path)
+            recording_sources.setdefault(callsign, set()).add((archive_root, source_path))
             current_time = heard_times.get(callsign)
             if callsign in heard and (
                 current_time is not None
@@ -1654,6 +1680,7 @@ def last_heard_callsigns(
                 "callsign": callsign,
                 "last_heard_at": iso_utc(last_heard_at),
                 "source_path": source_path,
+                "source_id": archive_source_id(archive_root) if archive_root else None,
             }
             if offset is not None:
                 item["heard_offset_seconds"] = offset
@@ -1778,7 +1805,7 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
 def _serialize_runtime_last_heard(
     heard: dict[str, dict[str, object]], heard_times: dict[str, datetime | None],
     observations: dict[str, list[TranscriptCallsignMention | None]],
-    recording_sources: dict[str, set[str]], result_limit: int,
+    recording_sources: dict[str, set[tuple[str | None, str]]], result_limit: int,
 ) -> dict[str, object]:
     for callsign, item in heard.items():
         mentions = observations[callsign]

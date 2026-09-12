@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from asl_transcriber.archive import serialize_recording
+from asl_transcriber.archive import archive_source_id, serialize_recording
 from asl_transcriber.callsign_service import (
     callsign_profile,
     list_call_sign_mentions,
@@ -223,7 +223,7 @@ def test_callsign_history_lookup_uses_an_index(archive_db) -> None:
 def test_last_heard_uses_persisted_snapshot_without_qrz_lookup(archive_db, monkeypatch) -> None:
     with archive_db() as session:
         recording = Recording(
-            id="recording-last-heard", source_path="not-a-timestamp.wav", archive_root="",
+            id="recording-last-heard", source_path="not-a-timestamp.wav", archive_root="/archive/one",
             started_at=datetime(2026, 9, 3, 12, tzinfo=UTC), status="completed",
         )
         session.add(recording)
@@ -249,6 +249,7 @@ def test_last_heard_uses_persisted_snapshot_without_qrz_lookup(archive_db, monke
         response = last_heard_callsigns(db=session)
     item = response["items"][0]
     assert item["callsign"] == "KM7GHS"
+    assert item["source_id"] == archive_source_id("/archive/one")
     assert item["last_heard_at"] == "2026-09-03T12:00:02+00:00"
     assert item["heard_offset_seconds"] == 2.0
     assert item["status"] == "found"

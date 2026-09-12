@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from asl_transcriber.archive import (
     _decode_cursor,
     _encode_cursor,
+    archive_source_id,
     refresh_audio,
     serialize_recording,
 )
@@ -66,7 +67,7 @@ MarkerType = Literal[
 
 
 def source_id(root: str) -> str:
-    return hashlib.sha256(root.encode()).hexdigest()
+    return archive_source_id(root)
 
 
 def sources(db: Session) -> list[dict]:
@@ -645,7 +646,9 @@ def recordings(
         if data["transcript"] is None:
             from asl_transcriber.main import current_runtime
 
-            live = current_runtime().live_results.get(recording.id)
+            live = current_runtime().live_result_for(
+                recording.source_path, archive_root=recording.archive_root
+            )
             if live:
                 data["transcript"] = {
                     "display_text": live.display_text,

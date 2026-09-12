@@ -161,6 +161,9 @@ logic, benchmarks, CPU fallback, tuning, and current limitations.
   node-keyed, and keyed-plus-transcribing operation.
 - Server-Sent Events for archive jobs, node state, key transitions, and topology
   progress.
+- Background updates preserve open Favorites connection menus and keyboard focus
+  while their target and connection state remain valid. Transcript playback keeps
+  its Playing indicator and pause control through refreshes and result reordering.
 - SQLite persistence for ingestion jobs, final transcripts, favorites, node
   statistics, and topology discovery.
 

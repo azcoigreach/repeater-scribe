@@ -74,7 +74,9 @@ def test_live_service_publishes_provisional_result_for_growing_file(tmp_path: Pa
     )
 
     assert service.process_once(runtime) == 1
-    assert runtime.live_results["100000/active.wav"].display_text == "KM7GHS"
+    assert runtime.live_result_for(
+        "100000/active.wav", archive_root=str(recording.parents[1].resolve())
+    ).display_text == "KM7GHS"
     event = subscriber.get_nowait()
     assert event["status"] == "live"
     assert event["provisional"] is True
@@ -109,5 +111,5 @@ def test_live_service_processes_all_growing_files_newest_first(tmp_path: Path) -
 
     assert service.process_once(runtime) == 2
     assert processed == ["newer.wav", "older.wav"]
-    assert "100000/newer.wav" in runtime.live_results
-    assert "100000/older.wav" in runtime.live_results
+    assert runtime.live_result_for("100000/newer.wav", archive_root=str(archive.resolve()))
+    assert runtime.live_result_for("100000/older.wav", archive_root=str(archive.resolve()))

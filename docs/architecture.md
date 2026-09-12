@@ -81,6 +81,20 @@ job list or poll on the live dashboard interval. It applies SQLite FTS5 and
 cursor pagination for historical searches, and can present transcript evidence
 when retained source audio is unavailable.
 
+Dashboard `/api/v1/recordings` rows include the opaque archive `source_id`, including
+waiting files that have no job ID yet. Playback uses `(source_id, source_path)` so
+identical filenames in different roots do not share controls. Generated
+`/api/v1/audio` URLs pass `source_id` to select only that configured root; a missing
+file or unknown source returns 404. Older URLs without `source_id` retain their
+existing lookup behavior. Viewer authorization and path containment apply to both.
+
+Live previews retain `(archive_root, source_path)` through growing-file processing,
+lookup, and cleanup. An explicit-root miss never falls back to a different root's
+preview. Runtime Last Heard uses the same identity for recording counts and partial
+callsign comparisons. Runtime and database Last Heard responses carry `source_id`
+to reveal the correct dashboard transcript; ambiguous legacy path-only links do
+not select an arbitrary root.
+
 ## Callsign intelligence
 
 A callsign mention is a callsign decoded or reconstructed in transcript audio;

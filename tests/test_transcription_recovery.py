@@ -25,6 +25,10 @@ def result(text=PREVIEW):
     return TranscriptResult(raw_text=text, display_text=text, language='en')
 
 
+def live_key(runtime: ArchiveRuntime) -> tuple[str, str]:
+    return str(runtime.roots[0].resolve()), 'call.wav'
+
+
 @pytest.fixture()
 def recovery_runtime(tmp_path, monkeypatch):
     archive = tmp_path / 'archive'
@@ -50,7 +54,7 @@ def test_collapsed_final_preserves_preview_and_persists_failure(recovery_runtime
     subscriber = runtime.subscribe()
     # The live poller can run after the recording leaves its waiting list.
     service = LiveTranscriptionService(snapshotter=None, transcribe=result)  # type: ignore[arg-type]
-    service._last_sizes['call.wav'] = 5
+    service._last_sizes[live_key(runtime)] = 5
     assert service.process_once(runtime) == 0
 
     def final_pass(_):
@@ -62,7 +66,7 @@ def test_collapsed_final_preserves_preview_and_persists_failure(recovery_runtime
 
     assert runtime.process_pending(final_pass, recovery_transcribe=final_pass) == []
     assert job.status == JobState.FAILED
-    assert runtime.live_results['call.wav'].display_text == PREVIEW
+    assert runtime.live_result_for('call.wav', archive_root=live_key(runtime)[0]).display_text == PREVIEW
     assert main.recordings()['items'][0]['last_error'] == job.last_error
     with runtime.session_factory() as session:
         assert session.get(IngestionJob, job.id).status == 'failed'
@@ -77,7 +81,7 @@ def test_recovery_pass_replaces_preview_only_after_success(recovery_runtime):
 
     def recover(path):
         paths.append(path)
-        assert runtime.live_results['call.wav'].display_text == PREVIEW
+        assert runtime.live_result_for('call.wav', archive_root=live_key(runtime)[0]).display_text == PREVIEW
         return result(PREVIEW + ' Final words.')
 
     completed = runtime.process_pending(lambda _: result('Only words'), recovery_transcribe=recover)
