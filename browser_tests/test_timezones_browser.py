@@ -120,6 +120,8 @@ def test_unchanged_calendars_preserve_repeated_hour_and_microseconds(page, appli
         page.locator('#save-event').click()
     assert request.value.post_data_json['started_at'] == '2025-11-02T06:30:00.123456Z'
     page.wait_for_url('**/events/*')
+    # Navigation finishes before the Event detail request populates the edit data.
+    expect(page.locator('#event-title')).to_have_text('Repeated hour')
     page.locator('#edit-event').click()
     expect(page.locator('#event-form [name=started_at]')).to_have_value('2025-11-02T01:30:00.123')
     with page.expect_request(lambda r: r.method == 'PATCH' and not r.url.endswith('/tags')) as request:
