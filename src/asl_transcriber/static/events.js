@@ -135,7 +135,7 @@
   $('#end-event').addEventListener('click', () => run(async () => {await api(`/${id}/end`, 'POST', {});await refreshDetail();await loadCollection('recordings');}));
   $('#reopen-event').addEventListener('click', () => run(async () => {await api(`/${id}/reopen`, 'POST', {});await refreshDetail();await loadCollection('recordings');}));
   const archiveLink = (recording, offset = 0) => `/archive/recordings/${encodeURIComponent(recording)}?offset=${Number(offset) || 0}`;
-  function seek(audio, offset) { if (!audio) return; audio.currentTime = Number(offset) || 0; audio.play().catch(() => {}); }
+  function seek(audio, offset) { if (!audio) return; Playback.play(audio, { offset }).catch(() => {}); }
   function recordingTagEditor(row) {
     let editor = recordingTagEditors.get(row.id);
     if (!editor) {
@@ -181,6 +181,7 @@
     if (row.audio_available) {
       audio = document.querySelector(`[data-recording-id="${CSS.escape(row.id)}"] audio`) || element('audio');
       if (!audio.src) { audio.controls = true; audio.preload = 'metadata'; audio.src = `/api/v1/archive/recordings/${encodeURIComponent(row.id)}/audio`; audio.addEventListener('error', () => {audio.replaceWith(element('p', 'Audio unavailable. Transcript and event history remain saved.', 'event-warning'));}); }
+      Playback.register(audio);
       card.append(audio);
     } else card.append(element('p', `Audio unavailable (${row.audio_status}). Saved transcript and history remain readable.`, 'event-warning'));
     if (row.provisional) card.append(element('p', 'Provisional live transcript', 'event-warning'));

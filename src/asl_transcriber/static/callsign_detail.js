@@ -11,7 +11,8 @@ let cursor = null;
 let historyLoading = false;
 let historyVersion = 0;
 let loadedMentions = new Set();
-const player = new Audio();
+const player = Playback.register(new Audio(), { persistent: true });
+let playbackVersion = 0;
 let activePlaybackButton = null;
 const text = (tag, value, className = '') => { const node = document.createElement(tag); node.textContent = value ?? ''; if (className) node.className = className; return node; };
 const safeExternalUrl = value => { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch (_) { return null; } };
@@ -44,29 +45,35 @@ function resetPlaybackButton() {
   activePlaybackButton = null;
 }
 
-function playMention(button, mention) {
-  if (activePlaybackButton === button && !player.paused) {
-    player.pause();
-    resetPlaybackButton();
-    return;
-  }
-  player.pause();
-  resetPlaybackButton();
-  player.src = `/api/v1/archive/recordings/${encodeURIComponent(mention.recording_id)}/audio`;
-  player.onloadedmetadata = () => {
-    player.currentTime = Number(mention.start_offset);
-    player.play().catch(resetPlaybackButton);
-  };
-  button.textContent = 'Playing';
-  activePlaybackButton = button;
+function updatePlaybackButton() {
+  if (activePlaybackButton) activePlaybackButton.textContent =
+    !player.paused && !player.ended && !player.error ? 'Playing' : 'Play from mention';
 }
 
-player.addEventListener('ended', resetPlaybackButton);
+function playMention(button, mention) {
+  const version = ++playbackVersion;
+  if (activePlaybackButton === button && !player.paused && !player.ended && !player.error) {
+    Playback.pause(player);
+    updatePlaybackButton();
+    return;
+  }
+  resetPlaybackButton();
+  activePlaybackButton = button;
+  Playback.play(player, {
+    src: `/api/v1/archive/recordings/${encodeURIComponent(mention.recording_id)}/audio`,
+    offset: mention.start_offset,
+  }).catch(() => { if (version === playbackVersion) updatePlaybackButton(); });
+  updatePlaybackButton();
+}
+
+['play', 'playing', 'pause', 'ended', 'error'].forEach(type => {
+  player.addEventListener(type, updatePlaybackButton);
+});
 
 async function loadHistory(reset = false) {
   if (!reset && historyLoading) return;
   const version = ++historyVersion; historyLoading = true; more.disabled = true;
-  if (reset) { cursor = null; loadedMentions = new Set(); history.replaceChildren(); }
+  if (reset) { ++playbackVersion; Playback.pause(player); resetPlaybackButton(); cursor = null; loadedMentions = new Set(); history.replaceChildren(); }
   try {
     const query = new URLSearchParams({ limit: '50' }); new FormData(filters).forEach((value, key) => { if (value) query.set(key, ['from', 'to'].includes(key) ? UITime.toUTC(String(value), key === 'to') : String(value)); }); if (cursor) query.set('cursor', cursor);
     const response = await fetch(`/api/v1/callsigns/${encodeURIComponent(name)}/mentions?${query}`);

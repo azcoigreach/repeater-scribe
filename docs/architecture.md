@@ -95,6 +95,15 @@ callsign comparisons. Runtime and database Last Heard responses carry `source_id
 to reveal the correct dashboard transcript; ambiguous legacy path-only links do
 not select an arbitrary root.
 
+Events, Archive detail, Dashboard and Callsign history register their audio with
+the page's shared playback coordinator. Starting a native player or selecting a
+transcript/mention offset pauses the previous player without resetting its position.
+Pending seeks are scoped to the latest selection; metadata callbacks never start
+playback. Removed native players and page navigation cancel playback. Dashboard's
+persistent player survives card filtering and refresh; Callsign history stops its
+player when replacing the history list. Archive and Callsign directory lists link
+to these playback surfaces and do not create players themselves.
+
 ## Callsign intelligence
 
 A callsign mention is a callsign decoded or reconstructed in transcript audio;
