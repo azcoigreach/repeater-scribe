@@ -1272,11 +1272,7 @@ def recordings(
     active_runtime = current_runtime()
     normalized_query = q.casefold() if q else None
     items: list[dict[str, object]] = []
-    jobs = sorted(
-        active_runtime.jobs(),
-        key=lambda job: (job.source_path, job.archive_root or ""),
-        reverse=True,
-    )
+    jobs = active_runtime.jobs()
     waiting_items: list[dict[str, object]] = []
     for archive_root, source_path in active_runtime.waiting_recordings():
         source_id = archive_source_id(archive_root)
@@ -1305,39 +1301,44 @@ def recordings(
                 else [],
             }
         )
-    all_items: list[dict[str, object]] = waiting_items + [
-        {
-            "id": job.id,
-            "source_path": job.source_path,
-            "source_id": archive_source_id(job.archive_root) if job.archive_root else None,
-            "_archive_root": job.archive_root,
-            "status": job.status.value,
-            "last_error": job.last_error,
-            "timestamp": recording_timestamp(job.source_path),
-            "audio_url": (
-                f"/api/v1/audio?path={quote(job.source_path)}"
-                + (f"&source_id={archive_source_id(job.archive_root)}" if job.archive_root else "")
-            ),
-            "callsigns": (
-                list(extract_callsigns(result.display_text))
-                if (result := active_runtime.results.get(job.id)
-                    or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
-                else []
-            ),
-            "transcript": (
-                {
-                    "raw_text": result.raw_text,
-                    "display_text": result.display_text,
-                    "language": result.language,
-                    "provisional": result.status == "live",
-                }
-                if (result := active_runtime.results.get(job.id)
-                    or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
-                else None
-            ),
-        }
-        for job in jobs
-    ]
+    all_items: list[dict[str, object]] = sorted(
+        waiting_items
+        + [
+            {
+                "id": job.id,
+                "source_path": job.source_path,
+                "source_id": archive_source_id(job.archive_root) if job.archive_root else None,
+                "_archive_root": job.archive_root,
+                "status": job.status.value,
+                "last_error": job.last_error,
+                "timestamp": recording_timestamp(job.source_path),
+                "audio_url": (
+                    f"/api/v1/audio?path={quote(job.source_path)}"
+                    + (f"&source_id={archive_source_id(job.archive_root)}" if job.archive_root else "")
+                ),
+                "callsigns": (
+                    list(extract_callsigns(result.display_text))
+                    if (result := active_runtime.results.get(job.id)
+                        or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
+                    else []
+                ),
+                "transcript": (
+                    {
+                        "raw_text": result.raw_text,
+                        "display_text": result.display_text,
+                        "language": result.language,
+                        "provisional": result.status == "live",
+                    }
+                    if (result := active_runtime.results.get(job.id)
+                        or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
+                    else None
+                ),
+            }
+            for job in jobs
+        ],
+        key=lambda item: (str(item["source_path"]), str(item["source_id"] or "")),
+        reverse=True,
+    )
     for item in all_items:
         job_source_path = str(item["source_path"])
         archive_root_value = item.pop("_archive_root", None)
