@@ -339,7 +339,7 @@ class ArchiveRuntime:
         result = self.live_results.get(self._live_result_key(source_path, resolved_root))
         if result is not None:
             return result
-        if resolved_root is not None:
+        if archive_root is None and resolved_root is not None:
             return self.live_results.get(self._live_result_key(source_path, None))
         matching = [
             live_result
