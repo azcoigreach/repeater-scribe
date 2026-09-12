@@ -1276,12 +1276,13 @@ def recordings(
     waiting_items: list[dict[str, object]] = []
     for archive_root, source_path in active_runtime.waiting_recordings():
         source_id = archive_source_id(archive_root)
-        live_result = active_runtime.live_results.get(source_path)
+        live_result = active_runtime.live_result_for(source_path, archive_root)
         waiting_items.append(
             {
                 "id": None,
                 "source_path": source_path,
                 "source_id": source_id,
+                "_archive_root": archive_root,
                 "status": "live" if live_result is not None else "waiting",
                 "transcript": (
                     {
@@ -1305,6 +1306,7 @@ def recordings(
             "id": job.id,
             "source_path": job.source_path,
             "source_id": archive_source_id(job.archive_root) if job.archive_root else None,
+            "_archive_root": job.archive_root,
             "status": job.status.value,
             "last_error": job.last_error,
             "timestamp": recording_timestamp(job.source_path),
@@ -1315,7 +1317,7 @@ def recordings(
             "callsigns": (
                 list(extract_callsigns(result.display_text))
                 if (result := active_runtime.results.get(job.id)
-                    or active_runtime.live_results.get(job.source_path)) is not None
+                    or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
                 else []
             ),
             "transcript": (
@@ -1326,7 +1328,7 @@ def recordings(
                     "provisional": result.status == "live",
                 }
                 if (result := active_runtime.results.get(job.id)
-                    or active_runtime.live_results.get(job.source_path)) is not None
+                    or active_runtime.live_result_for(job.source_path, job.archive_root)) is not None
                 else None
             ),
         }
@@ -1334,11 +1336,13 @@ def recordings(
     ]
     for item in all_items:
         job_source_path = str(item["source_path"])
+        archive_root_value = item.pop("_archive_root", None)
+        item_archive_root = str(archive_root_value) if archive_root_value is not None else None
         result = (
             (active_runtime.results.get(str(item["id"]))
-             or active_runtime.live_results.get(job_source_path))
+             or active_runtime.live_result_for(job_source_path, item_archive_root))
             if item["id"]
-            else active_runtime.live_results.get(job_source_path)
+            else active_runtime.live_result_for(job_source_path, item_archive_root)
         )
         searchable = f"{job_source_path} {result.raw_text if result else ''} {result.display_text if result else ''}".casefold()
         if normalized_query and normalized_query not in searchable:
@@ -1617,8 +1621,8 @@ def last_heard_callsigns(
     sources: list[tuple[str, object]] = []
     active_runtime = current_runtime()
     sources.extend(
-        (source_path, result)
-        for source_path, result in active_runtime.live_results.items()
+        (result.source_path, result)
+        for result in active_runtime.live_results.values()
     )
     sources.extend(
         (job.source_path, active_runtime.results[job.id])

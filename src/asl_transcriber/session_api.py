@@ -645,7 +645,9 @@ def recordings(
         if data["transcript"] is None:
             from asl_transcriber.main import current_runtime
 
-            live = current_runtime().live_results.get(recording.id)
+            live = current_runtime().live_result_for(
+                recording.source_path, archive_root=recording.archive_root
+            )
             if live:
                 data["transcript"] = {
                     "display_text": live.display_text,

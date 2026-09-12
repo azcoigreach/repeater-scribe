@@ -63,7 +63,7 @@ class ArchiveRuntime:
             for root in self.roots
         ]
         self.results: dict[str, ProcessingResult] = {}
-        self.live_results: dict[str, ProcessingResult] = {}
+        self.live_results: dict[tuple[str | None, str], ProcessingResult] = {}
         self._retry_jobs: set[str] = set()
         self._subscribers: set[Queue[dict[str, object]]] = set()
         self._subscriber_lock = RLock()
@@ -204,7 +204,10 @@ class ArchiveRuntime:
     ) -> list[ProcessingResult]:
         def process(job: IngestionJob) -> ProcessingResult:
             source = self._resolve_source(job.source_path, job.archive_root)
-            previous = self.results.get(job.id) or self.live_results.get(job.source_path)
+            previous = (
+                self.results.get(job.id)
+                or self.live_result_for(job.source_path, archive_root=job.archive_root)
+            )
             decoder = (
                 recovery_transcribe
                 if job.id in self._retry_jobs and recovery_transcribe is not None
@@ -253,7 +256,7 @@ class ArchiveRuntime:
                     job.touch()
                     self._persist_result(job, result)
                     self.results[job.id] = result
-                    self.clear_live_result(job.source_path)
+                    self.clear_live_result(job.source_path, archive_root=job.archive_root)
                     self._retry_jobs.discard(job.id)
             except Exception as error:
                 logger.exception("Transcription failed for job %s", job.id)
@@ -318,12 +321,49 @@ class ArchiveRuntime:
         with self._subscriber_lock:
             self._subscribers.discard(subscriber)
 
+    @staticmethod
+    def _live_result_key(source_path: str, archive_root: str | None = None) -> tuple[str | None, str]:
+        return archive_root, source_path
+
+    def _resolve_live_archive_root(self, source_path: str, archive_root: str | None) -> str | None:
+        if archive_root is not None:
+            return archive_root
+        if len(self.roots) == 1:
+            return str(self.roots[0].resolve())
+        roots = {
+            job.archive_root
+            for job in self.jobs()
+            if job.source_path == source_path and job.archive_root is not None
+        }
+        if len(roots) == 1:
+            return next(iter(roots))
+        return archive_root
+
+    def live_result_for(
+        self, source_path: str, archive_root: str | None = None
+    ) -> ProcessingResult | None:
+        resolved_root = self._resolve_live_archive_root(source_path, archive_root)
+        result = self.live_results.get(self._live_result_key(source_path, resolved_root))
+        if result is not None:
+            return result
+        if resolved_root is not None:
+            return self.live_results.get(self._live_result_key(source_path, None))
+        return None
+
     def set_live_result(
-        self, source_path: str, transcript: TranscriptResult, *, display_text: str | None = None
+        self,
+        source_path: str,
+        transcript: TranscriptResult,
+        *,
+        archive_root: str | None = None,
+        display_text: str | None = None,
     ) -> None:
+        archive_root = self._resolve_live_archive_root(source_path, archive_root)
         with self._scan_lock:
             if any(
-                job.source_path == source_path and job.status == JobState.COMPLETED
+                job.source_path == source_path
+                and job.archive_root == archive_root
+                and job.status == JobState.COMPLETED
                 for job in self.jobs()
             ):
                 return
@@ -337,7 +377,7 @@ class ArchiveRuntime:
                 segments=transcript.segments,
                 callsign_mentions=transcript.callsign_mentions,
             )
-            self.live_results[source_path] = result
+            self.live_results[self._live_result_key(source_path, archive_root)] = result
             self._broadcast(
                 {
                     "id": None,
@@ -348,8 +388,11 @@ class ArchiveRuntime:
                 }
             )
 
-    def clear_live_result(self, source_path: str) -> None:
-        self.live_results.pop(source_path, None)
+    def clear_live_result(self, source_path: str, archive_root: str | None = None) -> None:
+        resolved_root = self._resolve_live_archive_root(source_path, archive_root)
+        self.live_results.pop(self._live_result_key(source_path, resolved_root), None)
+        if resolved_root is not None:
+            self.live_results.pop(self._live_result_key(source_path, None), None)
 
     @staticmethod
     def _event_payload(
