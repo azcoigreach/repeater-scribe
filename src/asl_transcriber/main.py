@@ -1272,7 +1272,11 @@ def recordings(
     active_runtime = current_runtime()
     normalized_query = q.casefold() if q else None
     items: list[dict[str, object]] = []
-    jobs = sorted(active_runtime.jobs(), key=lambda job: job.source_path, reverse=True)
+    jobs = sorted(
+        active_runtime.jobs(),
+        key=lambda job: (job.source_path, job.archive_root or ""),
+        reverse=True,
+    )
     waiting_items: list[dict[str, object]] = []
     for archive_root, source_path in active_runtime.waiting_recordings():
         source_id = archive_source_id(archive_root)

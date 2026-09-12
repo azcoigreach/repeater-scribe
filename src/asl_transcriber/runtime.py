@@ -330,13 +330,6 @@ class ArchiveRuntime:
             return archive_root
         if len(self.roots) == 1:
             return str(self.roots[0].resolve())
-        roots = {
-            job.archive_root
-            for job in self.jobs()
-            if job.source_path == source_path and job.archive_root is not None
-        }
-        if len(roots) == 1:
-            return next(iter(roots))
         return archive_root
 
     def live_result_for(
