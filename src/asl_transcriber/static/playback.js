@@ -56,7 +56,7 @@ window.Playback = (() => {
     state.cancelSeek = null;
     const version = ++state.version;
     const current = () => players.get(audio) === state && state.version === version && active === audio;
-    if (src && audio.src !== new URL(src, location.href).href) {
+    if (src && (audio.error || audio.src !== new URL(src, location.href).href)) {
       audio.pause();
       audio.src = src;
     }

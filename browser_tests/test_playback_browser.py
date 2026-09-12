@@ -112,6 +112,9 @@ def test_events_refresh_rebuild_load_more_removal_and_navigation(page, applicati
     expect(audio_for(page, "fourth")).to_have_count(0)
     page.wait_for_function("() => removedPlayer.paused")
     assert page.evaluate("originalPlayers.every(a => a.paused)")
+    # Background refresh replaces only lastKeys (the appended fourth page),
+    # preserving players from previously loaded pages, including second.
+    expect(audio_for(page, "second")).to_be_visible()
     # Explicit refresh rebuilds the list; discarded players must also stop.
     audio_for(page, "second").click(position={"x": 18, "y": 27})
     assert_only(page, "second")
@@ -199,7 +202,7 @@ def test_callsign_switch_seek_pause_end_error_and_history_removal(page, mention_
         expect(card.get_by_role("button", name="Playing", exact=True)).to_be_visible()
     page.evaluate("player.pause()")
     expect(page.get_by_role("button", name="Playing", exact=True)).to_have_count(0)
-    third = page.locator('[data-mention-id="third"] button').filter(has_text="Play from mention")
+    third = page.locator('[data-mention-id="third"] button').first
     third.click()
     page.wait_for_function("() => !player.paused && player.currentTime >= 12")
     page.evaluate("player.currentTime = player.duration - 0.1")
@@ -217,6 +220,11 @@ def test_callsign_switch_seek_pause_end_error_and_history_removal(page, mention_
     third.click()
     page.wait_for_function("() => player.error !== null")
     expect(third).to_have_text("Play from mention")
+    # A transient media failure must be retryable without navigating or changing URL.
+    page.unroute("**/api/v1/archive/recordings/third/audio")
+    third.click()
+    page.wait_for_function("() => !player.error && !player.paused && player.currentTime >= 12")
+    expect(third).to_have_text("Playing")
 
 
 def test_callsign_delayed_metadata_and_rejected_old_play(page, mention_players, media):
