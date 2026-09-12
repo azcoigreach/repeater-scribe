@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Select, case, exists, func, select
 from sqlalchemy.orm import Session
 
+from asl_transcriber.archive import archive_source_id
 from asl_transcriber.models import (
     Callsign,
     CallsignMention,
@@ -389,6 +390,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
     latest_evidence = latest.with_only_columns(CallsignMention.evidence_json).scalar_subquery()
     latest_recording = latest.with_only_columns(CallsignMention.recording_id).scalar_subquery()
     latest_source_path = latest.with_only_columns(Recording.source_path).scalar_subquery()
+    latest_archive_root = latest.with_only_columns(Recording.archive_root).scalar_subquery()
     statement = select(
         Callsign,
         func.min(CallsignMention.heard_at),
@@ -402,6 +404,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
         latest_evidence,
         latest_recording,
         latest_source_path,
+        latest_archive_root,
     ).join(CallsignMention, CallsignMention.callsign_id == Callsign.id).join(
         Recording, Recording.id == CallsignMention.recording_id
     ).where(
@@ -429,6 +432,7 @@ def last_heard_rows(session: Session, limit: int) -> list[dict[str, object]]:
             "acoustic_quality_percent": round(float(row[6]) * 100) if row[6] is not None else None,
             "evidence": [*map(str, evidence), f"Heard {row[3]} times across {row[4]} recording{'s' if row[4] != 1 else ''}"],
             "source_path": row[11],
+            "source_id": archive_source_id(row[12]) if row[12] else None,
             "_recording_id": row[10],
             "qrz_status": details.qrz_status,
             "qrz_display_name": details.qrz_display_name,

@@ -274,3 +274,60 @@ def test_duplicate_filenames_in_distinct_roots_do_not_share_playback(page, playb
     page.wait_for_function("() => !player.paused && player.currentSrc.endsWith('/second.wav')")
     expect(first).to_have_text("▶ Play audio")
     expect(second).to_have_text("❚❚ Playing")
+
+
+@pytest.mark.parametrize("terminal", ["ended", "error"])
+def test_terminal_playback_restarts_with_one_click_after_refresh(page, playback_dashboard, terminal):
+    first = playback_button(page, "first")
+    first.click()
+    page.wait_for_function("() => !player.paused && player.currentTime > 0")
+    # Exercise the terminal-but-unpaused state which differs between media backends.
+    page.evaluate("""terminal => {
+        player.pause();
+        Object.defineProperty(player, 'paused', {configurable: true, value: false});
+        Object.defineProperty(player, terminal, {configurable: true, value: terminal === 'ended' ? true : {code: 3}});
+        const play = player.play.bind(player);
+        window.restartCalls = 0;
+        player.play = () => {
+            restartCalls++;
+            delete player.paused; delete player[terminal];
+            return play();
+        };
+    }""", terminal)
+    page.evaluate("loadJobs()")
+    expect(first).to_have_text("▶ Play audio")
+    first.click()
+    assert page.evaluate("restartCalls") == 1
+    page.wait_for_function("() => !player.paused && player.currentTime > 0")
+    expect(first).to_have_text("❚❚ Playing")
+
+
+@pytest.mark.parametrize("source_id", ["root-two", "missing-root", None])
+def test_last_heard_reveals_only_the_intended_root(page, playback_dashboard, source_id):
+    data, items = playback_dashboard
+    items[0]["source_path"] = items[1]["source_path"] = "same.wav"
+    items[0]["source_id"], items[1]["source_id"] = "root-one", "root-two"
+    page.route("**/api/v1/callsigns/last-heard", lambda route: route.fulfill(json={
+        "configured": False, "total": 1,
+        "items": [{"callsign": "KM7GHS", "source_path": "same.wav", "source_id": source_id}],
+    }))
+    # Install the response before navigation so the initial load cannot overwrite it.
+    page.reload()
+    page.evaluate("async () => { await loadJobs(); await loadCallsigns(); activatePanel('callsigns'); }")
+    page.evaluate("""() => {
+        const reveal = revealTranscript;
+        window.revealFinished = false;
+        revealTranscript = async (...args) => { await reveal(...args); window.revealFinished = true; };
+    }""")
+    page.get_by_role("button", name="Show transcript", exact=True).click()
+    page.wait_for_function("() => window.revealFinished")
+    if source_id == "root-two":
+        expect(page.locator('.recording.linked-highlight')).to_have_count(1)
+        expect(page.locator('.recording.linked-highlight')).to_have_attribute("data-source-id", "root-two")
+        # Reordering must not affect the target either.
+        data["items"].reverse()
+        page.evaluate("async () => { await loadJobs(); activatePanel('callsigns'); }")
+        page.get_by_role("button", name="Show transcript", exact=True).click()
+        expect(page.locator('.recording.linked-highlight')).to_have_attribute("data-source-id", "root-two")
+    else:
+        expect(page.locator('.recording.linked-highlight')).to_have_count(0)

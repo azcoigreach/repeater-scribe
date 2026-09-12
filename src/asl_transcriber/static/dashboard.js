@@ -98,6 +98,7 @@ function renderJobs(items, databaseTotals = {}) {
   if (!items.length) { recordings.append(element('div', 'No recordings match this search.', 'empty')); return; }
   items.forEach(item => {
     const card = element('article', '', 'recording'); card.dataset.sourcePath = item.source_path;
+    if (item.source_id) card.dataset.sourceId = item.source_id;
     const meta = element('div', '', 'recording-meta');
     meta.append(element('span', item.source_path, 'recording-path'), element('span', item.timestamp ? UITime.format(item.timestamp) : 'Timestamp unavailable', 'recording-date'), element('span', item.status, `status ${item.status}`));
     const play = actionButton('▶ Play audio', 'play-button'); const url = safeUrl(item.audio_url, true); play.disabled = !url; if (url) play.dataset.audioUrl = url;
@@ -142,8 +143,11 @@ const player = new Audio();
 // Keep playback independent of the currently visible (and replaceable) cards.
 let activeRecordingKey = null;
 let playbackRequestVersion = 0;
+function isPlayingRecording(button) {
+  return button.dataset.recordingKey === activeRecordingKey && !player.paused && !player.ended && !player.error;
+}
 function updatePlaybackButton(button) {
-  const playing = button.dataset.recordingKey === activeRecordingKey && !player.paused && !player.ended && !player.error;
+  const playing = isPlayingRecording(button);
   button.textContent = playing ? '❚❚ Playing' : '▶ Play audio';
   button.setAttribute('aria-label', `${playing ? 'Pause' : 'Play'} ${button.dataset.recordingPath}`);
   button.disabled = !playing && !button.dataset.audioUrl;
@@ -153,7 +157,7 @@ function updatePlaybackControls() {
 }
 function playAudio(button) {
   const requestVersion = ++playbackRequestVersion;
-  if (activeRecordingKey === button.dataset.recordingKey && !player.paused) {
+  if (isPlayingRecording(button)) {
     player.pause();
     updatePlaybackControls();
     return;
@@ -234,7 +238,7 @@ async function loadCallsigns() {
     details.append(score, meter, element('p', `${item.observation_count ?? 1} observations across ${item.recording_count ?? 1} recordings${item.acoustic_quality_percent != null ? ` · Best audio ${item.acoustic_quality_percent}%` : ''}`, 'confidence-observations'));
     if (item.evidence?.length) { const evidence = element('details', '', 'confidence-evidence'); evidence.open = expandedEvidence.has(String(item.callsign)); const list = element('ul'); item.evidence.forEach(reason => list.append(element('li', reason))); evidence.append(element('summary', 'Why this score'), list); details.append(evidence); }
     details.append(element('time', `Last heard ${item.last_heard_at ? UITime.format(item.last_heard_at) : 'Time unavailable'}`));
-    if (item.source_path) { const show = actionButton('Show transcript', 'callsign-evidence'); show.addEventListener('click', () => revealTranscript(item.source_path)); details.append(show); }
+    if (item.source_path) { const show = actionButton('Show transcript', 'callsign-evidence'); show.addEventListener('click', () => revealTranscript(item.source_path, item.source_id)); details.append(show); }
     card.append(photo, details); return card;
   }));
   if (data.configured) loadJobs();
@@ -1715,15 +1719,19 @@ async function revealCallsign(callsign) {
   emphasize(card);
 }
 
-async function revealTranscript(sourcePath) {
+async function revealTranscript(sourcePath, sourceId = null) {
   activatePanel('transcripts');
-  let recording = Array.from(recordings.querySelectorAll('.recording'))
-    .find(item => item.dataset.sourcePath === sourcePath);
+  const matchingRecording = () => {
+    const matches = Array.from(recordings.querySelectorAll('.recording')).filter(item =>
+      item.dataset.sourcePath === sourcePath && (!sourceId || item.dataset.sourceId === sourceId));
+    // Legacy path-only links must not guess between different archive roots.
+    return matches.length === 1 ? matches[0] : null;
+  };
+  let recording = matchingRecording();
   if (!recording) {
     searchInput.value = sourcePath;
     await loadJobs();
-    recording = Array.from(recordings.querySelectorAll('.recording'))
-      .find(item => item.dataset.sourcePath === sourcePath);
+    recording = matchingRecording();
   }
   emphasize(recording);
 }

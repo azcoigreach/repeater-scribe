@@ -335,6 +335,8 @@ class ArchiveRuntime:
     def live_result_for(
         self, source_path: str, archive_root: str | None = None
     ) -> ProcessingResult | None:
+        if archive_root is not None:
+            return self.live_results.get(self._live_result_key(source_path, archive_root))
         resolved_root = self._resolve_live_archive_root(source_path, archive_root)
         result = self.live_results.get(self._live_result_key(source_path, resolved_root))
         if result is not None:
@@ -389,6 +391,9 @@ class ArchiveRuntime:
             )
 
     def clear_live_result(self, source_path: str, archive_root: str | None = None) -> None:
+        if archive_root is not None:
+            self.live_results.pop(self._live_result_key(source_path, archive_root), None)
+            return
         resolved_root = self._resolve_live_archive_root(source_path, archive_root)
         if resolved_root is None:
             matching_keys = [

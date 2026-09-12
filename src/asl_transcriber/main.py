@@ -1626,20 +1626,16 @@ def last_heard_callsigns(
     heard: dict[str, dict[str, object]] = {}
     heard_times: dict[str, datetime | None] = {}
     observations: dict[str, list[TranscriptCallsignMention | None]] = {}
-    recording_sources: dict[str, set[str]] = {}
-    sources: list[tuple[str, object]] = []
+    recording_sources: dict[str, set[tuple[str | None, str]]] = {}
     active_runtime = current_runtime()
+    sources: list[tuple[tuple[str | None, str], object]] = list(active_runtime.live_results.items())
     sources.extend(
-        (result.source_path, result)
-        for result in active_runtime.live_results.values()
-    )
-    sources.extend(
-        (job.source_path, active_runtime.results[job.id])
+        ((job.archive_root, job.source_path), active_runtime.results[job.id])
         for job in active_runtime.jobs()
         if job.id in active_runtime.results
     )
 
-    for source_path, result in sources:
+    for (archive_root, source_path), result in sources:
         started_at_value = recording_timestamp(source_path)
         started_at = datetime.fromisoformat(started_at_value) if started_at_value else None
         mentions = getattr(result, "callsign_mentions", None) or []
@@ -1673,7 +1669,7 @@ def last_heard_callsigns(
 
         for callsign, last_heard_at, offset, precision, mention in candidates:
             observations.setdefault(callsign, []).append(mention)
-            recording_sources.setdefault(callsign, set()).add(source_path)
+            recording_sources.setdefault(callsign, set()).add((archive_root, source_path))
             current_time = heard_times.get(callsign)
             if callsign in heard and (
                 current_time is not None
@@ -1684,6 +1680,7 @@ def last_heard_callsigns(
                 "callsign": callsign,
                 "last_heard_at": iso_utc(last_heard_at),
                 "source_path": source_path,
+                "source_id": archive_source_id(archive_root) if archive_root else None,
             }
             if offset is not None:
                 item["heard_offset_seconds"] = offset
@@ -1808,7 +1805,7 @@ def _last_heard_from_database(db: Session, result_limit: int) -> dict[str, objec
 def _serialize_runtime_last_heard(
     heard: dict[str, dict[str, object]], heard_times: dict[str, datetime | None],
     observations: dict[str, list[TranscriptCallsignMention | None]],
-    recording_sources: dict[str, set[str]], result_limit: int,
+    recording_sources: dict[str, set[tuple[str | None, str]]], result_limit: int,
 ) -> dict[str, object]:
     for callsign, item in heard.items():
         mentions = observations[callsign]

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from asl_transcriber.archive import (
     _decode_cursor,
     _encode_cursor,
+    archive_source_id,
     refresh_audio,
     serialize_recording,
 )
@@ -66,7 +67,7 @@ MarkerType = Literal[
 
 
 def source_id(root: str) -> str:
-    return hashlib.sha256(root.encode()).hexdigest()
+    return archive_source_id(root)
 
 
 def sources(db: Session) -> list[dict]:

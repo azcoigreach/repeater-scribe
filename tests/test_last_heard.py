@@ -32,7 +32,7 @@ class FilteringQrzClient(FakeQrzClient):
 
 
 def test_last_heard_callsigns_are_extracted_and_enriched(monkeypatch) -> None:
-    job = SimpleNamespace(id="job-1", source_path="100000/2026083012304500-call.wav")
+    job = SimpleNamespace(id="job-1", archive_root="/archive", source_path="100000/2026083012304500-call.wav")
     result = SimpleNamespace(display_text="Kilo station KM7GHS checking in")
     runtime = SimpleNamespace(live_results={}, results={job.id: result}, jobs=lambda: [job])
     monkeypatch.setattr("asl_transcriber.main.current_runtime", lambda: runtime)
@@ -56,7 +56,7 @@ def test_last_heard_callsigns_are_extracted_and_enriched(monkeypatch) -> None:
 
 
 def test_last_heard_uses_each_callsigns_latest_segment_time(monkeypatch) -> None:
-    job = SimpleNamespace(id="job-1", source_path="100000/2026083012304500-call.wav")
+    job = SimpleNamespace(id="job-1", archive_root="/archive", source_path="100000/2026083012304500-call.wav")
     result = SimpleNamespace(
         display_text="KM7GHS then KE7WIL and KM7GHS again",
         callsign_mentions=[
@@ -80,7 +80,7 @@ def test_last_heard_uses_each_callsigns_latest_segment_time(monkeypatch) -> None
 
 
 def test_last_heard_omits_candidates_not_found_by_qrz(monkeypatch) -> None:
-    job = SimpleNamespace(id="job-1", source_path="100000/2026083012304500-call.wav")
+    job = SimpleNamespace(id="job-1", archive_root="/archive", source_path="100000/2026083012304500-call.wav")
     result = SimpleNamespace(display_text="W3UWU then KM7GHS", callsign_mentions=[])
     runtime = SimpleNamespace(live_results={}, results={job.id: result}, jobs=lambda: [job])
     monkeypatch.setattr("asl_transcriber.main.current_runtime", lambda: runtime)
@@ -107,7 +107,7 @@ def test_confidence_increases_with_independent_evidence_and_qrz() -> None:
 
 
 def test_later_confirmed_extension_supersedes_valid_qrz_prefix(monkeypatch) -> None:
-    job = SimpleNamespace(id="job-1", source_path="100000/2026083012304500-call.wav")
+    job = SimpleNamespace(id="job-1", archive_root="/archive", source_path="100000/2026083012304500-call.wav")
     result = SimpleNamespace(
         display_text="KM7GH corrected later to KM7GHS",
         callsign_mentions=[
@@ -132,7 +132,7 @@ def test_runtime_qrz_failure_redacts_upstream_exception(monkeypatch):
         def lookup(self, callsign):
             raise QrzError("session-key-marker /private/archive credential-marker")
 
-    job = SimpleNamespace(id="redaction", source_path="2026083012304500.wav")
+    job = SimpleNamespace(id="redaction", archive_root="/archive", source_path="2026083012304500.wav")
     runtime = SimpleNamespace(live_results={}, results={job.id: SimpleNamespace(display_text="KM7GHS")}, jobs=lambda: [job])
     monkeypatch.setattr("asl_transcriber.main.current_runtime", lambda: runtime)
     monkeypatch.setattr("asl_transcriber.main.current_qrz_client", lambda: UnavailableQrz())
