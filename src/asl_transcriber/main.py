@@ -1336,7 +1336,11 @@ def recordings(
             }
             for job in jobs
         ],
-        key=lambda item: (str(item["source_path"]), str(item["source_id"] or "")),
+        key=lambda item: (
+            str(item["timestamp"] or ""),
+            str(item["source_path"]),
+            str(item["source_id"] or ""),
+        ),
         reverse=True,
     )
     for item in all_items:
