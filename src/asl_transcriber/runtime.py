@@ -345,8 +345,8 @@ class ArchiveRuntime:
             return self.live_results.get(self._live_result_key(source_path, None))
         matching = [
             live_result
-            for (live_root, live_source_path), live_result in self.live_results.items()
-            if live_source_path == source_path and live_root is not None
+            for (_, live_source_path), live_result in self.live_results.items()
+            if live_source_path == source_path
         ]
         if len(matching) == 1:
             return matching[0]
