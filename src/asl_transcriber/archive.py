@@ -21,6 +21,10 @@ class ArchiveQueryError(ValueError):
     pass
 
 
+def archive_source_id(archive_root: str) -> str:
+    return hashlib.sha256(archive_root.encode()).hexdigest()
+
+
 def recording_started_at(source_path: str) -> datetime | None:
     match = re.match(r"^(\d{14})(\d{2})", Path(source_path).name)
     if match is None:
@@ -133,7 +137,7 @@ def serialize_recording(recording: Recording) -> dict[str, object]:
     return {
         "id": recording.id,
         "source_path": recording.source_path,
-        "source_id": hashlib.sha256((recording.archive_root or "").encode()).hexdigest(),
+        "source_id": archive_source_id(recording.archive_root or ""),
         "started_at": iso_utc(recording.started_at),
         "source_modified_at": iso_utc(recording.source_modified_at),
         "duration_seconds": recording.duration_seconds,

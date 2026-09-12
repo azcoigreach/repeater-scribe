@@ -186,6 +186,14 @@ class ArchiveRuntime:
     def waiting_sources(self) -> list[str]:
         return sorted(path for service in self.services for path in service.waiting_paths())
 
+    def waiting_recordings(self) -> list[tuple[str, str]]:
+        """Return root/path identities before an ingestion job has been assigned."""
+        return sorted(
+            (str(service.root.resolve()), path)
+            for service in self.services
+            for path in service.waiting_paths()
+        )
+
     def process_pending(
         self,
         transcribe: Callable[[str], TranscriptResult],

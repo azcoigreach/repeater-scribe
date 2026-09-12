@@ -121,6 +121,7 @@ def playback_dashboard(page, application):
     items = [
         {
             "source_path": f"{name}.wav", "audio_url": f"/refresh-audio/{name}.wav",
+            "source_id": "fixture-root",
             "status": "completed", "callsigns": [],
             "transcript": {"display_text": f"Transcript {name}"},
         }
@@ -153,6 +154,8 @@ def test_playback_refresh_reorder_filter_pause_switch_and_end(page, playback_das
     before = page.evaluate("({time: player.currentTime, src: player.src, events: [...mediaEvents]})")
     for order in ([items[2], items[1], items[0]], [items[0], items[2], items[1]]):
         data["items"] = order
+        # Assignment of an ingestion job must not change the root/path identity.
+        items[0]["id"] = "ingested-first"
         items[0]["transcript"]["display_text"] += " updated"
         page.evaluate("loadJobs()")
         expect(first).to_have_text("❚❚ Playing")
@@ -245,3 +248,29 @@ def test_rejected_current_play_request_clears_refreshed_control(page, playback_d
     page.evaluate("rejectPlay(new DOMException('Playback denied', 'NotAllowedError'))")
     expect(first).to_have_text("▶ Play audio")
     expect(first).to_have_attribute("aria-label", "Play first.wav")
+
+
+def test_duplicate_filenames_in_distinct_roots_do_not_share_playback(page, playback_dashboard):
+    data, items = playback_dashboard
+    items[0]["source_path"] = items[1]["source_path"] = "same.wav"
+    items[0]["source_id"] = "root-one"
+    items[1]["source_id"] = "root-two"
+    page.evaluate("loadJobs()")
+    first = page.locator('.recording').filter(has_text="Transcript first").locator('button').first
+    second = page.locator('.recording').filter(has_text="Transcript second").locator('button').first
+    first.click()
+    page.wait_for_function("() => !player.paused && player.currentTime > 0")
+    data["items"] = [items[1], items[0]]
+    page.evaluate("loadJobs()")
+    expect(first).to_have_text("❚❚ Playing")
+    expect(second).to_have_text("▶ Play audio")
+    data["items"] = [items[1]]
+    page.evaluate("loadJobs()")
+    expect(second).to_have_text("▶ Play audio")
+    data["items"] = [items[1], items[0]]
+    page.evaluate("loadJobs()")
+    expect(first).to_have_text("❚❚ Playing")
+    second.click()
+    page.wait_for_function("() => !player.paused && player.currentSrc.endsWith('/second.wav')")
+    expect(first).to_have_text("▶ Play audio")
+    expect(second).to_have_text("❚❚ Playing")

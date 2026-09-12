@@ -101,7 +101,8 @@ function renderJobs(items, databaseTotals = {}) {
     const meta = element('div', '', 'recording-meta');
     meta.append(element('span', item.source_path, 'recording-path'), element('span', item.timestamp ? UITime.format(item.timestamp) : 'Timestamp unavailable', 'recording-date'), element('span', item.status, `status ${item.status}`));
     const play = actionButton('▶ Play audio', 'play-button'); const url = safeUrl(item.audio_url, true); play.disabled = !url; if (url) play.dataset.audioUrl = url;
-    play.dataset.recordingKey = item.source_path;
+    play.dataset.recordingKey = JSON.stringify([item.source_id || item.id || null, item.source_path]);
+    play.dataset.recordingPath = item.source_path;
     updatePlaybackButton(play);
     play.addEventListener('click', () => playAudio(play));
     const transcript = element('p', '', 'transcript');
@@ -137,14 +138,14 @@ function renderJobs(items, databaseTotals = {}) {
 }
 
 const player = new Audio();
-// Source paths are the stable archive identities used by the recordings endpoint.
+// Root/path identity stays stable from waiting through ingestion and retry.
 // Keep playback independent of the currently visible (and replaceable) cards.
 let activeRecordingKey = null;
 let playbackRequestVersion = 0;
 function updatePlaybackButton(button) {
   const playing = button.dataset.recordingKey === activeRecordingKey && !player.paused && !player.ended && !player.error;
   button.textContent = playing ? '❚❚ Playing' : '▶ Play audio';
-  button.setAttribute('aria-label', `${playing ? 'Pause' : 'Play'} ${button.dataset.recordingKey}`);
+  button.setAttribute('aria-label', `${playing ? 'Pause' : 'Play'} ${button.dataset.recordingPath}`);
   button.disabled = !playing && !button.dataset.audioUrl;
 }
 function updatePlaybackControls() {

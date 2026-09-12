@@ -26,6 +26,7 @@ from asl_transcriber import __version__
 from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.archive import (
     ArchiveQueryError,
+    archive_source_id,
     list_recordings,
     refresh_audio,
     serialize_recording,
@@ -1273,12 +1274,14 @@ def recordings(
     items: list[dict[str, object]] = []
     jobs = sorted(active_runtime.jobs(), key=lambda job: job.source_path, reverse=True)
     waiting_items: list[dict[str, object]] = []
-    for source_path in active_runtime.waiting_sources():
+    for archive_root, source_path in active_runtime.waiting_recordings():
+        source_id = archive_source_id(archive_root)
         live_result = active_runtime.live_results.get(source_path)
         waiting_items.append(
             {
                 "id": None,
                 "source_path": source_path,
+                "source_id": source_id,
                 "status": "live" if live_result is not None else "waiting",
                 "transcript": (
                     {
@@ -1291,7 +1294,7 @@ def recordings(
                     else None
                 ),
                 "timestamp": recording_timestamp(source_path),
-                "audio_url": f"/api/v1/audio?path={quote(source_path)}",
+                "audio_url": f"/api/v1/audio?path={quote(source_path)}&source_id={source_id}",
                 "callsigns": list(extract_callsigns(live_result.display_text))
                 if live_result
                 else [],
@@ -1301,10 +1304,14 @@ def recordings(
         {
             "id": job.id,
             "source_path": job.source_path,
+            "source_id": archive_source_id(job.archive_root) if job.archive_root else None,
             "status": job.status.value,
             "last_error": job.last_error,
             "timestamp": recording_timestamp(job.source_path),
-            "audio_url": f"/api/v1/audio?path={quote(job.source_path)}",
+            "audio_url": (
+                f"/api/v1/audio?path={quote(job.source_path)}"
+                + (f"&source_id={archive_source_id(job.archive_root)}" if job.archive_root else "")
+            ),
             "callsigns": (
                 list(extract_callsigns(result.display_text))
                 if (result := active_runtime.results.get(job.id)
@@ -1348,9 +1355,19 @@ def recordings(
 
 
 @app.get("/api/v1/audio", dependencies=[Depends(require_viewer)])
-def audio(path: str) -> FileResponse:
+def audio(path: str, source_id: str | None = None) -> FileResponse:
+    runtime = current_runtime()
+    archive_root = None
+    if source_id is not None:
+        archive_root = next(
+            (str(root.resolve()) for root in runtime.roots
+             if archive_source_id(str(root.resolve())) == source_id),
+            None,
+        )
+        if archive_root is None:
+            raise HTTPException(status_code=404, detail="Audio recording not found")
     try:
-        source = current_runtime()._resolve_source(path)
+        source = runtime._resolve_source(path, archive_root)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="Audio recording not found") from error
     return FileResponse(source, media_type="audio/wav", filename=source.name)
