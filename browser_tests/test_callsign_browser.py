@@ -8,15 +8,38 @@ def open_profile(page, application, callsign="KM7GHS"):
     expect(page.locator("#history .recording").first).to_be_visible()
 
 
+def assert_directory_heading_hierarchy(page):
+    headings = page.locator("#callsign-directory h3").evaluate_all(
+        """nodes => nodes.map(heading => {
+            const style = getComputedStyle(heading);
+            const details = [...heading.closest('article').querySelectorAll('p')];
+            return {
+                size: parseFloat(style.fontSize), weight: Number(style.fontWeight),
+                detailSizes: details.map(p => parseFloat(getComputedStyle(p).fontSize)),
+                font: style.fontFamily,
+                bodyFont: getComputedStyle(document.body).fontFamily
+            };
+        })"""
+    )
+    assert headings
+    for heading in headings:
+        assert heading["size"] >= 24
+        assert heading["weight"] >= 700
+        assert heading["size"] >= max(heading["detailSizes"]) * 1.5
+        assert heading["font"] == heading["bodyFont"]
+
+
 def test_directory_search_sort_pagination_and_navigation(page, application):
     origin, _ = application
     page.goto(origin + "/")
     page.get_by_role("link", name="Callsigns", exact=True).click()
     expect(page.locator("#callsign-directory .recording")).to_have_count(50)
+    assert_directory_heading_hierarchy(page)
     expect(page.locator("#callsign-directory")).to_contain_text("First heard:")
     expect(page.locator("#callsign-directory")).to_contain_text("Most recent confidence:")
     page.locator("#callsign-more").click()
     expect(page.locator("#callsign-directory .recording")).to_have_count(56)
+    assert_directory_heading_hierarchy(page)
     names = page.locator("#callsign-directory h3").all_text_contents()
     assert len(names) == len(set(names))
     expect(page.locator("#callsign-more")).to_be_hidden()
@@ -25,12 +48,14 @@ def test_directory_search_sort_pagination_and_navigation(page, application):
     expect(page.locator("#callsign-directory .recording")).to_have_count(50)
     names = page.locator("#callsign-directory h3").all_text_contents()
     assert names == sorted(names)
+    assert_directory_heading_hierarchy(page)
     page.locator("#callsign-query").fill("K1")
     page.locator("#callsign-search button").click()
     expect(page.locator("#callsign-directory .recording")).to_have_count(50)
     assert all(
         name.startswith("K1") for name in page.locator("#callsign-directory h3").all_text_contents()
     )
+    assert_directory_heading_hierarchy(page)
     page.locator("#callsign-query").fill("KM7GHS")
     page.locator("#callsign-search button").click()
     expect(page).to_have_url(origin + "/callsigns/KM7GHS")
@@ -43,6 +68,55 @@ def test_directory_search_sort_pagination_and_navigation(page, application):
     expect(page.locator("#recording-detail")).to_be_visible()
     page.locator(".callsign-history-link").first.click()
     expect(page).to_have_url(origin + "/callsigns/KM7GHS")
+
+
+def test_directory_heading_focus_hover_navigation_and_compact_evidence(page, application):
+    origin, _ = application
+    page.goto(origin + "/callsigns")
+    link = page.locator("#callsign-directory a").first
+    expect(link).to_be_visible()
+    target = link.get_attribute("href")
+    colors = {"blue": "rgb(116, 199, 255)", "ink": "rgb(244, 247, 251)"}
+    expect(link).to_have_css("color", colors["blue"])
+    link.hover()
+    expect(link).to_have_css("color", colors["ink"])
+    expect(link).to_have_css("text-decoration-line", "underline")
+    page.mouse.move(0, 0)
+    page.locator("#callsign-search button").focus()
+    page.keyboard.press("Tab")
+    expect(link).to_be_focused()
+    expect(link).to_have_css("outline-style", "solid")
+    expect(link).to_have_css("outline-width", "2px")
+    expect(link).to_have_css("outline-color", colors["blue"])
+    page.keyboard.press("Enter")
+    expect(page).to_have_url(origin + target)
+    page.goto(origin + "/archive")
+    evidence = page.locator("#recordings .callsign-evidence").first
+    expect(evidence).to_be_visible()
+    expect(evidence).to_have_css("font-size", "9px")
+
+
+def test_directory_headings_reflow_at_narrow_widths_and_zoom(page, application):
+    page.goto(application[0] + "/callsigns")
+    expect(page.locator("#callsign-directory .recording")).to_have_count(50)
+    # CSS zoom exercises enlarged text and layout; 320px also covers narrow reflow.
+    for width, zoom in [(1440, 1), (390, 1), (320, 1), (1440, 2)]:
+        page.set_viewport_size({"width": width, "height": 1000})
+        page.evaluate("zoom => document.body.style.zoom = zoom", zoom)
+        assert_directory_heading_hierarchy(page)
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        violations = page.locator("#callsign-directory h3").evaluate_all(
+            """headings => headings.filter(heading => {
+                const box = heading.getBoundingClientRect();
+                const card = heading.closest('article').getBoundingClientRect();
+                const details = heading.closest('article').querySelector('p')
+                    .getBoundingClientRect();
+                return box.left < card.left || box.right > card.right ||
+                    box.top < card.top || box.bottom > details.top ||
+                    heading.scrollWidth > heading.clientWidth;
+            }).map(heading => heading.textContent)"""
+        )
+        assert violations == [], (width, zoom, violations)
 
 
 def test_history_filters_pagination_evidence_and_audio_seeking(page, application):
