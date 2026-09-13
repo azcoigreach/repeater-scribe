@@ -120,6 +120,11 @@ or browser; the established catalog/activity timestamp convention is UTC. This
 release does not reinterpret existing filename timestamps.
 Use an explicit offset through the API to disambiguate a repeated DST hour.
 
+Events calendar fields select dates and times to the whole second. Existing
+timestamp precision is retained when saving unrelated fields; explicitly editing
+a calendar value saves whole seconds. Audio offsets still accept fractional
+seconds, and API and stored timestamps retain their existing precision.
+
 **Event elapsed** is wall-clock end minus start (now minus start while active).
 **Included recording audio** sums whole recording durations; unknown-duration
 counts are displayed separately. Overlap and crossing audio can make this total

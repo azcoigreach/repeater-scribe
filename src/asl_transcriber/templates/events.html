@@ -29,8 +29,8 @@
       <label>Name<input name="name" required maxlength="255" placeholder="Groovy Late Shift"></label>
       <label>Type<select name="type" class="event-types"></select></label>
       <label>Monitored source<select name="source_id" class="event-sources" required></select></label>
-      <label>Start time<input name="started_at" type="datetime-local" step="0.001" required></label>
-      <label>End time (blank while active)<input name="ended_at" type="datetime-local" step="0.001"></label>
+      <label>Start time<input name="started_at" type="datetime-local" step="1" required></label>
+      <label>End time (blank while active)<input name="ended_at" type="datetime-local" step="1"></label>
       <label>Net-control callsign<input name="net_control" maxlength="32"></label>
       <label class="wide">Description / notes<textarea name="description" maxlength="20000" rows="3"></textarea></label>
       <label class="wide">Tags (comma separated)<input name="tags" maxlength="1900"></label>
@@ -47,7 +47,7 @@
       <label>Type<select name="type" class="event-types"><option value="">Any type</option></select></label>
       <label>Source<select name="source_id" class="event-sources"><option value="">Any source</option></select></label>
       <label>Status<select name="status"><option value="">Any status</option><option value="active">Active</option><option value="ended">Ended</option></select></label>
-      <label>From<input name="from" type="datetime-local" step="0.001"></label><label>To (exclusive)<input name="to" type="datetime-local" step="0.001"></label>
+      <label>From<input name="from" type="datetime-local" step="1"></label><label>To (exclusive)<input name="to" type="datetime-local" step="1"></label>
       <label>Tag<input name="tag"></label>
       <div class="event-actions"><button class="primary-button">Apply filters</button><button id="clear-event-filters" type="button" class="quiet-button">Clear</button></div>
     </form>
@@ -69,7 +69,7 @@
     <section id="markers-section" class="detail-section"><h2>Markers &amp; notes</h2>
       <form id="marker-form" class="event-form" data-write>
         <label>Marker type<select name="type"><option>Net Started</option><option>Check-In</option><option>Topic</option><option>Emergency Traffic</option><option>Net Closed</option><option>Custom</option></select></label>
-        <label>Marker time<input name="at" type="datetime-local" step="0.001" required></label>
+        <label>Marker time<input name="at" type="datetime-local" step="1" required></label>
         <label>Callsign (optional)<input name="callsign" maxlength="32"></label>
         <label class="wide">Marker note<textarea name="note" required maxlength="10000"></textarea></label>
         <label>Recording ID (optional)<input name="recording_id"></label><label>Audio offset (seconds)<input name="audio_offset" type="number" min="0" step="0.001"></label>
@@ -82,7 +82,7 @@
     </section>
     <section id="roster-section" class="detail-section"><h2>Operator-confirmed check-ins</h2>
       <form id="checkin-form" class="event-form" data-write>
-        <label>Check-in callsign<input name="callsign" required maxlength="32"></label><label>Claimed check-in time<input name="at" type="datetime-local" step="0.001" required></label>
+        <label>Check-in callsign<input name="callsign" required maxlength="32"></label><label>Claimed check-in time<input name="at" type="datetime-local" step="1" required></label>
         <label class="wide">Check-in notes<textarea name="note" maxlength="10000"></textarea></label>
         <label>Supporting recording ID (optional)<input name="recording_id"></label><label>Supporting offset (seconds)<input name="audio_offset" type="number" min="0" step="0.001"></label>
         <div class="wide event-actions"><button class="primary-button" id="save-checkin">Confirm Check-In</button><button type="button" id="cancel-checkin" class="quiet-button">Clear check-in form</button></div>
