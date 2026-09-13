@@ -114,7 +114,7 @@ def test_unchanged_calendars_preserve_repeated_hour_and_microseconds(page, appli
     assert parse_qs(urlparse(page.url).query)['from'] == ['2025-11-02T06:30:00.123456Z']
     page.reload()
     page.locator('#event-from-range').click()
-    expect(page.locator('#event-form [name=started_at]')).to_have_value('2025-11-02T01:30:00.123')
+    expect(page.locator('#event-form [name=started_at]')).to_have_value('2025-11-02T01:30')
     page.locator('#event-form [name=name]').fill('Repeated hour')
     with page.expect_request(lambda r: r.method == 'POST' and r.url.endswith('/ui/sessions')) as request:
         page.locator('#save-event').click()
@@ -123,7 +123,7 @@ def test_unchanged_calendars_preserve_repeated_hour_and_microseconds(page, appli
     # Navigation finishes before the Event detail request populates the edit data.
     expect(page.locator('#event-title')).to_have_text('Repeated hour')
     page.locator('#edit-event').click()
-    expect(page.locator('#event-form [name=started_at]')).to_have_value('2025-11-02T01:30:00.123')
+    expect(page.locator('#event-form [name=started_at]')).to_have_value('2025-11-02T01:30')
     with page.expect_request(lambda r: r.method == 'PATCH' and not r.url.endswith('/tags')) as request:
         page.locator('#save-event').click()
     assert request.value.post_data_json['started_at'] in [

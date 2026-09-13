@@ -41,8 +41,21 @@ window.UITime = (() => {
     try { return localInput(toUTC(value, endOfDay)); } catch (_) { return ''; }
   }
   const originals = new WeakMap();
+  const trackedInputs = new WeakSet();
   function setInput(input, value, endOfDay = false) {
-    input.value = typeof value === 'string' ? restore(value, endOfDay) : localInput(value);
+    const local = typeof value === 'string' ? restore(value, endOfDay) : localInput(value);
+    // Whole-second calendars hide fractions without changing the saved instant.
+    // Other calendars retain their existing precision and round-trip behavior.
+    const wholeSeconds = input.type === 'datetime-local' && input.step === '1';
+    input.value = wholeSeconds ? local.slice(0, 19) : local;
+    if (wholeSeconds && !trackedInputs.has(input)) {
+      // An explicit edit (even away and back to the displayed value) opts into
+      // whole seconds. Merely opening or focusing the field does not.
+      const edited = () => originals.delete(input);
+      input.addEventListener('input', edited);
+      input.addEventListener('change', edited);
+      trackedInputs.add(input);
+    }
     const date = instant(value);
     // Keep the original instant when an unchanged calendar is submitted. This
     // preserves sub-millisecond precision and the second occurrence of a time
