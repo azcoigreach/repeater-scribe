@@ -74,6 +74,28 @@ container port beyond loopback. The supplied application and Caddy images are
 pinned to their Linux AMD64 digests; review Dependabot's digest updates and
 repin deliberately when upgrading.
 
+### Proxy idle connections
+
+The reference Caddy transport retires idle upstream HTTP connections after
+**2 seconds**. The application image explicitly starts Uvicorn with
+`--timeout-keep-alive 5`. Keep the proxy's idle lifetime below the upstream's
+when overriding either configuration. These are idle connection timeouts, not
+limits on an active audio response or SSE stream.
+
+[Caddy's transport documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#the-http-transport)
+warns that a longer proxy lifetime can cause HTTP/1.1 upstream resets and 502s.
+The previous 120s/5s mismatch is a plausible cause of issue #49; a finite local
+run has not reproduced the original healthy-runtime failure. See the
+[transient-read verification record](verification-transient-reads.md) for
+evidence, regression commands, and remaining operational acceptance.
+
+Distinguish a healthy-runtime `connection reset by peer` from startup
+`connection refused`. Correlate the route and UTC timestamp in proxy and
+application logs before attributing a 502 to a timeout, dependency, or restart.
+The Favorites panel retains its last loaded list during a read failure and
+retries after 10 seconds; its status clears only after a successful load for
+the current home node. Node Controls reports explicit commands separately.
+
 ## Machine API tokens
 
 Create a token inside the application container. Its secret is printed once to

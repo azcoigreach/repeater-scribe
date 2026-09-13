@@ -131,6 +131,36 @@ def test_events_refresh_rebuild_load_more_removal_and_navigation(page, applicati
     assert page.evaluate("sessionStorage.getItem('leftPaused')") == "true"
 
 
+def test_events_failed_poll_recovers_without_losing_audio_or_draft(page, event_players):
+    page.locator('[data-recording-id="first"]').get_by_role(
+        "button", name="2.00s", exact=True
+    ).click()
+    assert_only(page, "first")
+    note = page.locator('#marker-form [name="note"]')
+    note.fill("Unsaved operator note")
+    before = audio_for(page, "first").evaluate("audio => audio.currentTime")
+    failures = []
+
+    def failed_read(route):
+        failures.append(route.request.method)
+        route.fulfill(status=502, body="Bad Gateway")
+
+    pattern = "**/api/v1/sessions/playback/markers?*"
+    page.route(pattern, failed_read)
+    page.evaluate("refreshEvent()")
+    expect(page.locator("#event-error")).to_contain_text("Request failed (502)")
+    expect(page.locator("#recordings-list audio")).to_have_count(3)
+    assert_only(page, "first")
+    page.unroute(pattern, failed_read)
+    page.evaluate("refreshEvent()")
+    expect(page.locator("#event-error")).to_be_hidden()
+    expect(note).to_have_value("Unsaved operator note")
+    assert page.evaluate("originalPlayers[0] === document.querySelector('audio')")
+    assert audio_for(page, "first").evaluate("audio => audio.currentTime") >= before
+    assert_only(page, "first")
+    assert failures == ["GET"]
+
+
 def test_events_delayed_load_and_old_play_completion_cannot_reclaim_audio(page, event_players, media):
     delayed = []
     page.route("**/slow-audio", lambda route: delayed.append(route))
