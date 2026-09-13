@@ -138,7 +138,7 @@ function renderJobs(items, databaseTotals = {}) {
   });
 }
 
-const player = new Audio();
+const player = Playback.register(new Audio(), { persistent: true });
 // Root/path identity stays stable from waiting through ingestion and retry.
 // Keep playback independent of the currently visible (and replaceable) cards.
 let activeRecordingKey = null;
@@ -165,7 +165,7 @@ function playAudio(button) {
   player.pause();
   activeRecordingKey = button.dataset.recordingKey;
   player.src = button.dataset.audioUrl;
-  player.play().catch(() => {
+  Playback.play(player).catch(() => {
     // An interrupted play request must not clear a newer recording's indicator.
     if (requestVersion !== playbackRequestVersion) return;
     activeRecordingKey = null;

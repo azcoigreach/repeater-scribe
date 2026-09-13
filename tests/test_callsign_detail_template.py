@@ -13,16 +13,16 @@ def test_callsign_history_uses_versioned_client_asset() -> None:
     assert 'data-role="{{ role }}"' in template
     assert 'href="/static/archive.css?v=0.9.1"' in template
     assert 'src="/static/callsign_detail.js?v=0.9.1"' in template
+    assert template.index('src="/static/playback.js?v=0.9.1"') < template.index(
+        'src="/static/callsign_detail.js?v=0.9.1"'
+    )
     assert "window.callsignName" not in template
     assert "workspace?.dataset.callsign" in script
     assert "image.className = 'callsign-profile-image'" in script
     assert "text('a', 'View QRZ profile', 'callsign-evidence')" in script
     assert "text('a', 'Open recording', 'control-button')" in script
     assert "text('button', 'Play from mention', 'control-button')" in script
-    assert "const player = new Audio()" in script
     assert "function playMention(button, mention)" in script
-    assert "player.pause();" in script
-    assert "player.addEventListener('ended', resetPlaybackButton)" in script
 
 
 def test_dynamic_callsign_pages_are_not_cached() -> None:
