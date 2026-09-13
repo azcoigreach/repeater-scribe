@@ -144,6 +144,67 @@ def playback_button(page, name):
     return page.locator(f'[data-source-path="{name}.wav"] button').first
 
 
+@pytest.mark.parametrize("width", [640, 260])
+def test_transcript_action_spacing_survives_states_and_refresh(page, playback_dashboard, width):
+    _, items = playback_dashboard
+    for index, item in enumerate(items):
+        item["id"] = f"spacing-{index}"
+    items[1]["audio_url"] = None
+    items[1]["status"] = "processing"
+    page.evaluate("async () => { await loadJobs(); undockPanel('transcripts'); }")
+    panel = page.locator('[data-win="transcripts"]')
+    panel.evaluate("(node, width) => node.style.width = width + 'px'", width)
+
+    def assert_spacing():
+        cards = page.locator("#recordings .recording")
+        assert cards.count() == 2
+        for card in cards.all():
+            play, retry = card.locator("button.play-button").all()
+            first, second = play.bounding_box(), retry.bounding_box()
+            bounds = card.bounding_box()
+            assert first and second and bounds
+            if second["y"] == first["y"]:
+                assert second["x"] - first["x"] - first["width"] == pytest.approx(8)
+            else:
+                assert width == 260
+                assert second["x"] == pytest.approx(first["x"])
+                assert second["y"] - first["y"] - first["height"] == pytest.approx(8)
+            if width == 260 and play.text_content() == "▶ Play audio":
+                assert second["y"] > first["y"]
+            for button in (first, second):
+                assert button["x"] >= bounds["x"]
+                assert button["x"] + button["width"] <= bounds["x"] + bounds["width"]
+
+    assert_spacing()
+    expect(playback_button(page, "second")).to_be_disabled()
+    expect(page.locator('[data-source-path="second.wav"]').get_by_role(
+        "button", name="Re-transcribe", exact=True
+    )).to_be_disabled()
+    first = playback_button(page, "first")
+    first.click()
+    expect(first).to_have_text("❚❚ Playing")
+    assert_spacing()
+    items[0]["transcript"]["display_text"] += " refreshed"
+    page.evaluate("loadJobs()")
+    expect(first).to_have_text("❚❚ Playing")
+    expect(page.locator("#recordings")).to_contain_text("refreshed")
+    assert_spacing()
+
+    queued = []
+    page.route("**/ui/ingestion/jobs/spacing-0/retry", lambda route: queued.append(route))
+    retry = page.locator('[data-source-path="first.wav"]').get_by_role(
+        "button", name="Re-transcribe", exact=True
+    )
+    retry.click()
+    busy = page.get_by_role("button", name="Queuing…", exact=True)
+    expect(busy).to_be_disabled()
+    assert_spacing()
+    items[0]["status"] = "pending"
+    queued[0].fulfill(status=202, json={"id": "spacing-0", "status": "pending"})
+    expect(retry).to_be_disabled()
+    assert_spacing()
+
+
 def test_playback_refresh_reorder_filter_pause_switch_and_end(page, playback_dashboard):
     data, items = playback_dashboard
     first = playback_button(page, "first")

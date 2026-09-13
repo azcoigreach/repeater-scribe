@@ -109,7 +109,9 @@ function renderJobs(items, databaseTotals = {}) {
     const transcript = element('p', '', 'transcript');
     if (item.transcript) { transcript.append(linkedTranscript(item.transcript.display_text, item.callsigns)); if (item.transcript.provisional) transcript.append(element('span', ' (provisional)', 'muted-text')); }
     else transcript.append(element('span', 'Awaiting local transcription', 'muted-text'));
-    card.append(meta, play);
+    const actions = element('div', '', 'transcript-actions');
+    actions.append(play);
+    card.append(meta, actions);
     if (item.id && ['operator', 'admin'].includes(document.body.dataset.role)) {
       const retry = actionButton('Re-transcribe', 'play-button');
       retry.disabled = ['pending', 'processing'].includes(item.status);
@@ -126,7 +128,7 @@ function renderJobs(items, databaseTotals = {}) {
           feedback.textContent = error.message;
         }
       });
-      card.append(retry);
+      actions.append(retry);
     }
     const feedback = element('p', item.last_error || '', 'muted-text', { role: 'status' });
     card.append(transcript, feedback);
