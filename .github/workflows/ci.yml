@@ -30,8 +30,18 @@ jobs:
         run: mypy src
       - name: Test
         run: pytest -q -W error::DeprecationWarning
+      - name: Extract the reference Caddy binary for isolated proxy tests
+        run: |
+          caddy_image=$(python -c 'from pathlib import Path; print(next(line.split("image: ", 1)[1] for line in Path("compose.internet.yml").read_text().splitlines() if "image: caddy:" in line))')
+          docker create --name proxy-test-caddy "$caddy_image"
+          docker cp proxy-test-caddy:/usr/bin/caddy "$RUNNER_TEMP/caddy"
+          docker rm proxy-test-caddy
       - name: Browser acceptance
+        env:
+          ASLT_TEST_CADDY_BINARY: ${{ runner.temp }}/caddy
         run: pytest browser_tests -q -W error::DeprecationWarning
+      - name: Proxy idle connection regression
+        run: python scripts/verify_proxy_keepalive.py --caddy "$RUNNER_TEMP/caddy" --output "$RUNNER_TEMP/proxy-check" --rounds 4 --concurrency 16
       - name: Audit Python dependencies
         uses: pypa/gh-action-pip-audit@v1.1.0
         with:

@@ -37,4 +37,4 @@ USER appuser
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "alembic upgrade head && exec python -m uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080 --no-server-header"]
+CMD ["sh", "-c", "alembic upgrade head && exec python -m uvicorn asl_transcriber.main:app --host 0.0.0.0 --port 8080 --no-server-header --timeout-keep-alive 5"]

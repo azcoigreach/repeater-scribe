@@ -263,6 +263,10 @@ async function loadNodeStatus() {
 
 let pendingControl = null;
 let favoriteItems = [];
+let favoritesHome = null;
+let favoritesLoaded = false;
+let favoritesRequest = null;
+let favoritesTimer = null;
 let currentConnections = [];
 function renderNodeSnapshot(data) {
   const state = document.querySelector('#node-state');
@@ -374,7 +378,8 @@ function renderFavorites() {
   const connectionControls = new Map(Array.from(table.querySelectorAll('[data-connection-key]'))
     .map(control => [control.dataset.connectionKey, control]));
   if (!favoriteItems.length) {
-    const row = element('tr'); row.append(element('td', 'No favorite nodes yet. Add one from Connected nodes.', 'empty', { colspan: 11 })); table.replaceChildren(row);
+    const message = favoritesLoaded ? 'No favorite nodes yet. Add one from Connected nodes.' : 'Favorites have not been loaded yet.';
+    const row = element('tr'); row.append(element('td', message, 'empty', { colspan: 11 })); table.replaceChildren(row);
     return;
   }
   table.replaceChildren(...favoriteItems.map(item => {
@@ -1180,20 +1185,69 @@ document.querySelector('#topology-reset-positions').addEventListener('click', ()
   requestAnimationFrame(fitTopologyView);
 });
 
-async function loadFavorites() {
-  const response = await fetch(`/api/v1/nodes/${encodeURIComponent(controlledNodeId())}/favorites`, { cache: 'no-store' });
-  if (!response.ok) {
-    setControlResult(`Favorites could not be loaded (${response.status}).`, true);
-    return;
+function setFavoritesStatus(message) {
+  const status = document.querySelector('#favorites-status');
+  status.textContent = message;
+  status.hidden = !message;
+}
+
+function loadFavorites() {
+  const home = controlledNodeId();
+  if (favoritesHome !== home) {
+    favoritesRequest?.controller.abort();
+    favoritesRequest = null;
+    favoritesHome = home;
+    favoritesLoaded = false;
+    favoriteItems = [];
+    setFavoritesStatus('Loading Favorites…');
+    renderConnectedStations(currentConnections);
+    renderFavorites();
+    renderTopology();
   }
-  favoriteItems = (await response.json()).items || [];
-  renderConnectedStations(currentConnections);
-  renderFavorites();
-  renderTopology();
-  if (topologyFavorite() && topologyPanelVisible() && !topologyStream) {
-    startTopologyCrawl(false);
-    syncTopologyStream();
-  }
+  // Polls, transitions and explicit refreshes share one bounded read. Schedule
+  // the next poll after completion so slow/failing reads cannot pile up.
+  if (favoritesRequest) return favoritesRequest.promise;
+  clearTimeout(favoritesTimer);
+  const request = { controller: new AbortController(), promise: null };
+  favoritesRequest = request;
+  const timeout = setTimeout(() => request.controller.abort(), 8000);
+  const isCurrent = () => favoritesRequest === request && controlledNodeId() === home;
+  request.promise = (async () => {
+    try {
+      const response = await fetch(`/api/v1/nodes/${encodeURIComponent(home)}/favorites`, {
+        cache: 'no-store', signal: request.controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      let data;
+      try { data = await response.json(); } catch (_) { throw new Error('invalid response'); }
+      if (!data || !Array.isArray(data.items) || data.items.some(item =>
+        !item || typeof item.id !== 'string' || typeof item.target_identifier !== 'string')) {
+        throw new Error('invalid response');
+      }
+      if (!isCurrent() || request.controller.signal.aborted) return;
+      favoriteItems = data.items;
+      favoritesLoaded = true;
+      setFavoritesStatus('');
+      renderConnectedStations(currentConnections);
+      renderFavorites();
+      renderTopology();
+      if (topologyFavorite() && topologyPanelVisible() && !topologyStream) {
+        startTopologyCrawl(false);
+        syncTopologyStream();
+      }
+    } catch (error) {
+      if (!isCurrent()) return;
+      const reason = request.controller.signal.aborted ? 'request timed out' : error instanceof TypeError ? 'network error' : error.message;
+      setFavoritesStatus(`Favorites could not be loaded (${reason}). ${favoritesLoaded ? 'Showing last loaded Favorites; data may be stale.' : 'No Favorites data loaded.'} Retrying in 10 seconds.`);
+    } finally {
+      clearTimeout(timeout);
+      if (favoritesRequest === request) {
+        favoritesRequest = null;
+        favoritesTimer = setTimeout(loadFavorites, 10000);
+      }
+    }
+  })();
+  return request.promise;
 }
 
 async function addConnectedFavorite(identifier) {
@@ -1357,7 +1411,6 @@ nodeStream.addEventListener('node-transition', loadFavorites);
 nodeStream.addEventListener('error', enableNodeRestFallback);
 enableNodeRestFallback();
 loadFavorites();
-setInterval(loadFavorites, 10000);
 const stream = new EventSource('/api/v1/events');
 stream.addEventListener('open', () => { document.querySelector('#connection-label').textContent = 'Live archive connection'; });
 let archiveRefreshTimer = null;

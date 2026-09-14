@@ -1,10 +1,16 @@
-# Upgrade to 0.9.1
+# Upgrade to 0.9.2
 
-From 0.9.0, rebuild and restart with the 0.9.1 code. This patch adds no
+From 0.9.0 or 0.9.1, rebuild and restart with the 0.9.2 code. This patch adds no
 database migration: the required head remains `events_sessions`. UTC storage
 and container timezone settings stay the same. The UI follows the browser’s
 local timezone; Arizona users should use `America/Phoenix`. All UI script and
-stylesheet URLs carry the 0.9.1 version to refresh cached assets.
+stylesheet URLs carry the 0.9.2 version to refresh cached assets.
+
+For internet installations, apply the updated Caddyfile together with the new
+application image. Caddy now retires idle upstream connections after 2 seconds;
+Uvicorn explicitly uses 5 seconds. Custom startup commands must keep the
+upstream timeout above the proxy timeout. Active audio and SSE streams are not
+limited by these idle timeouts.
 
 The steps below also cover upgrades from 0.8.1, which require the Events migration.
 
@@ -52,8 +58,14 @@ the actual baseline. The 0.9.0 migration head is `events_sessions`.
 Use the same Compose profile for every command. For internet installations,
 replace `docker compose` above with
 `docker compose -f docker-compose.yml -f compose.internet.yml`.
+After starting the application, recreate the proxy to load the checked-in
+transport setting:
 
-The migration adds `radio_sessions`, `session_requests`, `session_recordings`,
+```bash
+docker compose -f docker-compose.yml -f compose.internet.yml up -d --no-deps --force-recreate caddy
+```
+
+The original 0.9.0 migration adds `radio_sessions`, `session_requests`, `session_recordings`,
 `session_markers`, `session_checkins`, `tags`, `session_tags`, `recording_tags`,
 foreign keys, constraints and source/window lookup indexes. It does not rebuild
 or delete existing transcript, recording, segment, mention, correction, review,
@@ -69,9 +81,13 @@ saved events, retain a complete post-upgrade backup as well as the pre-upgrade
 backup, stop traffic, and restore the appropriate catalog/code pair. Do not run
 older application code against a newer schema.
 
+A rollback from 0.9.2 to 0.9.1 does not require a schema downgrade. Restore the
+matching application image and proxy configuration while retaining the data
+volume; restoring the old proxy setting reintroduces the idle-timeout mismatch.
+
 The implementation task does not perform any of these deployment steps against
 your running installation and does not publish a release or create a release tag.
 
-See [0.9.1 verification](verification-0.9.1.md) and
+See [0.9.2 verification](verification-0.9.2.md) and
 [the original Events verification report](verification-0.9.md) for migration and
 browser acceptance coverage and environment limits.

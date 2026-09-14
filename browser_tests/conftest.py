@@ -20,6 +20,12 @@ def application(tmp_path_factory):
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     origin = f"https://127.0.0.1:{port}"
+    caddy = os.environ.get("ASLT_TEST_CADDY_BINARY")
+    upstream_port = port
+    if caddy:
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            upstream_port = listener.getsockname()[1]
     environment = {key: value for key, value in os.environ.items() if not key.startswith("ASLT_")}
     environment.update(
         {
@@ -48,7 +54,8 @@ def application(tmp_path_factory):
             "ASLT_QRZ_PASSWORD_FILE": "",
             "ASLT_REQUEST_RATE_PER_MINUTE": "10000",
             "ASLT_RETENTION_DAYS": "0",
-            "BROWSER_PORT": str(port),
+            "BROWSER_PORT": str(upstream_port),
+            "BROWSER_PLAIN_HTTP": "1" if caddy else "",
             "BROWSER_IDS": str(directory / "ids.json"),
             "BROWSER_KEY": str(directory / "key.pem"),
             "BROWSER_CERT": str(directory / "cert.pem"),
@@ -89,9 +96,31 @@ def application(tmp_path_factory):
             stdout=log,
             stderr=log,
         )
+        proxy = None
+        proxy_log = None
         try:
+            if caddy:
+                config = (ROOT / "deploy/Caddyfile").read_text().replace(
+                    "{$ASLT_PUBLIC_HOST}", origin
+                ).replace("repeater-scribe:8080", f"127.0.0.1:{upstream_port}")
+                config = config.replace(
+                    "\tencode zstd gzip",
+                    f'\ttls {environment["BROWSER_CERT"]} {environment["BROWSER_KEY"]}\n'
+                    "\tencode zstd gzip",
+                )
+                config = "{\n admin off\n auto_https off\n persist_config off\n}\n" + config
+                config_path = directory / "Caddyfile"
+                config_path.write_text(config)
+                proxy_log = (directory / "caddy.log").open("w")
+                proxy = subprocess.Popen(
+                    [caddy, "run", "--config", str(config_path), "--adapter", "caddyfile"],
+                    env=dict(environment, XDG_CONFIG_HOME=str(directory), XDG_DATA_HOME=str(directory)),
+                    stdout=proxy_log, stderr=proxy_log,
+                )
             with httpx.Client(verify=False, trust_env=False) as client:
                 for _ in range(200):
+                    if proxy and proxy.poll() is not None:
+                        pytest.fail((directory / "caddy.log").read_text())
                     if process.poll() is not None:
                         pytest.fail((directory / "server.log").read_text())
                     try:
@@ -106,6 +135,15 @@ def application(tmp_path_factory):
                     )
             yield origin, json.loads((directory / "ids.json").read_text())
         finally:
+            if proxy:
+                proxy.terminate()
+                try:
+                    proxy.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proxy.kill()
+                    proxy.wait()
+            if proxy_log:
+                proxy_log.close()
             process.terminate()
             try:
                 process.wait(timeout=10)

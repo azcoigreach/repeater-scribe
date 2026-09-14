@@ -187,7 +187,8 @@ uvicorn.run(
     main.app,
     host="127.0.0.1",
     port=int(os.environ["BROWSER_PORT"]),
-    ssl_keyfile=os.environ["BROWSER_KEY"],
-    ssl_certfile=os.environ["BROWSER_CERT"],
+    ssl_keyfile=None if os.environ.get("BROWSER_PLAIN_HTTP") else os.environ["BROWSER_KEY"],
+    ssl_certfile=None if os.environ.get("BROWSER_PLAIN_HTTP") else os.environ["BROWSER_CERT"],
+    timeout_keep_alive=5,
     log_level="warning",
 )

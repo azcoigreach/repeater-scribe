@@ -11,10 +11,10 @@ def test_callsign_history_uses_versioned_client_asset() -> None:
 
     assert 'data-callsign="{{ callsign }}"' in template
     assert 'data-role="{{ role }}"' in template
-    assert 'href="/static/archive.css?v=0.9.1"' in template
-    assert 'src="/static/callsign_detail.js?v=0.9.1"' in template
-    assert template.index('src="/static/playback.js?v=0.9.1"') < template.index(
-        'src="/static/callsign_detail.js?v=0.9.1"'
+    assert 'href="/static/archive.css?v=0.9.2"' in template
+    assert 'src="/static/callsign_detail.js?v=0.9.2"' in template
+    assert template.index('src="/static/playback.js?v=0.9.2"') < template.index(
+        'src="/static/callsign_detail.js?v=0.9.2"'
     )
     assert "window.callsignName" not in template
     assert "workspace?.dataset.callsign" in script

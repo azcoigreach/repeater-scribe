@@ -5,7 +5,12 @@
 		max_size 64KB
 	}
 
-	reverse_proxy repeater-scribe:8080
+	reverse_proxy repeater-scribe:8080 {
+		transport http {
+			# Retire idle upstream connections before Uvicorn's explicit 5s timeout.
+			keepalive 2s
+		}
+	}
 
 	log {
 		output stdout
