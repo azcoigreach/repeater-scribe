@@ -8,20 +8,21 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import monotonic
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
+from asl_transcriber.accounts import admit_account, begin_account_write
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal
-from asl_transcriber.models import ApiToken, AuthSession, OidcLoginState, SecurityAudit
+from asl_transcriber.models import Account, ApiToken, AuthSession, OidcLoginState, SecurityAudit
+from asl_transcriber.roles import ROLE_RANK, Role, normalize_role
 
 logger = logging.getLogger(__name__)
-Role = Literal["viewer", "operator", "admin"]
-ROLE_RANK: dict[str, int] = {"viewer": 1, "operator": 2, "admin": 3}
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,8 @@ class Principal:
     auth_source: str
     csrf_token: str | None = None
     session_hash: str | None = None
+    account_id: str | None = None
+    token_id: str | None = None
 
 
 def token_digest(value: str) -> str:
@@ -63,12 +66,18 @@ def audit_event(
     outcome: str,
     request: Request | None = None,
     detail: str | None = None,
+    account_id: str | None = None,
 ) -> None:
+    if account_id is None and request is not None:
+        current = getattr(request.state, "principal", None)
+        if isinstance(current, Principal):
+            account_id = current.account_id
     try:
         with SessionLocal() as session:
             session.add(
                 SecurityAudit(
                     actor=actor[:255],
+                    account_id=account_id,
                     auth_source=auth_source[:32],
                     action=action[:128],
                     outcome=outcome[:32],
@@ -83,29 +92,59 @@ def audit_event(
         logger.exception("Could not persist security audit event")
 
 
+def resolve_principal(principal: Principal, db: Session) -> Principal | None:
+    """Resolve current credential and account authority, including active streams.
+
+    Account-owned tokens are capped by both the credential and current account
+    role. Independent named tokens preserve their own authority.
+    """
+    now = datetime.now(UTC)
+    if principal.auth_source == "session":
+        stored = db.get(AuthSession, principal.session_hash) if principal.session_hash else None
+        if stored is None or _utc(stored.expires_at) <= now or (
+            _utc(stored.last_seen_at) + timedelta(seconds=settings.session_idle_seconds) <= now
+        ):
+            return None
+        account = db.get(Account, stored.account_id)
+        if account is None or not account.enabled:
+            return None
+        return Principal(f"account:{account.id}", account.identity, normalize_role(account.role),
+                         "session", stored.csrf_token, stored.token_hash, account.id)
+    if principal.auth_source == "api_token":
+        token = db.get(ApiToken, principal.token_id) if principal.token_id else None
+        if token is None or not token.enabled:
+            return None
+        role = normalize_role(token.role)
+        if token.account_id is not None:
+            account = db.get(Account, token.account_id)
+            if account is None or not account.enabled:
+                return None
+            role = min((role, normalize_role(account.role)), key=ROLE_RANK.__getitem__)
+        return Principal(f"api-token:{token.id}", token.name, role, "api_token",
+                         account_id=token.account_id, token_id=token.id)
+    if principal.auth_source == "local":
+        return principal if settings.auth_mode == "off" and settings.deployment_mode == "local" else None
+    return principal if principal.auth_source == "legacy_api_key" else None
+
+
+def refresh_principal(principal: Principal) -> Principal | None:
+    with SessionLocal() as db:
+        return resolve_principal(principal, db)
+
+
 def _session_principal(raw_token: str) -> Principal | None:
     token_hash = token_digest(raw_token)
     now = datetime.now(UTC)
     with SessionLocal() as session:
+        principal = resolve_principal(Principal("", "", "viewer", "session", session_hash=token_hash), session)
+        if principal is None:
+            return None
         stored = session.get(AuthSession, token_hash)
-        if stored is None:
-            return None
-        idle_deadline = _utc(stored.last_seen_at) + timedelta(seconds=settings.session_idle_seconds)
-        if _utc(stored.expires_at) <= now or idle_deadline <= now:
-            session.delete(stored)
-            session.commit()
-            return None
+        assert stored is not None
         if (now - _utc(stored.last_seen_at)).total_seconds() >= 60:
             stored.last_seen_at = now
             session.commit()
-        return Principal(
-            subject=stored.subject,
-            identity=stored.identity,
-            role=stored.role,  # type: ignore[arg-type]
-            auth_source="session",
-            csrf_token=stored.csrf_token,
-            session_hash=stored.token_hash,
-        )
+        return principal
 
 
 def _api_principal(raw_token: str) -> Principal | None:
@@ -122,12 +161,13 @@ def _api_principal(raw_token: str) -> Principal | None:
             ):
                 stored.last_used_at = now
                 session.commit()
-            return Principal(
+            return resolve_principal(Principal(
                 subject=f"api-token:{stored.id}",
                 identity=stored.name,
-                role=stored.role,  # type: ignore[arg-type]
+                role=normalize_role(stored.role),
                 auth_source="api_token",
-            )
+                token_id=stored.id,
+            ), session)
     legacy = settings.resolved_api_key
     if legacy and hmac.compare_digest(raw_token, legacy):
         return Principal(
@@ -142,7 +182,9 @@ def _api_principal(raw_token: str) -> Principal | None:
 def authenticate_request(request: Request) -> Principal | None:
     cached = getattr(request.state, "principal", None)
     if isinstance(cached, Principal):
-        return cached
+        current = refresh_principal(cached)
+        request.state.principal = current
+        return current
 
     authorization = request.headers.get("authorization", "")
     principal: Principal | None = None
@@ -178,6 +220,7 @@ def _require(request: Request, role: Role) -> Principal:
     if ROLE_RANK.get(principal.role, 0) < ROLE_RANK[role]:
         audit_event(
             actor=principal.identity,
+            account_id=principal.account_id,
             auth_source=principal.auth_source,
             action="authorization",
             outcome="denied",
@@ -192,8 +235,8 @@ def require_viewer(request: Request) -> Principal:
     return _require(request, "viewer")
 
 
-def require_operator(request: Request) -> Principal:
-    return _require(request, "operator")
+def require_user(request: Request) -> Principal:
+    return _require(request, "user")
 
 
 def require_admin(request: Request) -> Principal:
@@ -211,8 +254,8 @@ def verify_csrf(request: Request, principal: Principal) -> None:
         raise HTTPException(status_code=403, detail="Invalid request origin")
 
 
-def require_ui_operator(request: Request) -> Principal:
-    principal = require_operator(request)
+def require_ui_user(request: Request) -> Principal:
+    principal = require_user(request)
     if settings.deployment_mode == "internet":
         if principal.auth_source != "session":
             raise HTTPException(
@@ -233,8 +276,8 @@ def require_ui_admin(request: Request) -> Principal:
     return principal
 
 
-def require_api_operator(request: Request) -> Principal:
-    principal = require_operator(request)
+def require_api_user(request: Request) -> Principal:
+    principal = require_user(request)
     if principal.auth_source == "local":
         raise HTTPException(status_code=401, detail="An API token is required")
     verify_csrf(request, principal)
@@ -250,7 +293,12 @@ def require_api_admin(request: Request) -> Principal:
 
 
 Viewer = Annotated[Principal, Depends(require_viewer)]
-Operator = Annotated[Principal, Depends(require_operator)]
+User = Annotated[Principal, Depends(require_user)]
+# Internal imports in older extensions remain compatible.
+require_operator = require_user
+require_ui_operator = require_ui_user
+require_api_operator = require_api_user
+Operator = User
 Admin = Annotated[Principal, Depends(require_admin)]
 
 
@@ -334,8 +382,8 @@ def _role_from_claims(claims: dict[str, Any]) -> Role:
     if subject in settings.oidc_operator_subject_list or groups.intersection(
         settings.oidc_operator_group_list
     ):
-        return "operator"
-    return settings.oidc_default_role
+        return "user"
+    return normalize_role(settings.oidc_default_role)
 
 
 def _identity_is_allowed(claims: dict[str, Any]) -> bool:
@@ -436,32 +484,31 @@ async def complete_oidc_login(code: str, state: str) -> tuple[str, Principal, st
     subject = str(claims.get("sub", ""))
     if not subject:
         raise HTTPException(status_code=502, detail="Identity token has no subject")
-    if not _identity_is_allowed(claims):
-        logger.warning(
-            "OIDC login denied for subject=%s; add it to ASLT_OIDC_ALLOWED_SUBJECTS",
-            subject,
-        )
-        raise HTTPException(status_code=403, detail="This identity is not allowed")
-    identity = str(claims.get("email") or claims.get("preferred_username") or subject)
-    role = _role_from_claims(claims)
+    if not isinstance(claims["sub"], str) or len(subject) > 255 or len(claims["iss"]) > 1024:
+        raise HTTPException(status_code=502, detail="Identity token identity is invalid")
     raw_session = secrets.token_urlsafe(48)
     csrf_token = secrets.token_urlsafe(32)
-    expires_at = now + timedelta(seconds=settings.session_absolute_seconds)
-    with SessionLocal() as session:
-        session.add(
-            AuthSession(
-                token_hash=token_digest(raw_session),
-                subject=subject,
-                identity=identity[:255],
-                role=role,
-                csrf_token=csrf_token,
-                created_at=now,
-                last_seen_at=now,
-                expires_at=expires_at,
-            )
-        )
-        session.commit()
-    return raw_session, Principal(subject, identity, role, "session", csrf_token), next_path
+    token_hash = token_digest(raw_session)
+    try:
+        with SessionLocal() as session:
+            begin_account_write(session)
+            account = admit_account(session, claims, allowed=_identity_is_allowed(claims),
+                                    role=_role_from_claims(claims))
+            role = normalize_role(account.role)
+            session.add(AuthSession(
+                token_hash=token_hash, account_id=account.id, subject=subject,
+                identity=account.identity, role=role, csrf_token=csrf_token,
+                created_at=now, last_seen_at=now,
+                expires_at=now + timedelta(seconds=settings.session_absolute_seconds),
+            ))
+            principal = Principal(f"account:{account.id}", account.identity, role, "session",
+                                  csrf_token, token_hash, account.id)
+            session.commit()
+    except HTTPException:
+        audit_event(actor=subject, auth_source="oidc", action="account_admission", outcome="denied")
+        logger.warning("OIDC login denied for subject=%s", subject)
+        raise
+    return raw_session, principal, next_path
 
 
 def revoke_session(raw_token: str | None) -> None:
@@ -474,10 +521,10 @@ def revoke_session(raw_token: str | None) -> None:
             session.commit()
 
 
-def create_api_token(name: str, role: Role) -> str:
+def create_api_token(name: str, role: str) -> str:
     raw_token = f"aslt_{secrets.token_urlsafe(36)}"
     with SessionLocal() as session:
-        session.add(ApiToken(name=name, token_hash=token_digest(raw_token), role=role))
+        session.add(ApiToken(name=name, token_hash=token_digest(raw_token), role=normalize_role(role)))
         session.commit()
     return raw_token
 

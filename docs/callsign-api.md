@@ -13,13 +13,13 @@ recording responses retain their existing fields.
 | `GET /api/v1/callsigns/{callsign}` | Viewer | Profile; 404 if unknown |
 | `GET /api/v1/callsigns/{callsign}/mentions` | Viewer | Current mention page |
 | `GET /api/v1/callsigns/last-heard?limit=1` | Viewer | Recent observations with cached QRZ enrichment |
-| `PATCH /api/v1/callsign-mentions/{mention_id}` | Operator | Review result |
-| `POST /api/v1/callsigns/{callsign}/qrz-refresh` | Operator | Updated profile |
-| `PATCH /ui/callsign-mentions/{mention_id}` | Operator browser session | Review result |
-| `POST /ui/callsigns/{callsign}/qrz-refresh` | Operator browser session | Updated profile |
+| `PATCH /api/v1/callsign-mentions/{mention_id}` | User | Review result |
+| `POST /api/v1/callsigns/{callsign}/qrz-refresh` | User | Updated profile |
+| `PATCH /ui/callsign-mentions/{mention_id}` | User browser session | Review result |
+| `POST /ui/callsigns/{callsign}/qrz-refresh` | User browser session | Updated profile |
 
 Internet mode denies anonymous reads/writes with 401 and insufficient roles with
-403. Operators include administrators. Cookie-authenticated writes require both
+403. Users include Admins. Cookie-authenticated writes require both
 the session CSRF token and an Origin exactly equal to `ASLT_PUBLIC_BASE_URL`'s
 origin. Missing/incorrect tokens and missing/disallowed origins return 403.
 Machine bearer tokens use `/api/v1/`; `/ui/` requires browser sessions in internet
@@ -97,7 +97,7 @@ await fetch(`/ui/callsign-mentions/${mentionId}`, {
 });
 ```
 
-Machine clients use a named operator token created with the documented
+Machine clients use a named User token created with the documented
 [security CLI](security.md#machine-api-tokens):
 
 ```bash

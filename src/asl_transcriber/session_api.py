@@ -23,14 +23,15 @@ from asl_transcriber.archive import (
 )
 from asl_transcriber.auth import (
     Principal,
-    require_api_operator,
-    require_ui_operator,
+    require_api_user,
+    require_ui_user,
     require_viewer,
 )
 from asl_transcriber.callsign_service import canonical_callsign
 from asl_transcriber.config import settings
 from asl_transcriber.database import get_db
 from asl_transcriber.models import (
+    Account,
     Callsign,
     CallsignMention,
     RadioSession,
@@ -97,9 +98,9 @@ def resolve_source(db: Session, identifier: str) -> str:
 
 def writer(request: Request) -> Principal:
     return (
-        require_ui_operator(request)
+        require_ui_user(request)
         if request.url.path.startswith("/ui/")
-        else require_api_operator(request)
+        else require_api_user(request)
     )
 
 
@@ -471,6 +472,12 @@ def create_event(
         if previous.fingerprint != fingerprint:
             raise HTTPException(409, "Idempotency key already used with different input")
         return detail(db, get_event(db, previous.session_id))
+    if principal.auth_source == "session" and principal.account_id:
+        account = db.get(Account, principal.account_id)
+        if account and db.get(SessionRequest, (account.subject, idempotency_key)):
+            # Pre-account request actors have no issuer evidence. Do not replay
+            # them as this account, or silently create a duplicate after login.
+            raise HTTPException(409, "This key predates managed accounts; inspect the existing Event before retrying")
     root = resolve_source(db, payload.source_id)
     selected = selected_recordings(db, payload, root)
     start = utc(payload.started_at) if payload.started_at else datetime.now(UTC)

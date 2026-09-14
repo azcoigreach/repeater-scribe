@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Event
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +14,7 @@ from asl_transcriber import auth, main
 from asl_transcriber.config import settings
 from asl_transcriber.database import Base
 from asl_transcriber.ingestion.jobs import JobState
-from asl_transcriber.models import AuthSession, IngestionJob, Recording, Transcript
+from asl_transcriber.models import Account, AuthSession, IngestionJob, Recording, Transcript
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.transcription.base import TranscriptResult
 from asl_transcriber.transcription.live import LiveTranscriptionService
@@ -197,6 +198,9 @@ def test_retry_requires_operator_and_csrf(recovery_runtime, monkeypatch, role, c
     now = datetime.now(UTC)
     with runtime.session_factory() as session:
         session.add(AuthSession(
+                account=Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
+                                identity=role, role="user" if role == "operator" else role,
+                                created_by="fixture", updated_by="fixture"),
             token_hash=auth.token_digest('retry-session'), subject=role, identity=role, role=role,
             csrf_token='csrf', created_at=now, last_seen_at=now,
             expires_at=now + timedelta(hours=1),

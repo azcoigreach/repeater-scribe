@@ -42,21 +42,23 @@ allowlist are configured. Caddy is the only public listener in the reference
 deployment; the FastAPI container remains on the private Compose network.
 
 OIDC uses Authorization Code flow with PKCE, issuer discovery, signed ID-token
-verification, nonce/state validation, and optional subject allowlisting. The
+verification, nonce/state validation, and explicit subject/group admission. The
 browser receives only an opaque `Secure`, `HttpOnly`, `SameSite=Lax` session
-cookie. Server-side sessions carry viewer, operator, or administrator authority.
+cookie. Server-side sessions reference durable issuer/subject accounts. Protected requests
+resolve current Viewer, User, or Admin authority and enabled state; streams repeat
+that check while connected. See [managed accounts](accounts.md).
 Cookie-authenticated writes additionally require a session CSRF token and the
 exact configured public Origin. Machine clients use separately generated,
 hashed bearer tokens.
 
 Only minimal health and login/callback routes are anonymous. Audio, transcript,
 node state, topology, SSE, and API resources require a viewer. Favorites and AMI
-controls require an operator. Ingestion and diagnostics require an administrator.
+controls require a User. Ingestion and diagnostics require an Admin.
 Raw AllStar functions have a separate default-off control because their meaning
 depends on the local `app_rpt` configuration.
 
 AMI control is disabled by default. Enabling it requires AMI credentials and an
-authenticated operator (a named API token, browser session, or legacy API key).
+authenticated User (a named API token, browser session, or legacy API key).
 Arbitrary AMI actions are never exposed through the HTTP API.
 
 ## Archive catalog

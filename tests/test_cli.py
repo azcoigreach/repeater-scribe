@@ -30,7 +30,7 @@ def test_create_api_token_delivers_secret_only_to_controlling_terminal(monkeypat
 
     assert json.loads(writes[0]) == {
         "name": "automation",
-        "role": "operator",
+        "role": "user",
         "token": "one-time-secret",
     }
     assert closed == [7]

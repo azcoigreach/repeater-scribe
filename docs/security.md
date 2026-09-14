@@ -16,12 +16,15 @@ only application write locations.
 | --- | --- |
 | Anonymous | Minimal health response and OIDC login/callback |
 | Viewer | Dashboard, audio, transcripts, activity, topology, and event streams |
-| Operator | Viewer authority plus favorites and constrained node controls |
-| Administrator | Operator authority plus ingestion and diagnostics |
+| User | Viewer authority plus Event/transcript edits, favorites, and constrained node controls |
+| Admin | User authority plus accounts, ingestion, and diagnostics |
 
 Use OIDC subject allowlists for a private installation. Map administrative and
-operator access through either subject lists or the configured group claim. MFA
+User access through either subject lists or the configured group claim. MFA
 is enforced at the identity provider and should be mandatory for both roles.
+
+Managed accounts are authoritative after admission. See the [account migration and
+recovery guide](accounts.md) and [complete endpoint permission matrix](permissions.md).
 
 ## First internet deployment
 
@@ -29,7 +32,7 @@ is enforced at the identity provider and should be mandatory for both roles.
    `https://RADIO_HOST/auth/callback` as its redirect URI.
 2. Copy `.env.example` to `.env`. Set `ASLT_PUBLIC_HOST` for Compose and configure
    the OIDC issuer/client ID plus an explicit allowed-subject or group mapping.
-   A valid identity that matches none of the allowed viewer/operator/admin
+   A valid identity that matches none of the allowed Viewer/User/Admin
    subjects or groups is denied.
 3. Create `secrets/session_secret` with at least 32 random bytes and
    `secrets/oidc_client_secret` with the provider-issued client secret. Restrict
@@ -108,7 +111,7 @@ Do not add `-T` to this command.
 
 ```bash
 docker compose exec repeater-scribe \
-  asl-transcriber create-api-token automation --role operator
+  asl-transcriber create-api-token automation --role user
 ```
 
 Send it as `Authorization: Bearer TOKEN`. Revoke it by name:

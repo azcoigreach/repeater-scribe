@@ -32,7 +32,7 @@
       <div class="filter-actions"><button class="primary-button" type="submit">Apply</button><button id="clear" class="quiet-button" type="button">Clear</button></div>
       <p id="filter-error" class="form-error" role="alert" hidden></p>
     </form>
-    <div class="event-actions" id="archive-event-actions" {% if role not in ["operator", "admin"] %}hidden{% endif %}><button id="event-from-range" class="quiet-button" type="button">Create event from range</button><button id="event-from-selection" class="quiet-button" type="button">Create event from selected (0)</button></div>
+    <div class="event-actions" id="archive-event-actions" {% if role not in ["user", "admin"] %}hidden{% endif %}><button id="event-from-range" class="quiet-button" type="button">Create event from range</button><button id="event-from-selection" class="quiet-button" type="button">Create event from selected (0)</button></div>
     <div id="active-filters" class="active-filters" aria-label="Active filters"></div>
     <section class="results-section" aria-labelledby="results-heading"><div class="results-heading"><h2 id="results-heading">Recordings</h2><p id="loaded-count" aria-live="polite">Loading archive...</p></div><p id="archive-state" class="state" role="status" aria-live="polite">Loading archive...</p><div class="table-wrap"><table class="recording-table"><thead><tr><th>Time</th><th>Duration</th><th>Callsigns</th><th>Node</th><th>Status</th><th>Audio</th><th>Transcript</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="recordings"></tbody></table></div><div id="recording-cards" class="recording-cards"></div><div class="load-more-wrap"><button id="load-more" class="primary-button" type="button" hidden>Load more</button></div></section>
   </main>
