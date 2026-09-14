@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = selector => document.querySelector(selector);
-  const canWrite = ['operator', 'admin'].includes(document.body.dataset.role);
+  const canWrite = ['user', 'admin'].includes(document.body.dataset.role);
   if (!canWrite) document.querySelectorAll('[data-write]').forEach(node => node.hidden = true);
   const id = location.pathname.split('/')[2] || null;
   const query = new URLSearchParams(location.search);

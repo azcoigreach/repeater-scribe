@@ -18,7 +18,7 @@ const text = (tag, value, className = '') => { const node = document.createEleme
 const safeExternalUrl = value => { try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch (_) { return null; } };
 const percent = value => value == null ? 'Unavailable' : `${(Number(value) * 100).toFixed(0)}%`;
 const timestamp = value => value ? UITime.format(value) : 'Time unavailable';
-const operator = () => role === 'operator' || role === 'admin';
+const operator = () => role === 'user' || role === 'admin';
 
 async function review(mention, action) {
   const body = { action };

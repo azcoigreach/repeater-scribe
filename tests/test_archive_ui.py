@@ -14,7 +14,7 @@ from asl_transcriber.auth import token_digest
 from asl_transcriber.config import settings
 from asl_transcriber.database import Base, get_db
 from asl_transcriber.main import app
-from asl_transcriber.models import AuthSession, Recording
+from asl_transcriber.models import Account, AuthSession, Recording
 
 
 @pytest.fixture()
@@ -56,6 +56,9 @@ def session_for(sessions, role: str) -> str:
     with sessions() as session:
         session.add(
             AuthSession(
+                account=Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
+                                identity=role, role="user" if role == "operator" else role,
+                                created_by="fixture", updated_by="fixture"),
                 token_hash=token_digest(raw),
                 subject=f"archive-ui-{role}",
                 identity=f"{role}@example.test",

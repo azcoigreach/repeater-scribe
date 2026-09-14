@@ -4,7 +4,7 @@ The UI calls these resources **Events**. The existing `GET /api/v1/events` SSE
 stream, its payloads and node-control APIs are unchanged.
 
 All session reads require viewer authority. API mutations require an authenticated
-operator or administrator. Named bearer tokens work on `/api/v1/sessions`.
+User or Admin. Named bearer tokens work on `/api/v1/sessions`.
 Cookie writes require the session's `X-CSRF-Token` and exact public `Origin`.
 The matching `/ui/sessions` paths follow existing browser permissions, including
 trusted-local UI administration. An anonymous local principal cannot mutate the

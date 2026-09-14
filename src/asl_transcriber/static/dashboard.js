@@ -112,7 +112,7 @@ function renderJobs(items, databaseTotals = {}) {
     const actions = element('div', '', 'transcript-actions');
     actions.append(play);
     card.append(meta, actions);
-    if (item.id && ['operator', 'admin'].includes(document.body.dataset.role)) {
+    if (item.id && ['user', 'admin'].includes(document.body.dataset.role)) {
       const retry = actionButton('Re-transcribe', 'play-button');
       retry.disabled = ['pending', 'processing'].includes(item.status);
       retry.addEventListener('click', async () => {
@@ -132,7 +132,7 @@ function renderJobs(items, databaseTotals = {}) {
     }
     const feedback = element('p', item.last_error || '', 'muted-text', { role: 'status' });
     card.append(transcript, feedback);
-    if (item.id && item.transcript && !item.transcript.provisional && !['pending', 'processing'].includes(item.status) && ['operator', 'admin'].includes(document.body.dataset.role)) {
+    if (item.id && item.transcript && !item.transcript.provisional && !['pending', 'processing'].includes(item.status) && ['user', 'admin'].includes(document.body.dataset.role)) {
       TranscriptCorrections.attach(card, { jobId: item.id, text: item.transcript.display_text,
         sources: [{ node: transcript, offset: 0 }], onSaved: async () => { await loadCallsigns(); await loadJobs(); } });
     }

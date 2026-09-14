@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from asl_transcriber import __version__
+from asl_transcriber.account_api import router as accounts_router
 from asl_transcriber.ami import AmiError, AmiResponse
 from asl_transcriber.archive import (
     ArchiveQueryError,
@@ -42,12 +43,13 @@ from asl_transcriber.auth import (
     purge_security_state,
     require_admin,
     require_api_admin,
-    require_api_operator,
-    require_ui_operator,
+    require_api_user,
+    require_ui_user,
     require_viewer,
     revoke_session,
     verify_csrf,
 )
+from asl_transcriber.auth_streams import protected_stream
 from asl_transcriber.callsign_service import (
     callsign_profile,
     canonical_callsign,
@@ -423,6 +425,7 @@ app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 
 
+app.include_router(accounts_router)
 app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["sessions"])
 app.include_router(sessions_router, prefix="/ui/sessions", include_in_schema=False)
 
@@ -459,6 +462,7 @@ def _workspace_context(
         "app_name": settings.app_name,
         "csrf_token": principal.csrf_token or "",
         "identity": principal.identity,
+        "account_id": principal.account_id,
         "role": principal.role,
     }
     if recording_id is not None:
@@ -531,6 +535,7 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     )
     audit_event(
         actor=principal.identity,
+        account_id=principal.account_id,
         auth_source="oidc",
         action="login",
         outcome="allowed",
@@ -555,6 +560,7 @@ def auth_logout(request: Request) -> RedirectResponse:
 def auth_me(principal: Viewer) -> dict[str, str | None]:
     return {
         "identity": principal.identity,
+        "account_id": principal.account_id,
         "role": principal.role,
         "auth_source": principal.auth_source,
         "csrf_token": principal.csrf_token,
@@ -718,7 +724,7 @@ def favorites(home: str, db: Annotated[Session, Depends(get_db)]) -> dict[str, o
     return {"total": len(items), "items": items}
 
 
-@app.post("/api/v1/nodes/{home}/favorites", dependencies=[Depends(require_api_operator)])
+@app.post("/api/v1/nodes/{home}/favorites", dependencies=[Depends(require_api_user)])
 def api_create_favorite(
     home: str,
     request: FavoriteCreateRequest,
@@ -729,7 +735,7 @@ def api_create_favorite(
 
 @app.patch(
     "/api/v1/nodes/{home}/favorites/{favorite_id}",
-    dependencies=[Depends(require_api_operator)],
+    dependencies=[Depends(require_api_user)],
 )
 def api_update_favorite(
     home: str,
@@ -742,7 +748,7 @@ def api_update_favorite(
 
 @app.delete(
     "/api/v1/nodes/{home}/favorites/{favorite_id}",
-    dependencies=[Depends(require_api_operator)],
+    dependencies=[Depends(require_api_user)],
 )
 def api_delete_favorite(
     home: str,
@@ -752,7 +758,7 @@ def api_delete_favorite(
     return delete_favorite_record(home, favorite_id, db)
 
 
-@app.post("/ui/nodes/{home}/favorites", dependencies=[Depends(require_ui_operator)])
+@app.post("/ui/nodes/{home}/favorites", dependencies=[Depends(require_ui_user)])
 def ui_create_favorite(
     home: str,
     request: FavoriteCreateRequest,
@@ -763,7 +769,7 @@ def ui_create_favorite(
 
 @app.patch(
     "/ui/nodes/{home}/favorites/{favorite_id}",
-    dependencies=[Depends(require_ui_operator)],
+    dependencies=[Depends(require_ui_user)],
 )
 def ui_update_favorite(
     home: str,
@@ -776,7 +782,7 @@ def ui_update_favorite(
 
 @app.delete(
     "/ui/nodes/{home}/favorites/{favorite_id}",
-    dependencies=[Depends(require_ui_operator)],
+    dependencies=[Depends(require_ui_user)],
 )
 def ui_delete_favorite(
     home: str,
@@ -804,7 +810,7 @@ def topology_graph(
 
 @app.post(
     "/ui/nodes/{home}/topology/{root}/crawl",
-    dependencies=[Depends(require_ui_operator)],
+    dependencies=[Depends(require_ui_user)],
 )
 def ui_start_topology_crawl(
     home: str,
@@ -852,7 +858,7 @@ async def topology_events(home: str, root: str, principal: Viewer) -> StreamingR
     root = validate_node_identifier(root, label="topology root")
     await sse_connections.acquire(principal.subject)
 
-    async def stream() -> AsyncIterator[str]:
+    async def stream() -> AsyncGenerator[str, None]:
         try:
             yield "retry: 3000\n\n"
             async for event in service.events(
@@ -868,7 +874,7 @@ async def topology_events(home: str, root: str, principal: Viewer) -> StreamingR
             await sse_connections.release(principal.subject)
 
     return StreamingResponse(
-        stream(),
+        protected_stream(stream(), principal),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -937,7 +943,7 @@ def pending_control_response(
     }
 
 
-@app.post("/api/v1/nodes/{home}/links", dependencies=[Depends(require_api_operator)])
+@app.post("/api/v1/nodes/{home}/links", dependencies=[Depends(require_api_user)])
 async def connect_link(home: str, request: LinkControlRequest) -> dict[str, object]:
     require_control()
     active_node_monitor()
@@ -963,7 +969,7 @@ async def connect_link(home: str, request: LinkControlRequest) -> dict[str, obje
     }
 
 
-@app.delete("/api/v1/nodes/{home}/links/{target}", dependencies=[Depends(require_api_operator)])
+@app.delete("/api/v1/nodes/{home}/links/{target}", dependencies=[Depends(require_api_user)])
 async def disconnect_link(home: str, target: str) -> dict[str, object]:
     require_control()
     active_node_monitor()
@@ -973,7 +979,7 @@ async def disconnect_link(home: str, target: str) -> dict[str, object]:
     return pending_control_response(home, response, target=target, desired_connected=False)
 
 
-@app.delete("/api/v1/nodes/{home}/links", dependencies=[Depends(require_api_operator)])
+@app.delete("/api/v1/nodes/{home}/links", dependencies=[Depends(require_api_user)])
 async def disconnect_all_links(home: str) -> dict[str, object]:
     require_control()
     active_node_monitor()
@@ -982,7 +988,7 @@ async def disconnect_all_links(home: str) -> dict[str, object]:
     return pending_control_response(home, response, desired_connected=False)
 
 
-@app.post("/api/v1/nodes/{home}/reconnect", dependencies=[Depends(require_api_operator)])
+@app.post("/api/v1/nodes/{home}/reconnect", dependencies=[Depends(require_api_user)])
 async def reconnect_node(home: str) -> dict[str, object]:
     require_control()
     active_node_monitor()
@@ -997,7 +1003,7 @@ async def node_events(home: str, principal: Viewer) -> StreamingResponse:
     home = validate_node_identifier(home, label="home node")
     await sse_connections.acquire(principal.subject)
 
-    async def stream() -> AsyncIterator[str]:
+    async def stream() -> AsyncGenerator[str, None]:
         try:
             async for event in monitor.events(home, monitor.subscribe(home)):
                 yield event
@@ -1005,13 +1011,13 @@ async def node_events(home: str, principal: Viewer) -> StreamingResponse:
             await sse_connections.release(principal.subject)
 
     return StreamingResponse(
-        stream(),
+        protected_stream(stream(), principal),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-@app.post("/api/v1/node/ping", dependencies=[Depends(require_api_operator)])
+@app.post("/api/v1/node/ping", dependencies=[Depends(require_api_user)])
 async def node_ping() -> dict[str, object]:
     monitor = active_node_monitor()
     try:
@@ -1066,7 +1072,7 @@ async def execute_named_command(node_id: int, request: NodeCommandRequest) -> di
     }
 
 
-@app.post("/api/v1/node/{node_id}/command", dependencies=[Depends(require_api_operator)])
+@app.post("/api/v1/node/{node_id}/command", dependencies=[Depends(require_api_user)])
 async def node_command(
     node_id: int,
     request: NodeCommandRequest,
@@ -1074,7 +1080,7 @@ async def node_command(
     return await execute_named_command(node_id, request)
 
 
-@app.post("/ui/node/{node_id}/command", dependencies=[Depends(require_ui_operator)])
+@app.post("/ui/node/{node_id}/command", dependencies=[Depends(require_ui_user)])
 async def ui_node_command(node_id: int, request: NodeCommandRequest) -> dict[str, object]:
     return await execute_named_command(node_id, request.model_copy(update={"confirmed": True}))
 
@@ -1119,7 +1125,7 @@ async def execute_node_function(node_id: int, request: NodeFunctionRequest) -> d
     }
 
 
-@app.post("/api/v1/node/{node_id}/function", dependencies=[Depends(require_api_operator)])
+@app.post("/api/v1/node/{node_id}/function", dependencies=[Depends(require_api_user)])
 async def node_function(
     node_id: int,
     request: NodeFunctionRequest,
@@ -1127,7 +1133,7 @@ async def node_function(
     return await execute_node_function(node_id, request)
 
 
-@app.post("/ui/node/{node_id}/function", dependencies=[Depends(require_ui_operator)])
+@app.post("/ui/node/{node_id}/function", dependencies=[Depends(require_ui_user)])
 async def ui_node_function(node_id: int, request: NodeFunctionRequest) -> dict[str, object]:
     return await execute_node_function(node_id, request)
 
@@ -1189,11 +1195,11 @@ def process_transcription_jobs(
 
 @app.post(
     "/api/v1/ingestion/jobs/{job_id}/retry", status_code=202,
-    dependencies=[Depends(require_api_operator)],
+    dependencies=[Depends(require_api_user)],
 )
 @app.post(
     "/ui/ingestion/jobs/{job_id}/retry", status_code=202,
-    dependencies=[Depends(require_ui_operator)],
+    dependencies=[Depends(require_ui_user)],
 )
 def retry_transcription(job_id: str, background_tasks: BackgroundTasks) -> dict[str, str]:
     try:
@@ -1226,11 +1232,11 @@ def activity_events() -> dict[str, object]:
 
 @app.post(
     "/api/v1/ingestion/jobs/{job_id}/callsign-correction",
-    dependencies=[Depends(require_api_operator)],
+    dependencies=[Depends(require_api_user)],
 )
 @app.post(
     "/ui/ingestion/jobs/{job_id}/callsign-correction",
-    dependencies=[Depends(require_ui_operator)],
+    dependencies=[Depends(require_ui_user)],
 )
 def correct_transcript_callsign(
     db: Annotated[Session, Depends(get_db)], request: Request, principal: Viewer,
@@ -1562,26 +1568,26 @@ def _apply_mention_review(
                 "reviewed_at": iso_utc(mention.reviewed_at)}
 
 
-@app.patch("/api/v1/callsign-mentions/{mention_id}", dependencies=[Depends(require_api_operator)])
+@app.patch("/api/v1/callsign-mentions/{mention_id}", dependencies=[Depends(require_api_user)])
 def review_callsign_mention_api(
     db: Annotated[Session, Depends(get_db)], request: Request, mention_id: str,
-    payload: CallsignMentionReviewRequest, principal: Annotated[Principal, Depends(require_api_operator)],
+    payload: CallsignMentionReviewRequest, principal: Annotated[Principal, Depends(require_api_user)],
 ) -> dict[str, object]:
     return _apply_mention_review(db, mention_id, payload, principal, request)
 
 
-@app.patch("/ui/callsign-mentions/{mention_id}", dependencies=[Depends(require_ui_operator)])
+@app.patch("/ui/callsign-mentions/{mention_id}", dependencies=[Depends(require_ui_user)])
 def review_callsign_mention_ui(
     db: Annotated[Session, Depends(get_db)], request: Request, mention_id: str,
-    payload: CallsignMentionReviewRequest, principal: Annotated[Principal, Depends(require_ui_operator)],
+    payload: CallsignMentionReviewRequest, principal: Annotated[Principal, Depends(require_ui_user)],
 ) -> dict[str, object]:
     return _apply_mention_review(db, mention_id, payload, principal, request)
 
 
-@app.post("/api/v1/callsigns/{callsign}/qrz-refresh", dependencies=[Depends(require_api_operator)])
+@app.post("/api/v1/callsigns/{callsign}/qrz-refresh", dependencies=[Depends(require_api_user)])
 def refresh_callsign_qrz_api(
     db: Annotated[Session, Depends(get_db)], request: Request, callsign: str,
-    principal: Annotated[Principal, Depends(require_api_operator)],
+    principal: Annotated[Principal, Depends(require_api_user)],
 ) -> dict[str, object]:
     try:
         normalized = canonical_callsign(callsign)
@@ -1608,10 +1614,10 @@ def refresh_callsign_qrz_api(
     return callsign_profile(db, stored.normalized_callsign) or {}
 
 
-@app.post("/ui/callsigns/{callsign}/qrz-refresh", dependencies=[Depends(require_ui_operator)])
+@app.post("/ui/callsigns/{callsign}/qrz-refresh", dependencies=[Depends(require_ui_user)])
 def refresh_callsign_qrz_ui(
     db: Annotated[Session, Depends(get_db)], request: Request, callsign: str,
-    principal: Annotated[Principal, Depends(require_ui_operator)],
+    principal: Annotated[Principal, Depends(require_ui_user)],
 ) -> dict[str, object]:
     return refresh_callsign_qrz_api(db, request, callsign, principal)
 
@@ -1995,10 +2001,10 @@ def _serialize_runtime_last_heard(
 @app.get("/api/v1/events")
 async def events(request: Request, principal: Viewer) -> StreamingResponse:
     active_runtime = current_runtime()
-    event_queue = active_runtime.subscribe()
     await sse_connections.acquire(principal.subject)
+    event_queue = active_runtime.subscribe()
 
-    async def stream() -> AsyncIterator[str]:
+    async def stream() -> AsyncGenerator[str, None]:
         try:
             yield "event: ready\ndata: {}\n\n"
             while True:
@@ -2014,7 +2020,7 @@ async def events(request: Request, principal: Viewer) -> StreamingResponse:
             await sse_connections.release(principal.subject)
 
     return StreamingResponse(
-        stream(),
+        protected_stream(stream(), principal),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

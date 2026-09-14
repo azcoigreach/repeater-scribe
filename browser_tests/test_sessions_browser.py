@@ -22,6 +22,7 @@ def start_form(page, origin, historical=False):
 def test_live_groovy_accumulation_markers_checkin_end_reopen_and_seek(page, application):
     origin, ids = application
     start_form(page, origin)
+    expect(page.locator("body")).to_have_attribute("data-role", "user")
     page.locator("#event-form [name=tags]").fill("groovy, late-shift")
     page.locator("#save-event").click()
     expect(page.locator("#event-detail")).to_be_visible()
