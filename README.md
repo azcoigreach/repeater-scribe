@@ -13,8 +13,9 @@ It runs alongside an ASL3 node rather than replacing it. The recording archive
 is always mounted read-only. Node commands are optional and travel through a
 separately enabled Asterisk Manager Interface (AMI) connection.
 
-Version `0.9.1` fixes local-time display and calendar input, historical-event
-creation, and recording tag drafts during refreshes. Durable Events let you
+Version `0.9.2` rolls up the post-0.9.1 fixes for exclusive audio playback,
+refresh-state preservation, Favorites recovery, calendar pickers, and interface
+readability, and aligns proxy/application idle timeouts. Durable Events let you
 operate nets live or reconstruct them from Archive ranges and selected recordings, with saved markers, tags and confirmed
 check-ins. It retains the 0.8.1 transcription recovery and callsign history
 workflows, local transcription and the fail-closed internet deployment profile. Audio transcription uses `faster-whisper` on the machine
@@ -27,7 +28,7 @@ Archive links store UTC instants and restore them in the viewing browser’s loc
 timezone. Callsign date filters cover the selected local days. The application
 continues to store UTC; no container timezone change or data migration is needed.
 
-## Events (0.9.1)
+## Events (0.9.2)
 
 Choose **Start Event** to run Groovy Late Shift live, or filter Archive by source
 and time and choose **Create event from range**. Events retain recordings,
@@ -37,7 +38,7 @@ interval overlap; manual Include/Exclude choices survive boundary changes.
 Detected callsigns are separate from confirmed attendance.
 
 See the [Events guide](docs/events.md), [session API and retry contract](docs/sessions-api.md),
-and [0.9.1 upgrade instructions](docs/upgrade-0.9.md). Run `alembic upgrade head`
+and [0.9.2 upgrade instructions](docs/upgrade-0.9.md). Run `alembic upgrade head`
 before starting the new application; the required head is `events_sessions`.
 
 ## Callsign history
@@ -377,7 +378,7 @@ their panel is focused again.
   QRZ.com. QRZ credentials and session keys remain server-side; profile images are
   loaded in the browser from the HTTPS URL returned by QRZ.
 - No OpenAI token is read and no remote transcription request is made in version
-  `0.9.1`.
+  `0.9.2`.
 
 ## Security and internet access
 
@@ -417,8 +418,8 @@ Missing source audio preserves history and disables playback.
 See the [callsign API contract](docs/callsign-api.md),
 [review preservation rules](docs/architecture.md#reviewed-evidence-lifecycle), and
 [migration and verification guide](docs/verification-0.8.md). The package version
-is 0.9.1; see the [release notes](CHANGELOG.md) and
-[verification results](docs/verification-0.9.1.md).
+is 0.9.2; see the [release notes](CHANGELOG.md) and
+[verification results](docs/verification-0.9.2.md).
 
 ## API
 

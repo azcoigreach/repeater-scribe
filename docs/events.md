@@ -1,4 +1,4 @@
-# Events, nets and sessions (0.9.1)
+# Events, nets and sessions (0.9.2)
 
 Use **Events** to save a named radio activity and return to its recordings,
 transcript, markers and confirmed roster later. The internal resource name is

@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-13
+
+### Fixed
+
+- Preserve open Favorites connection menus, focus, and transcript Playing
+  indicators during live refreshes, with recording identity retained across
+  archive roots and Last Heard navigation (#29).
+- Enforce exclusive audio playback across Events, Archive, and callsign history,
+  preserving seek positions and handling delayed or failed playback (#30).
+- Restore the Callsigns favicon and enlarge station headings (#31, #32).
+- Use whole-second Event calendar pickers while preserving existing precise
+  timestamps until the operator edits them (#33).
+- Recover Favorites after failed reads without a browser reload or stale Node
+  Controls errors. Retain loaded data, bound and serialize reads, discard obsolete
+  responses, and preserve menus, list order, and topology drags (#39).
+- Add spacing between Play Audio and Re-transcribe actions, including narrow
+  panels and loading/disabled states (#44).
+- Retire Caddy's idle upstream connections after 2 seconds, before Uvicorn's
+  explicit 5-second timeout. Preserve active audio and SSE streaming (#49).
+
+### Changed
+
+- Align package/application versions, UI asset cache versions, and current
+  documentation at 0.9.2. No database migration is added; the head remains
+  `events_sessions`.
+- Run browser acceptance through the reference Caddy proxy and add repeatable
+  idle-connection, read-recovery, audio-range, and authorization checks.
+
+### Known limitation
+
+- The original deployed 502 was not reproduced in finite baseline/corrected
+  experiments. The maintainer accepted the timeout correction and remaining
+  uncertainty for 0.9.2, with investigation to resume if errors recur. This is
+  not a claim that the deployed root cause was conclusively established.
+
 ## [0.9.1] - 2026-09-06
 
 ### Fixed

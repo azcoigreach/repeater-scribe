@@ -1,7 +1,7 @@
 # Transient Favorites and Event reads: issues #39 and #49
 
-This is stabilization work for the 0.9.2 milestone, not a version bump or release.
-No live deployment, restart, node command, archive access, or credential access
+This stabilization work is rolled into package/application version 0.9.2 at the
+maintainer's request. No live deployment, restart, node command, archive access, or credential access
 was performed during implementation. All test databases, media, identities,
 TLS certificates, and services were disposable fixtures on loopback.
 
@@ -106,11 +106,16 @@ auditing and Python 3.12 execution are delegated to CI. Direct HTTPS browser
 acceptance was not rerun locally; this run used the production-shaped proxy
 boundary. Current CI status belongs in the PR; pending checks are not passes.
 
-## Remaining acceptance and rollout
+## Maintainer acceptance and rollout
 
-Keep #49 open until its original reset cause is established or the issue owner
-explicitly accepts the remaining reproduction limitation. A deployed observation
-requires separate authorization. Capture the image commit, effective timeout
+On 2026-09-13, the maintainer accepted the remaining reproduction limitation:
+"we are going to go ahead and run with it. We can circle back around if the errors pop back up."
+PR #54 may therefore close #49 on merge together with #39. This records an
+acceptance decision; it does not turn the inferred root cause into a verified
+diagnosis. Further deployed experimentation is deferred unless errors recur.
+
+If investigation resumes, a deployed observation requires separate authorization.
+Capture the image commit, effective timeout
 configuration, exact route/home node, request protocol, UTC timestamps, proxy
 error/response, and matching application logs; omit credentials and private
 identifiers. Compare a documented pre/post observation window around the

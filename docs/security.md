@@ -87,7 +87,8 @@ warns that a longer proxy lifetime can cause HTTP/1.1 upstream resets and 502s.
 The previous 120s/5s mismatch is a plausible cause of issue #49; a finite local
 run has not reproduced the original healthy-runtime failure. See the
 [transient-read verification record](verification-transient-reads.md) for
-evidence, regression commands, and remaining operational acceptance.
+evidence, regression commands, and the maintainer's acceptance of the remaining
+reproduction uncertainty, with investigation to resume if errors recur.
 
 Distinguish a healthy-runtime `connection reset by peer` from startup
 `connection refused`. Correlate the route and UTC timestamp in proxy and
