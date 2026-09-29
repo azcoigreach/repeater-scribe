@@ -368,7 +368,7 @@ def test_last_heard_reveals_only_the_intended_root(page, playback_dashboard, sou
     data, items = playback_dashboard
     items[0]["source_path"] = items[1]["source_path"] = "same.wav"
     items[0]["source_id"], items[1]["source_id"] = "root-one", "root-two"
-    page.route("**/api/v1/callsigns/last-heard", lambda route: route.fulfill(json={
+    page.route("**/api/v1/callsigns/last-heard?*", lambda route: route.fulfill(json={
         "configured": False, "total": 1,
         "items": [{"callsign": "KM7GHS", "source_path": "same.wav", "source_id": source_id}],
     }))

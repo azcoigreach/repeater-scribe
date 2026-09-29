@@ -424,7 +424,7 @@ app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 # Bump when shipping changed UI assets, independently of the product version.
-templates.env.globals["asset_version"] = "managed-accounts-1"
+templates.env.globals["asset_version"] = "runtime-settings-1"
 
 
 app.include_router(accounts_router)
@@ -446,6 +446,8 @@ def dashboard(request: Request):
             "ami_node_id": settings.ami_node_id,
             "csrf_token": principal.csrf_token or "",
             "identity": principal.identity,
+            "preference_scope": principal.subject,
+            "last_heard_default": settings.qrz_last_heard_limit,
             "role": principal.role,
         },
     )

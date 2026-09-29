@@ -168,6 +168,13 @@ logic, benchmarks, CPU fallback, tuning, and current limitations.
 - SQLite persistence for ingestion jobs, final transcripts, favorites, node
   statistics, and topology discovery.
 
+### Personal runtime preferences
+
+The Dashboard menu’s **Settings** dialog controls transcript and Last Heard display
+counts without restarting the application. Preferences belong to the current
+account in this browser. See [Runtime Settings](docs/runtime-settings.md) for
+supported ranges, defaults, keyboard controls, and page extension guidance.
+
 ## System overview
 
 ```mermaid

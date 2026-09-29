@@ -49,6 +49,7 @@ def application(tmp_path_factory):
             "ASLT_FAVORITE_STATS_ENABLED": "false",
             "ASLT_AUTO_PROCESS": "false",
             "ASLT_LIVE_TRANSCRIPTION": "false",
+            "ASLT_QRZ_LAST_HEARD_LIMIT": "25",
             "ASLT_QRZ_USERNAME": "",
             "ASLT_QRZ_PASSWORD": "",
             "ASLT_QRZ_PASSWORD_FILE": "",
