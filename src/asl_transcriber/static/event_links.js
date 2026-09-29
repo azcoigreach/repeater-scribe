@@ -17,7 +17,7 @@
             try {const ended = await fetch(`/ui/sessions/${item.id}/end`, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name="csrf-token"]')?.content || ''},body:'{}'});if (!ended.ok) throw new Error((await ended.json()).detail || 'Could not end event');await refresh();}
             catch (error) {const note = document.createElement('span');note.textContent = error.message;row.append(note);control.disabled = false;}
           });
-          if (['operator','admin'].includes(document.body.dataset.role)) row.append(control);
+          if (['user','admin'].includes(document.body.dataset.role)) row.append(control);
           box.append(row);
         });
         if (!result.items.length) box.append(document.createTextNode(' · No active event'));

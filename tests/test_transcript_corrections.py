@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from asl_transcriber import auth, main
 from asl_transcriber.archive import serialize_recording
 from asl_transcriber.config import settings
 from asl_transcriber.database import Base, get_db
-from asl_transcriber.models import AuthSession, CallsignMention, Transcript
+from asl_transcriber.models import Account, AuthSession, CallsignMention, Transcript
 from asl_transcriber.runtime import ArchiveRuntime
 from asl_transcriber.transcript_corrections import CorrectionConflict, correct_selection
 from asl_transcriber.transcription.base import TranscriptResult, TranscriptSegment
@@ -147,7 +148,11 @@ def test_ui_correction_requires_operator_csrf_and_updates_dashboard(context, mon
     monkeypatch.setattr(settings, 'public_base_url', 'https://testserver')
     now = datetime.now(UTC)
     with sessions() as session:
-        session.add(AuthSession(token_hash=auth.token_digest('correction-session'), subject=role,
+        session.add(AuthSession(
+                account=Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
+                                identity=role, role="user" if role == "operator" else role,
+                                created_by="fixture", updated_by="fixture"),
+            token_hash=auth.token_digest('correction-session'), subject=role,
             identity=role, role=role, csrf_token='csrf', created_at=now, last_seen_at=now,
             expires_at=now + timedelta(hours=1)))
         session.commit()

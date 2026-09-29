@@ -22,6 +22,7 @@ def start_form(page, origin, historical=False):
 def test_live_groovy_accumulation_markers_checkin_end_reopen_and_seek(page, application):
     origin, ids = application
     start_form(page, origin)
+    expect(page.locator("body")).to_have_attribute("data-role", "user")
     page.locator("#event-form [name=tags]").fill("groovy, late-shift")
     page.locator("#save-event").click()
     expect(page.locator("#event-detail")).to_be_visible()
@@ -213,3 +214,23 @@ def test_selected_event_create_failure_keeps_form_and_can_retry(page, applicatio
     assert set(requests[1].post_data_json['recording_ids']) == {ids['KM7GHS'], ids['K1AB']}
     for key in ['KM7GHS', 'K1AB']:
         expect(page.locator(f'#recordings-list [data-recording-id="{ids[key]}"]')).to_contain_text('include')
+
+
+def test_user_event_controls_load_revised_asset_url(page, application):
+    origin, _ = application
+    # Model a stale response at the shipped URL. New HTML must request a new URL.
+    page.route("**/static/events.js?v=0.9.2", lambda route: route.fulfill(
+        content_type="application/javascript",
+        body="document.querySelectorAll('[data-write]').forEach(node => node.hidden = true);",
+    ))
+    scripts = []
+    page.on("request", lambda request: scripts.append(request.url)
+            if request.resource_type == "script" else None)
+    page.goto(origin + "/events")
+    expect(page.locator("body")).to_have_attribute("data-role", "user")
+    expect(page.locator("#start-event")).to_be_visible()
+    page.locator("#start-event").click()
+    expect(page.locator("#event-form")).to_be_visible()
+    event_scripts = [url for url in scripts if "/static/events.js?" in url]
+    assert len(event_scripts) == 1
+    assert event_scripts[0] != origin + "/static/events.js?v=0.9.2"

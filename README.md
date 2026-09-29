@@ -56,11 +56,11 @@ are excluded from normal callsign totals.
 
 Read callsign history with `GET /api/v1/callsigns`,
 `GET /api/v1/callsigns/KM7GHS`, and
-`GET /api/v1/callsigns/KM7GHS/mentions?limit=50`. Operators review a mention
+`GET /api/v1/callsigns/KM7GHS/mentions?limit=50`. Users review a mention
 with `PATCH /api/v1/callsign-mentions/{mention_id}` using `confirm`, `reject`,
 or `correct` and a replacement callsign. A bounded QRZ snapshot refresh is
 available at `POST /api/v1/callsigns/KM7GHS/qrz-refresh`. All reads require a
-viewer; writes require an operator and browser writes additionally require the
+viewer; writes require a User and browser writes additionally require the
 existing session CSRF and exact-origin checks.
 
 ## Database migrations
@@ -387,15 +387,18 @@ loopback. Do not change `ASLT_BIND_ADDRESS` to a public interface while
 `ASLT_AUTH_MODE=off`.
 
 Internet mode adds OIDC Authorization Code + PKCE login, server-side opaque
-sessions, viewer/operator/admin roles, CSRF and Origin validation, strict Host
+sessions, Viewer/User/Admin accounts, CSRF and Origin validation, strict Host
 validation, security headers, rate/request limits, audit records, and bounded
 SSE connections. The reference profile terminates TLS with Caddy while the app
 container remains private.
 
 Only health and login/callback routes are anonymous. Audio, transcripts, node
 state, topology, and event streams require a viewer. Favorites and AMI controls
-require an operator. Ingestion and diagnostics require an administrator. Raw
+require a User. Ingestion and diagnostics require an Admin. Raw
 AllStar functions are separately disabled by default.
+
+Managed account migration, role precedence and emergency recovery are documented
+in [accounts](docs/accounts.md), with a [complete endpoint permission matrix](docs/permissions.md).
 
 To deploy publicly, configure OIDC and the secret files described in
 [Internet security and operations](docs/security.md), then run:
@@ -438,7 +441,7 @@ The main route groups are:
 | Topology | `GET /api/v1/nodes/{home}/topology`, `/topology/events` |
 
 Machine writes use named bearer tokens. Create one with
-`asl-transcriber create-api-token automation --role operator`, then add a
+`asl-transcriber create-api-token automation --role user`, then add a
 favorite with:
 
 ```bash

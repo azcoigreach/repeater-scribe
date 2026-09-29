@@ -6,7 +6,7 @@ import wave
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import NAMESPACE_DNS, uuid5
+from uuid import NAMESPACE_DNS, uuid4, uuid5
 
 import uvicorn
 from fastapi import Depends
@@ -17,6 +17,7 @@ from asl_transcriber.callsign_service import persist_transcript_details
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.models import (
+    Account,
     AuthSession,
     Callsign,
     CallsignMention,
@@ -134,6 +135,9 @@ with SessionLocal() as db:
     for role in ("operator", "viewer"):
         db.add(
             AuthSession(
+                account=Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
+                                identity=role, role="user" if role == "operator" else role,
+                                created_by="fixture", updated_by="fixture"),
                 token_hash=token_digest(f"browser-{role}"),
                 subject=f"browser-{role}",
                 identity=f"{role}@example.test",

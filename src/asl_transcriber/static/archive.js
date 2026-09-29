@@ -46,7 +46,7 @@
   document.querySelector('#sign-out')?.addEventListener('click', async () => { await fetch('/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content } }); location.assign('/auth/login'); });
   const selected = new Map();
   function addSelection(parent, item) {
-    if (!['operator', 'admin'].includes(document.body.dataset.role)) return;
+    if (!['user', 'admin'].includes(document.body.dataset.role)) return;
     const label = document.createElement('label');label.className = 'event-select';
     const checkbox = document.createElement('input');checkbox.type = 'checkbox';checkbox.dataset.selectRecording = item.id;checkbox.checked = selected.has(item.id);
     checkbox.addEventListener('change', () => {
