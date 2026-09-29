@@ -11,7 +11,9 @@ subject** pair. Email, preferred username, display name and displayed identity
 are mutable metadata; none can admit an identity or link two accounts. Accounts
 are retained when disabled. Existing content attribution and session identity
 snapshots are not rewritten when metadata changes. Security audits attach the
-stable account ID and preserve their actor/detail snapshots.
+stable account ID and preserve their actor/detail snapshots. Denied sign-ins for
+known disabled accounts retain that account ID; unknown identities remain
+unlinked. Denial audits persist after the login transaction rolls back.
 
 On successful, cryptographically verified login:
 
@@ -50,7 +52,10 @@ role and rejects disabled accounts. No personal-token creation API is added.
 All three SSE routes revalidate credentials before each emitted event and at
 least every second while idle (subject to database/scheduler latency). Revocation,
 expiry or any role change closes the subscription and releases its connection
-slot. Streaming does not extend session idle lifetime. Already-authorized finite
+slot. Streaming does not extend session idle lifetime. Periodic security cleanup
+removes both idle-expired and absolutely expired sessions, including abandoned
+sessions that never make another request. A rejected browser request also removes
+its invalid session immediately. Already-authorized finite
 responses or in-flight node commands cannot be recalled; future requests are
 checked against current state.
 
@@ -82,6 +87,10 @@ Back up the database as described in [security operations](security.md), stop
 the old application, and run `alembic upgrade head` before starting new code.
 The supported prior revision is `events_sessions` (0.9.2); fresh creation is also
 supported. Keep deployment OIDC configuration intact for initial admission.
+
+UI assets use a shared `asset_version` template global, currently
+`managed-accounts-1`, to invalidate cached scripts and styles independently of
+the product version. Bump this revision whenever changed UI assets are shipped.
 
 **Browser sessions and pending OIDC logins are revoked once on upgrade.** Old
 session rows have no issuer and cannot safely establish verified account links.

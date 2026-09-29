@@ -13,10 +13,10 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from asl_transcriber.accounts import admit_account, begin_account_write
+from asl_transcriber.accounts import AccountAdmissionDenied, admit_account, begin_account_write
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.models import Account, ApiToken, AuthSession, OidcLoginState, SecurityAudit
@@ -138,6 +138,10 @@ def _session_principal(raw_token: str) -> Principal | None:
     with SessionLocal() as session:
         principal = resolve_principal(Principal("", "", "viewer", "session", session_hash=token_hash), session)
         if principal is None:
+            stored = session.get(AuthSession, token_hash)
+            if stored is not None:
+                session.delete(stored)
+                session.commit()
             return None
         stored = session.get(AuthSession, token_hash)
         assert stored is not None
@@ -504,8 +508,9 @@ async def complete_oidc_login(code: str, state: str) -> tuple[str, Principal, st
             principal = Principal(f"account:{account.id}", account.identity, role, "session",
                                   csrf_token, token_hash, account.id)
             session.commit()
-    except HTTPException:
-        audit_event(actor=subject, auth_source="oidc", action="account_admission", outcome="denied")
+    except AccountAdmissionDenied as error:
+        audit_event(actor=subject, auth_source="oidc", action="account_admission",
+                    outcome="denied", account_id=error.account_id)
         logger.warning("OIDC login denied for subject=%s", subject)
         raise
     return raw_session, principal, next_path
@@ -541,10 +546,14 @@ def revoke_api_token(name: str) -> bool:
 
 def purge_security_state() -> dict[str, int]:
     now = datetime.now(UTC)
+    idle_cutoff = now - timedelta(seconds=settings.session_idle_seconds)
     audit_cutoff = now - timedelta(days=settings.audit_retention_days)
     with SessionLocal() as session:
         expired_sessions_result = session.execute(
-            delete(AuthSession).where(AuthSession.expires_at <= now)
+            delete(AuthSession).where(or_(
+                AuthSession.expires_at <= now,
+                AuthSession.last_seen_at <= idle_cutoff,
+            ))
         )
         expired_logins_result = session.execute(
             delete(OidcLoginState).where(OidcLoginState.expires_at <= now)

@@ -48,3 +48,36 @@ human-authorized merge, release or deployment.
 
 Migration/admission/recovery decisions are in [accounts](accounts.md); the full
 route inventory is in [permissions](permissions.md).
+
+
+## PR #57 review fixes (2026-09-28)
+
+The follow-up restores invalid-session deletion on rejected browser requests and
+includes idle deadlines in periodic cleanup. Denied admission for a known disabled
+account carries the verified account ID past transaction rollback into its audit;
+unknown identities remain unlinked. A shared `managed-accounts-1` asset revision
+replaces the product-version cache token across all workspace scripts/styles.
+Product version and migration revision are unchanged.
+
+New regressions failed before their corresponding fixes: idle purge left two
+expired rows, rejected requests retained both idle/absolute-expired sessions,
+disabled-account admission audits had no account ID, and all six workspaces
+still requested the shipped asset URLs. Coverage also checks expiry boundaries,
+active-session/account/audit preservation, repeated cleanup, same-subject identities
+at different issuers, unknown-identity denial, and CLI recovery dispatch, issuer
+normalization, output and invalid inputs. Browser acceptance substitutes stale
+JavaScript at the old URL and verifies the User can open the Event form through
+the revised asset URL.
+
+| Command | Follow-up result |
+| --- | --- |
+| `.venv/bin/ruff check .` | Passed |
+| `.venv/bin/mypy src` | Passed, 43 source files |
+| `.venv/bin/pytest -q -W error::DeprecationWarning` | 349 passed in 40.40s |
+| `PLAYWRIGHT_BROWSERS_PATH=/tmp/issue55-playwright .venv/bin/pytest browser_tests -q -W error::DeprecationWarning` | 77 passed in 96.72s |
+| `git diff --check` | Passed |
+
+The same disposable databases, mocked external services and direct fixture TLS
+server boundaries apply. The full Python suite includes fresh/prior-schema
+migration coverage, although this follow-up does not change migrations. GitHub
+CI and CodeQL results are recorded on the PR for the pushed commit.

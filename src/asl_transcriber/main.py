@@ -423,6 +423,8 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_host_li
 app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
+# Bump when shipping changed UI assets, independently of the product version.
+templates.env.globals["asset_version"] = "managed-accounts-1"
 
 
 app.include_router(accounts_router)

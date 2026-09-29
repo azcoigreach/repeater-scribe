@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from asl_transcriber import auth, cli
+from asl_transcriber import accounts, auth, cli
 from asl_transcriber.cli import build_parser
 
 
@@ -55,3 +55,39 @@ def test_create_api_token_fails_before_creation_without_a_terminal(monkeypatch) 
         cli.main()
 
     assert not created
+
+
+def test_recover_admin_uses_configured_issuer_and_reports_fresh_login(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["asl-transcriber", "recover-admin", "Exact-Subject"])
+    monkeypatch.setattr(cli.settings, "oidc_issuer_url", "https://identity.example.test/")
+
+    def recover(issuer, subject):
+        calls.append((issuer, subject))
+        return "recovered-account"
+
+    monkeypatch.setattr(accounts, "recover_admin", recover)
+    cli.main()
+
+    assert calls == [("https://identity.example.test", "Exact-Subject")]
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "account_id": "recovered-account", "role": "admin", "sign_in_required": True,
+    }
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("issuer,subject", [("", "subject"), ("https://id.test", "")])
+def test_recover_admin_invalid_configuration_or_subject_is_cli_error(
+    monkeypatch, capsys, issuer, subject,
+):
+    monkeypatch.setattr(sys, "argv", ["asl-transcriber", "recover-admin", subject])
+    monkeypatch.setattr(cli.settings, "oidc_issuer_url", issuer)
+
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+
+    assert error.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Recovery requires a configured HTTPS issuer" in captured.err

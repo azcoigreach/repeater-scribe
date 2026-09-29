@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -13,7 +15,7 @@ from asl_transcriber import auth
 from asl_transcriber.auth import token_digest
 from asl_transcriber.config import settings
 from asl_transcriber.database import Base, get_db
-from asl_transcriber.main import app
+from asl_transcriber.main import app, templates
 from asl_transcriber.models import Account, AuthSession, Recording
 
 
@@ -131,8 +133,8 @@ def test_archive_assets_use_database_api_and_id_based_audio(archive_ui_db) -> No
     archive_script = client.get("/static/archive.js").text
     detail_script = client.get("/static/archive_detail.js").text
 
-    assert "/static/archive.css?v=0.9.2" in archive_html
-    assert "/static/archive.js?v=0.9.2" in archive_html
+    assert f"/static/archive.css?v={templates.env.globals['asset_version']}" in archive_html
+    assert f"/static/archive.js?v={templates.env.globals['asset_version']}" in archive_html
     assert "/api/v1/archive/recordings" in archive_script
     assert "/api/v1/archive/recordings/${encodeURIComponent(item.id)}/audio" in detail_script
     assert "/api/v1/audio?path=" not in archive_script + detail_script
@@ -170,3 +172,20 @@ def test_dashboard_reconciles_jobs_and_ignores_stale_responses() -> None:
     assert "let jobsRequestVersion = 0" in script
     assert "requestVersion === jobsRequestVersion" in script
     assert "setInterval(loadJobs, 30000)" in script
+
+
+@pytest.mark.parametrize("path", [
+    "/", "/archive", "/archive/recordings/asset-test", "/events",
+    "/callsigns", "/callsigns/KM7GHS",
+])
+def test_workspace_assets_share_a_new_cache_revision(archive_ui_db, path):
+    add_recording(archive_ui_db, "asset-test")
+    client = TestClient(app)
+    response = client.get(path)
+    assert response.status_code == 200
+    assets = re.findall(r'(?:src|href)="(/static/[^"?]+\.(?:js|css))\?v=([^" ]+)"', response.text)
+    assert assets
+    assert all(version != "0.9.2" for _, version in assets)
+    assert {version for _, version in assets} == {templates.env.globals["asset_version"]}
+    for asset, _ in assets:
+        assert Path("src/asl_transcriber" + asset).is_file()

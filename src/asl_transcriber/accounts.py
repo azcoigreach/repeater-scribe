@@ -19,6 +19,14 @@ if TYPE_CHECKING:
     from asl_transcriber.auth import Principal
 
 
+class AccountAdmissionDenied(HTTPException):
+    """Retain a verified account match across the rolled-back login transaction."""
+
+    def __init__(self, detail: str, account_id: str | None = None) -> None:
+        super().__init__(status_code=403, detail=detail)
+        self.account_id = account_id
+
+
 def begin_account_write(db: Session) -> None:
     # Reserve the database writer before reads, across processes, as Event writes do.
     # Login, recovery and account changes all participate in the same serialization.
@@ -46,10 +54,10 @@ def admit_account(db: Session, claims: dict[str, Any], *, allowed: bool, role: R
     account = db.scalar(select(Account).where(Account.issuer == issuer, Account.subject == subject))
     now = datetime.now(UTC)
     if account is not None and not account.enabled:
-        raise HTTPException(403, "This account is disabled")
+        raise AccountAdmissionDenied("This account is disabled", account.id)
     if account is None:
         if not allowed:
-            raise HTTPException(403, "This identity is not allowed")
+            raise AccountAdmissionDenied("This identity is not allowed")
         account = Account(
             issuer=issuer,
             subject=subject,

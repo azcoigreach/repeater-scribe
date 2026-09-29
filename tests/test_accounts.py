@@ -429,3 +429,64 @@ def test_legacy_event_retry_cannot_create_duplicate_after_account_login(db_facto
         with pytest.raises(HTTPException, match="predates managed accounts"):
             create_event(db, principal, CreateEvent(name="Original", source_id="unused"), "retry")
         assert db.scalar(select(func.count()).select_from(RadioSession)) == 1
+
+
+def test_security_purge_removes_idle_and_absolute_expiry_but_preserves_history(
+    db_factory, monkeypatch,
+):
+    now = datetime.now(UTC)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(auth, "datetime", Clock)
+    idle_cutoff = now - timedelta(seconds=settings.session_idle_seconds)
+    sessions = {}
+    for name, last_seen, expires in (
+        ("idle", idle_cutoff - timedelta(seconds=1), now + timedelta(hours=1)),
+        ("idle-boundary", idle_cutoff, now + timedelta(hours=1)),
+        ("absolute", now, now - timedelta(seconds=1)),
+        ("absolute-boundary", now, now),
+        ("active", idle_cutoff + timedelta(seconds=1), now + timedelta(hours=1)),
+    ):
+        _, raw, _ = login(db_factory)
+        digest = auth.token_digest(raw)
+        sessions[name] = digest
+        with db_factory() as db:
+            stored = db.get(AuthSession, digest)
+            stored.last_seen_at, stored.expires_at = last_seen, expires
+            db.commit()
+
+    with db_factory() as db:
+        audit_count = db.scalar(select(func.count()).select_from(SecurityAudit))
+    # No request presents the expired credentials: abandoned sessions must purge too.
+    assert auth.purge_security_state()["sessions"] == 4
+    with db_factory() as db:
+        assert list(db.scalars(select(AuthSession.token_hash))) == [sessions["active"]]
+        assert db.scalar(select(func.count()).select_from(Account)) == 5
+        assert db.scalar(select(func.count()).select_from(SecurityAudit)) == audit_count
+    assert auth.purge_security_state()["sessions"] == 0
+
+
+@pytest.mark.parametrize("expiry", ["idle", "absolute"])
+def test_rejected_expired_session_is_removed_on_request(db_factory, expiry):
+    account_id, raw, _ = login(db_factory)
+    _, active_raw, _ = login(db_factory)
+    digest = auth.token_digest(raw)
+    now = datetime.now(UTC)
+    with db_factory() as db:
+        stored = db.get(AuthSession, digest)
+        if expiry == "idle":
+            stored.last_seen_at = now - timedelta(seconds=settings.session_idle_seconds + 1)
+        else:
+            stored.expires_at = now - timedelta(seconds=1)
+        db.commit()
+    assert auth._session_principal(raw) is None
+    with db_factory() as db:
+        assert db.get(AuthSession, digest) is None
+        assert db.get(Account, account_id) is not None
+        assert db.scalar(select(SecurityAudit).where(SecurityAudit.account_id == account_id))
+    assert auth._session_principal(raw) is None
+    assert auth._session_principal(active_raw) is not None
