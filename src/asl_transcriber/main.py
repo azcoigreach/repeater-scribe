@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from queue import Empty
+from queue import Empty, Full
 from typing import Annotated
 from urllib.parse import quote
 
@@ -2021,6 +2021,13 @@ async def events(request: Request, principal: Viewer) -> StreamingResponse:
                     yield ": heartbeat\n\n"
         finally:
             active_runtime.unsubscribe(event_queue)
+            # Cancelling to_thread does not stop Queue.get in its worker. Wake
+            # that abandoned read so reloads cannot starve authenticated reads
+            # sharing the executor until the 15-second heartbeat timeout.
+            try:
+                event_queue.put_nowait({})
+            except Full:
+                pass  # A queued event already makes the abandoned get runnable.
             await sse_connections.release(principal.subject)
 
     return StreamingResponse(

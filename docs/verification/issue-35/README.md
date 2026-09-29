@@ -24,6 +24,10 @@ storage writes, Apply/Cancel/defaults, page permissions/action boundaries,
 keyboard navigation/focus, and uninterrupted audio with retained station evidence.
 API tests exercise authenticated limit overrides, bounds, unique stations, and
 unchanged QRZ lookup budgets. Existing eligibility/cache regression tests also run.
+A deterministic one-worker regression verifies that closing/reloading Dashboard
+event streams releases their idle queue reads, keeping authenticated Apply/refresh
+requests responsive. Final browser verification also uses the repository-pinned
+Caddy binary via `ASLT_TEST_CADDY_BINARY`.
 
 No migration or live ASL3/AMI/GPU/QRZ acceptance is needed for personal presentation
 preferences. Automated tests never issue live node commands or access a live
