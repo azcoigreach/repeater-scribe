@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from queue import Empty
+from queue import Empty, Full
 from typing import Annotated
 from urllib.parse import quote
 
@@ -424,7 +424,7 @@ app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 # Bump when shipping changed UI assets, independently of the product version.
-templates.env.globals["asset_version"] = "managed-accounts-1"
+templates.env.globals["asset_version"] = "runtime-settings-1"
 
 
 app.include_router(accounts_router)
@@ -446,6 +446,8 @@ def dashboard(request: Request):
             "ami_node_id": settings.ami_node_id,
             "csrf_token": principal.csrf_token or "",
             "identity": principal.identity,
+            "preference_scope": principal.subject,
+            "last_heard_default": settings.qrz_last_heard_limit,
             "role": principal.role,
         },
     )
@@ -1275,21 +1277,22 @@ def correct_transcript_callsign(
 
 @app.get("/api/v1/recordings", dependencies=[Depends(require_viewer)])
 def recordings(
-    q: str | None = None, status: str | None = None, limit: int = 100
+    q: str | None = None, status: str | None = None, limit: int = 100,
+    source_path: str | None = None, source_id: str | None = None,
 ) -> dict[str, object]:
     active_runtime = current_runtime()
     normalized_query = q.casefold() if q else None
     items: list[dict[str, object]] = []
     jobs = active_runtime.jobs()
     waiting_items: list[dict[str, object]] = []
-    for archive_root, source_path in active_runtime.waiting_recordings():
-        source_id = archive_source_id(archive_root)
-        live_result = active_runtime.live_result_for(source_path, archive_root)
+    for archive_root, waiting_source_path in active_runtime.waiting_recordings():
+        waiting_source_id = archive_source_id(archive_root)
+        live_result = active_runtime.live_result_for(waiting_source_path, archive_root)
         waiting_items.append(
             {
                 "id": None,
-                "source_path": source_path,
-                "source_id": source_id,
+                "source_path": waiting_source_path,
+                "source_id": waiting_source_id,
                 "_archive_root": archive_root,
                 "status": "live" if live_result is not None else "waiting",
                 "transcript": (
@@ -1302,8 +1305,8 @@ def recordings(
                     if live_result is not None
                     else None
                 ),
-                "timestamp": recording_timestamp(source_path),
-                "audio_url": f"/api/v1/audio?path={quote(source_path)}&source_id={source_id}",
+                "timestamp": recording_timestamp(waiting_source_path),
+                "audio_url": f"/api/v1/audio?path={quote(waiting_source_path)}&source_id={waiting_source_id}",
                 "callsigns": list(extract_callsigns(live_result.display_text))
                 if live_result
                 else [],
@@ -1355,6 +1358,10 @@ def recordings(
         job_source_path = str(item["source_path"])
         archive_root_value = item.pop("_archive_root", None)
         item_archive_root = str(archive_root_value) if archive_root_value is not None else None
+        if source_path is not None and item["source_path"] != source_path:
+            continue
+        if source_id is not None and item["source_id"] != source_id:
+            continue
         result = (
             (active_runtime.results.get(str(item["id"]))
              or active_runtime.live_result_for(job_source_path, item_archive_root))
@@ -2019,6 +2026,13 @@ async def events(request: Request, principal: Viewer) -> StreamingResponse:
                     yield ": heartbeat\n\n"
         finally:
             active_runtime.unsubscribe(event_queue)
+            # Cancelling to_thread does not stop Queue.get in its worker. Wake
+            # that abandoned read so reloads cannot starve authenticated reads
+            # sharing the executor until the 15-second heartbeat timeout.
+            try:
+                event_queue.put_nowait({})
+            except Full:
+                pass  # A queued event already makes the abandoned get runnable.
             await sse_connections.release(principal.subject)
 
     return StreamingResponse(

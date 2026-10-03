@@ -277,3 +277,28 @@ def test_history_cursor_error_does_not_echo_internal_exception(secured, monkeypa
     response = browser.get("/api/v1/callsigns/KM7GHS/mentions?cursor=bad")
     assert response.status_code == 422
     assert response.json() == {"detail": {"code": "invalid_cursor", "message": "cursor must be valid"}}
+
+
+@pytest.mark.parametrize("limit,expected", [(1, 1), (40, 40), (100, 100), (1000, 100), (-1, 1)])
+def test_personal_last_heard_limit_bounds_and_refresh_budget(secured, monkeypatch, limit, expected):
+    browser, _, qrz = secured
+    monkeypatch.setattr(settings, "qrz_last_heard_limit", 25)
+    monkeypatch.setattr(settings, "qrz_last_heard_refresh_limit", 2)
+    with SessionLocal() as db:
+        for index in range(105):
+            seed(db, f"K2{chr(65 + index // 26)}{chr(65 + index % 26)}")
+        db.commit()
+    path = f"/api/v1/callsigns/last-heard?limit={limit}"
+    assert browser.get(path).status_code == 401
+    qrz.lookup.assert_not_called()
+    login(browser, "viewer")
+    response = browser.get(path)
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == expected
+    assert len({row["callsign"] for row in response.json()["items"]}) == expected
+    assert qrz.lookup.call_count == 2
+    assert settings.qrz_last_heard_limit == 25
+    qrz.reset_mock()
+    browser.get(path)
+    assert qrz.lookup.call_count <= 2
+    assert browser.get("/api/v1/callsigns/last-heard?limit=1.5").status_code == 422

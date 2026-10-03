@@ -5,6 +5,7 @@ const callsignCards = document.querySelector('#last-heard-callsigns');
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 let confirmedCallsigns = null;
 let jobsRequestVersion = 0;
+let callsignsRequestVersion = 0;
 
 function authenticatedFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -179,13 +180,23 @@ function playAudio(button) {
   player.addEventListener(type, updatePlaybackControls);
 });
 
-async function loadJobs() {
+async function loadJobs(target = null) {
   const requestVersion = ++jobsRequestVersion;
-  const query = encodeURIComponent(searchInput.value.trim());
-  const response = await fetch(`/api/v1/recordings?limit=500${query ? `&q=${query}` : ''}`);
+  const params = new URLSearchParams({ limit: RuntimeSettings.get('dashboard.transcriptLimit') });
+  if (target) {
+    params.set('source_path', target.sourcePath);
+    if (target.sourceId) params.set('source_id', target.sourceId);
+  } else if (searchInput.value.trim()) {
+    params.set('q', searchInput.value.trim());
+  }
+  const response = await fetch(`/api/v1/recordings?${params}`);
   if (response.ok && requestVersion === jobsRequestVersion) {
     const data = await response.json();
+    if (requestVersion !== jobsRequestVersion) return;
     renderJobs(data.items, data.database_totals);
+    if (!window.TranscriptCorrections?.busy()) {
+      document.querySelector('#transcript-results').textContent = `Showing ${data.items.length} of ${data.total ?? data.items.length} matching recordings`;
+    }
   }
 }
 
@@ -202,21 +213,24 @@ async function loadActivity() {
 }
 
 async function loadCallsigns() {
+  const requestVersion = ++callsignsRequestVersion;
   const source = document.querySelector('#callsigns-source');
+  const response = await fetch(`/api/v1/callsigns/last-heard?limit=${RuntimeSettings.get('dashboard.lastHeardLimit')}`, { cache: 'no-store' });
+  if (requestVersion !== callsignsRequestVersion) return;
   const expandedEvidence = new Set(Array.from(
     callsignCards.querySelectorAll('.callsign-card .confidence-evidence[open]')
   ).map(details => details.closest('.callsign-card')?.dataset.callsign).filter(Boolean));
-  const response = await fetch('/api/v1/callsigns/last-heard', { cache: 'no-store' });
   if (!response.ok) {
     source.textContent = 'QRZ lookup is temporarily unavailable.';
     callsignCards.replaceChildren(element('div', 'Could not load last heard callsigns.', 'empty'));
     return;
   }
   const data = await response.json();
+  if (requestVersion !== callsignsRequestVersion) return;
   confirmedCallsigns = data.configured && !data.items.some(item => item.status === 'error')
     ? new Set(data.items.filter(item => item.status === 'found').map(item => String(item.callsign).toUpperCase()))
     : null;
-  document.querySelector('#callsigns-count').textContent = data.total;
+  document.querySelector('#callsigns-count').textContent = `${data.items.length} shown`;
   source.textContent = data.configured
     ? `Location and primary photos supplied by QRZ.com.${data.rejected ? ` ${data.rejected} unconfirmed transcript fragment${data.rejected === 1 ? '' : 's'} hidden.` : ''}${data.superseded ? ` ${data.superseded} partial callsign${data.superseded === 1 ? '' : 's'} superseded by later audio.` : ''}`
     : 'Add ASLT_QRZ_USERNAME and ASLT_QRZ_PASSWORD to enable QRZ.com details.';
@@ -1465,15 +1479,17 @@ document.addEventListener('click', event => {
   }
 });
 
-/* Settings modal */
-const settingsModal = document.querySelector('#settings-modal');
-document.querySelector('#open-settings').addEventListener('click', () => {
-  settingsModal.removeAttribute('hidden');
-  mainMenuPanel.setAttribute('hidden', '');
-  closeAllSubmenus();
+/* Personal changes use the same refresh paths as search, polling and manual refresh. */
+window.addEventListener('runtime-settings-change', event => {
+  if (event.detail.includes('dashboard.transcriptLimit')) loadJobs();
+  if (event.detail.includes('dashboard.lastHeardLimit')) loadCallsigns();
 });
-document.querySelector('#close-settings').addEventListener('click', () => settingsModal.setAttribute('hidden', ''));
-settingsModal.addEventListener('click', event => { if (event.target === settingsModal) settingsModal.setAttribute('hidden', ''); });
+document.querySelector('#open-settings').addEventListener('click', () => {
+  mainMenuPanel.setAttribute('hidden', '');
+  mainMenuTrigger.setAttribute('aria-expanded', 'false');
+  closeAllSubmenus();
+  RuntimeSettings.open(mainMenuTrigger);
+});
 document.querySelector('#sign-out')?.addEventListener('click', async () => {
   const response = await authenticatedFetch('/auth/logout', { method: 'POST' });
   if (response.redirected) window.location.assign(response.url);
@@ -1785,7 +1801,7 @@ async function revealTranscript(sourcePath, sourceId = null) {
   let recording = matchingRecording();
   if (!recording) {
     searchInput.value = sourcePath;
-    await loadJobs();
+    await loadJobs({ sourcePath, sourceId });
     recording = matchingRecording();
   }
   emphasize(recording);
