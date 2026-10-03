@@ -2,6 +2,7 @@
 
 import io
 import wave
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from playwright.sync_api import expect
@@ -392,3 +393,38 @@ def test_last_heard_reveals_only_the_intended_root(page, playback_dashboard, sou
         expect(page.locator('.recording.linked-highlight')).to_have_attribute("data-source-id", "root-two")
     else:
         expect(page.locator('.recording.linked-highlight')).to_have_count(0)
+
+
+def test_last_heard_reveals_requested_root_beyond_transcript_limit(page, playback_dashboard):
+    data, items = playback_dashboard
+    items[0]["source_path"] = items[1]["source_path"] = "same.wav"
+    items[0]["source_id"], items[1]["source_id"] = "root-one", "root-two"
+    data["items"] = [items[0]]
+
+    def recordings(route):
+        params = parse_qs(urlparse(route.request.url).query)
+        if params.get("source_path") == ["same.wav"]:
+            matches = [
+                item for item in items
+                if item["source_path"] == params["source_path"][0]
+                and item["source_id"] == params.get("source_id", [None])[0]
+            ]
+        else:
+            matches = data["items"]
+        route.fulfill(json={"items": matches, "total": len(matches)})
+
+    page.route("**/api/v1/recordings?*", recordings)
+    page.route("**/api/v1/callsigns/last-heard?*", lambda route: route.fulfill(json={
+        "configured": False, "total": 1,
+        "items": [{"callsign": "KM7GHS", "source_path": "same.wav", "source_id": "root-two"}],
+    }))
+    page.evaluate("""() => localStorage.setItem(
+        `repeater-scribe:preferences:v1:${document.body.dataset.preferenceScope}`,
+        JSON.stringify({"dashboard.transcriptLimit": 1, "dashboard.lastHeardLimit": 25})
+    )""")
+    page.reload()
+    page.evaluate("async () => { await loadJobs(); await loadCallsigns(); activatePanel('callsigns'); }")
+    expect(page.locator("#recordings .recording")).to_have_count(1)
+    page.get_by_role("button", name="Show transcript", exact=True).click()
+    expect(page.locator('.recording.linked-highlight')).to_have_count(1)
+    expect(page.locator('.recording.linked-highlight')).to_have_attribute("data-source-id", "root-two")

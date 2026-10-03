@@ -180,10 +180,16 @@ function playAudio(button) {
   player.addEventListener(type, updatePlaybackControls);
 });
 
-async function loadJobs() {
+async function loadJobs(target = null) {
   const requestVersion = ++jobsRequestVersion;
-  const query = encodeURIComponent(searchInput.value.trim());
-  const response = await fetch(`/api/v1/recordings?limit=${RuntimeSettings.get('dashboard.transcriptLimit')}${query ? `&q=${query}` : ''}`);
+  const params = new URLSearchParams({ limit: RuntimeSettings.get('dashboard.transcriptLimit') });
+  if (target) {
+    params.set('source_path', target.sourcePath);
+    if (target.sourceId) params.set('source_id', target.sourceId);
+  } else if (searchInput.value.trim()) {
+    params.set('q', searchInput.value.trim());
+  }
+  const response = await fetch(`/api/v1/recordings?${params}`);
   if (response.ok && requestVersion === jobsRequestVersion) {
     const data = await response.json();
     if (requestVersion !== jobsRequestVersion) return;
@@ -1795,7 +1801,7 @@ async function revealTranscript(sourcePath, sourceId = null) {
   let recording = matchingRecording();
   if (!recording) {
     searchInput.value = sourcePath;
-    await loadJobs();
+    await loadJobs({ sourcePath, sourceId });
     recording = matchingRecording();
   }
   emphasize(recording);
