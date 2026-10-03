@@ -132,17 +132,20 @@ with SessionLocal() as db:
         mention.confidence = None
         mention.acoustic_confidence = None
         mention.recognition_confidence = None
-    for role in ("operator", "viewer"):
+    for identity, role in (
+        ("operator", "user"), ("viewer", "viewer"), ("admin", "admin"),
+        ("session-target", "user"),
+    ):
         db.add(
             AuthSession(
-                account=Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
-                                identity=role, role="user" if role == "operator" else role,
+                account=Account(issuer="https://identity.example.test", subject=f"fixture-{identity}-{uuid4()}",
+                                identity=identity, role=role,
                                 created_by="fixture", updated_by="fixture"),
-                token_hash=token_digest(f"browser-{role}"),
-                subject=f"browser-{role}",
-                identity=f"{role}@example.test",
+                token_hash=token_digest(f"browser-{identity}"),
+                subject=f"browser-{identity}",
+                identity=f"{identity}@example.test",
                 role=role,
-                csrf_token=f"csrf-{role}",
+                csrf_token=f"csrf-{identity}",
                 created_at=datetime.now(UTC),
                 last_seen_at=datetime.now(UTC),
                 expires_at=datetime.now(UTC) + timedelta(hours=2),

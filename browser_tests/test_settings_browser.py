@@ -250,3 +250,90 @@ def test_storage_write_failure_preserves_applied_preferences(page, application):
     page.get_by_role("button", name="Cancel", exact=True).click()
     open_settings(page)
     expect(page.get_by_label("Transcript display count", exact=True)).to_have_value("3")
+
+
+def test_admin_users_provisions_changes_access_and_revokes_sessions(page, application):
+    page.set_viewport_size({"width": 375, "height": 850})
+    page.context.add_cookies([{
+        "name": "__Host-aslt_session", "value": "browser-admin", "url": application[0],
+        "secure": True, "httpOnly": True,
+    }])
+    page.goto(application[0] + "/")
+    open_settings(page)
+    users_tab = page.get_by_role("tab", name="Users", exact=True)
+    expect(users_tab).to_be_visible()
+    users_tab.click()
+    users = page.locator(".account-table tbody tr")
+    expect(users).to_have_count(4)
+    assert page.locator(".settings-content").evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert page.locator(".account-table-wrap").evaluate("el => el.scrollWidth > el.clientWidth")
+
+    form = page.get_by_role("form", name="Provision OIDC identity")
+    form.get_by_label("OIDC subject").fill("future-browser-user")
+    form.get_by_label("Initial role").select_option("viewer")
+    form.get_by_role("button", name="Provision account").click()
+    expect(page.locator("#settings-feedback")).to_contain_text("sign-in is still pending")
+    new_user = users.filter(has_text="future-browser-user")
+    expect(new_user).to_contain_text("Provisioned")
+    expect(new_user).to_contain_text("No successful sign-in yet")
+    new_user.get_by_label("Role for future-browser-user").select_option("user")
+    role_confirmation = []
+    page.once("dialog", lambda dialog: (role_confirmation.append(dialog.message), dialog.accept()))
+    new_user.get_by_role("button", name="Change role").click()
+    assert "future-browser-user" in role_confirmation[0]
+    assert "Viewer to User" in role_confirmation[0]
+    expect(new_user.get_by_label("Role for future-browser-user")).to_have_value("user")
+    page.once("dialog", lambda dialog: dialog.accept())
+    new_user.get_by_role("button", name="Disable account").click()
+    expect(new_user).to_contain_text("Disabled")
+
+    target = users.filter(has_text="session-target")
+    session_confirmation = []
+    page.once("dialog", lambda dialog: (session_confirmation.append(dialog.message), dialog.accept()))
+    target.get_by_role("button", name="Revoke all sessions").click()
+    assert "session-target" in session_confirmation[0]
+    assert "all devices" in session_confirmation[0]
+    expect(target.locator("td").nth(5)).to_have_text("0")
+
+    page.context.add_cookies([{
+        "name": "__Host-aslt_session", "value": "browser-viewer", "url": application[0],
+        "secure": True, "httpOnly": True,
+    }])
+    page.reload()
+    open_settings(page)
+    expect(page.get_by_role("tab", name="Users", exact=True)).to_have_count(0)
+
+
+def test_admin_users_can_load_accounts_beyond_first_page(page, application):
+    page.context.add_cookies([{
+        "name": "__Host-aslt_session", "value": "browser-admin", "url": application[0],
+        "secure": True, "httpOnly": True,
+    }])
+    base_account = page.request.get(
+        application[0] + "/api/v1/accounts?limit=200&offset=0"
+    ).json()["items"][0]
+    first_page = [base_account | {
+        "id": f"fixture-account-{index}", "subject": f"subject-{index}",
+        "identity": f"Fixture {index}", "display_name": f"Fixture {index}",
+    } for index in range(200)]
+    second_page = [base_account | {
+        "id": "fixture-account-200", "subject": "subject-200",
+        "identity": "Fixture 200", "display_name": "Fixture 200",
+    }]
+
+    def accounts_response(route):
+        items = second_page if "offset=200" in route.request.url else first_page
+        route.fulfill(json={"items": items})
+
+    page.route("**/api/v1/accounts*", accounts_response)
+    page.goto(application[0] + "/")
+    open_settings(page)
+    page.get_by_role("tab", name="Users", exact=True).click()
+    users = page.locator(".account-table tbody tr")
+    expect(users).to_have_count(200)
+    more = page.get_by_role("button", name="Load more accounts")
+    expect(more).to_be_visible()
+    more.click()
+    expect(users).to_have_count(201)
+    expect(users.last).to_contain_text("Fixture 200")
+    expect(more).to_be_hidden()

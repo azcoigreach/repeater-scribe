@@ -14,8 +14,9 @@ sets priorities, performs operational acceptance, and authorizes releases.
 3. Mark the issue Ready once Eric accepts its scope and the requirements are
    actionable. Start with one implementation task at a time.
 4. Hand the issue URL to Codex in the configured development environment.
-   Codex reads the issue and comments, creates a branch from main, implements
-   the change, and opens a linked PR with verification evidence.
+   Codex reads the issue and comments, creates a focused branch from the active
+   milestone release branch, implements the change, and opens a linked PR
+   targeting that release branch with verification evidence.
 5. CI checks the PR. Review the current diff in ChatGPT against the issue,
    inspect surrounding code and test results, and record actionable findings
    on the PR when asked to publish the review.
@@ -63,8 +64,11 @@ the current implementation; discovery candidates are not release commitments.
 
 ## Development and release boundaries
 
-Use short-lived feature/fix branches targeting main. A separate deployment
-environment does not require a permanent develop branch.
+Use one milestone release branch from `main` (for example, `release/0.10.0`)
+and short-lived feature/fix branches from that release branch. Target issue PRs
+to the release branch. Once the milestone is complete, tag the release branch
+and merge it into `main` with authorization. A separate deployment environment
+does not require a permanent develop branch.
 
 Give development its own Compose project name, port bindings, data volumes,
 database, credentials, and configuration. Use disposable or sanitized fixtures

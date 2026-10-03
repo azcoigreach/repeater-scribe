@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
+from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.models import Account, AuthSession, SecurityAudit
 from asl_transcriber.roles import Role, normalize_role
@@ -177,6 +178,72 @@ def change_account(
         result = serialize_account(account)
         db.commit()
         return result
+
+
+def provision_account(subject: str, role: Role, principal: Principal) -> dict[str, Any]:
+    from asl_transcriber.auth import resolve_principal
+
+    with SessionLocal() as db:
+        begin_account_write(db)
+        current = resolve_principal(principal, db)
+        if current is None or current.role != "admin":
+            raise HTTPException(403, "Administrator access is required")
+        issuer = settings.oidc_issuer_url.rstrip("/")
+        if not issuer:
+            raise HTTPException(503, "OIDC provider is not configured")
+        if db.scalar(select(Account.id).where(Account.issuer == issuer, Account.subject == subject)):
+            raise HTTPException(409, "This OIDC identity is already provisioned")
+        account = Account(
+            issuer=issuer,
+            subject=subject,
+            identity=subject,
+            role=role,
+            enabled=True,
+            created_by=current.subject,
+            updated_by=current.subject,
+        )
+        db.add(account)
+        db.flush()
+        account_audit(
+            db,
+            account,
+            current.subject,
+            current.auth_source,
+            "account_provisioned",
+            {"issuer": issuer, "subject": subject, "role": role},
+        )
+        result = serialize_account(account)
+        db.commit()
+        return result
+
+
+def revoke_account_sessions(account_id: str, principal: Principal) -> dict[str, Any]:
+    from asl_transcriber.auth import resolve_principal
+
+    with SessionLocal() as db:
+        begin_account_write(db)
+        current = resolve_principal(principal, db)
+        if current is None or current.role != "admin":
+            raise HTTPException(403, "Administrator access is required")
+        account = db.get(Account, account_id)
+        if account is None:
+            raise HTTPException(404, "Account not found")
+        revoked_sessions = db.scalar(
+            select(func.count()).select_from(AuthSession).where(AuthSession.account_id == account.id)
+        ) or 0
+        db.execute(delete(AuthSession).where(AuthSession.account_id == account.id))
+        account.updated_at = datetime.now(UTC)
+        account.updated_by = current.subject
+        account_audit(
+            db,
+            account,
+            current.subject,
+            current.auth_source,
+            "account_sessions_revoked",
+            {"revoked_sessions": revoked_sessions},
+        )
+        db.commit()
+        return {"account_id": account.id, "revoked_sessions": revoked_sessions}
 
 
 def recover_admin(issuer: str, subject: str) -> str:

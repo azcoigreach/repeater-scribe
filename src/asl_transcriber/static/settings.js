@@ -37,6 +37,9 @@ window.RuntimeSettings = (() => {
     }
     // Later account/token pages own their actions. These controls only edit personal fields.
     actions.hidden = !pages.get(id).personal;
+    modal.querySelector('.settings-scope').textContent = pages.get(id).personal
+      ? 'Personal preferences are saved for this account in this browser only.'
+      : 'Administrative account access.';
     feedback.textContent = '';
     if (focus) pages.get(id).tab.focus();
   }

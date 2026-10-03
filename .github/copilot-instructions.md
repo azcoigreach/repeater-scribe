@@ -27,7 +27,7 @@
 ## Pull Requests
 
 - Push the feature branch with upstream tracking before opening a PR.
-- Open pull requests against `main` unless the user specifies another base.
+- Open issue pull requests against the active milestone release branch (for example, `release/0.10.0`). After the milestone is complete, tag the release branch and merge it into `main` with authorization.
 - Include a concise summary, user-visible behavior, test results, and deployment notes when applicable.
 - Do not merge the PR automatically unless explicitly requested.
 - After opening or updating a PR, report its URL, source branch, target branch, and latest commit.
