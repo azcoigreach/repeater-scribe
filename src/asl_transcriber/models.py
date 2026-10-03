@@ -480,10 +480,36 @@ class ControlAudit(Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class Account(Base):
+    __tablename__ = "accounts"
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_account_oidc_identity"),
+        CheckConstraint("role IN ('viewer', 'user', 'admin')", name="ck_account_role"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    issuer: Mapped[str] = mapped_column(String(1024), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    identity: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255))
+    preferred_username: Mapped[str | None] = mapped_column(String(255))
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_sign_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sign_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
 
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), nullable=False, index=True)
+    account: Mapped[Account] = relationship()
     subject: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     identity: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -515,6 +541,7 @@ class ApiToken(Base):
     __tablename__ = "api_tokens"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id"), index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -533,6 +560,7 @@ class SecurityAudit(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True
     )
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id"), index=True)
     auth_source: Mapped[str] = mapped_column(String(32), nullable=False)
     action: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)

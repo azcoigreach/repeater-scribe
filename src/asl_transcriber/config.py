@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     oidc_client_secret_file: str = Field(default="")
     oidc_scopes: str = Field(default="openid profile email")
     oidc_role_claim: str = Field(default="groups")
-    oidc_default_role: Literal["viewer", "operator", "admin"] = Field(default="viewer")
+    oidc_default_role: Literal["viewer", "user", "operator", "admin"] = Field(default="viewer")
     oidc_allowed_subjects: str = Field(default="")
     oidc_allowed_groups: str = Field(default="")
     oidc_operator_subjects: str = Field(default="")

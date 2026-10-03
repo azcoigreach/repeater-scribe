@@ -248,10 +248,6 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .modal[hidden] { display: none; }
 .modal-content { width: min(640px, calc(100% - 40px)); max-height: calc(100vh - 80px); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); padding: 24px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
-.settings-grid > div { padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
-.settings-grid h3 { margin: 0 0 8px; font-size: 15px; }
-.settings-grid p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .favorite-form { width: min(720px, calc(100% - 40px)); }
 .favorite-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .favorite-fields label { display: grid; gap: 6px; color: var(--muted); font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: .08em; }
@@ -338,4 +334,32 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
   .stats { grid-template-columns: repeat(2, 1fr); }
   .search { width: 100%; }
   .search input { width: 100%; }
+}
+
+/* Shared runtime Settings shell: pages keep the same left-side navigation at all widths. */
+#settings-modal { width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); }
+#settings-modal::backdrop { background: transparent; }
+.settings-content { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; width: min(760px, calc(100% - 32px)); height: min(524px, calc(100dvh - 32px)); box-sizing: border-box; }
+.settings-scope { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.settings-layout { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 20px; min-height: 0; margin-top: 20px; }
+#settings-tabs { display: flex; flex-direction: column; gap: 6px; border-right: 1px solid var(--line); padding-right: 12px; }
+#settings-tabs button { text-align: left; border: 1px solid transparent; border-radius: 6px; padding: 10px; color: var(--muted); background: transparent; cursor: pointer; overflow-wrap: anywhere; }
+#settings-tabs button[aria-selected="true"] { color: var(--green); background: var(--paper); border-color: var(--green); font-weight: 700; }
+#settings-modal :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+#settings-pages { min-width: 0; min-height: 0; overflow: auto; }
+#settings-pages h3 { margin: 0 0 18px; font-size: 16px; }
+#settings-pages p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.settings-field { margin-bottom: 22px; }
+.settings-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.settings-field input { width: 110px; max-width: 100%; box-sizing: border-box; padding: 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--ink); background: var(--paper); }
+.settings-field input[aria-invalid="true"] { border-color: var(--amber); }
+.settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.settings-actions[hidden] { display: none; }
+.settings-actions button:first-child { margin-right: auto; }
+#settings-feedback { font-size: 12px; line-height: 1.5; }
+@media (max-width: 520px) {
+  .settings-content { padding: 16px; max-height: calc(100dvh - 24px); }
+  .settings-layout { grid-template-columns: 100px minmax(0, 1fr); gap: 12px; }
+  #settings-tabs { padding-right: 8px; }
+  #settings-tabs button { padding: 8px 5px; font-size: 12px; }
 }

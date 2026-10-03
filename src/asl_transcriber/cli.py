@@ -31,9 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
         "create-api-token", help="Create a named API token and print its secret once"
     )
     create_token.add_argument("name")
-    create_token.add_argument("--role", choices=("viewer", "operator", "admin"), default="operator")
+    create_token.add_argument("--role", choices=("viewer", "user", "admin", "operator"), default="user")
     revoke_token = subparsers.add_parser("revoke-api-token", help="Revoke a named API token")
     revoke_token.add_argument("name")
+    recovery = subparsers.add_parser("recover-admin", help="Restore Admin access for an exact OIDC subject")
+    recovery.add_argument("subject")
     benchmark = subparsers.add_parser(
         "benchmark", help="Benchmark the configured local model on archive recordings"
     )
@@ -112,6 +114,16 @@ def main() -> None:
                 parser.error("could not deliver the token to the controlling terminal")
         finally:
             os.close(terminal_fd)
+        return
+
+    if args.command == "recover-admin":
+        from asl_transcriber.accounts import recover_admin
+
+        try:
+            account_id = recover_admin(settings.oidc_issuer_url.rstrip("/"), args.subject)
+        except ValueError as error:
+            parser.error(str(error))
+        print(json.dumps({"account_id": account_id, "role": "admin", "sign_in_required": True}))
         return
 
     if args.command == "revoke-api-token":

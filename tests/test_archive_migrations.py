@@ -283,7 +283,7 @@ def test_populated_07_to_head_and_supported_cycle_preserves_duration_and_foreign
     for _ in range(2):
         alembic(database, "head")
         with closing(sqlite3.connect(database)) as connection, connection:
-            assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("events_sessions",)
+            assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("managed_accounts",)
             assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
             assert connection.execute("SELECT duration_milliseconds FROM transmissions").fetchone() == (12345,)
             assert connection.execute("SELECT canonical_callsign, is_current FROM callsign_mentions").fetchall() == [("KM7GHS", 1)]
@@ -334,4 +334,4 @@ def test_upgrade_actual_081_preserves_catalog_review_and_search(tmp_path):
         assert db.execute("SELECT display_text FROM transcript_fts WHERE transcript_fts MATCH 'archive'").fetchone() == ('KM7GHS archive',)
         assert db.execute('SELECT text_corrections_json FROM transcripts').fetchone() == ('[{"callsign":"KM7GHS","applied":true}]',)
         assert db.execute('SELECT COUNT(*) FROM radio_sessions').fetchone() == (0,)
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone() == ('events_sessions',)
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone() == ('managed_accounts',)

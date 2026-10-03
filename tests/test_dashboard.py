@@ -128,3 +128,13 @@ def test_favicon_state_images_are_served() -> None:
     for state in range(4):
         assert (static_dir / f"repeater-scribe-state{state}-256px.png").is_file()
         assert (static_dir / f"repeater-scribe-state{state}.png").is_file()
+
+
+def test_dashboard_exposes_effective_default_and_stable_preference_scope(monkeypatch, tmp_path):
+    monkeypatch.setattr("asl_transcriber.main.settings.archive_paths", str(tmp_path))
+    monkeypatch.setattr("asl_transcriber.main.settings.auto_process", False)
+    monkeypatch.setattr("asl_transcriber.main.settings.qrz_last_heard_limit", 17)
+    with TestClient(app) as client:
+        response = client.get("/")
+    assert 'data-last-heard-default="17"' in response.text
+    assert 'data-preference-scope="local-admin"' in response.text

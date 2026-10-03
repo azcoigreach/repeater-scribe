@@ -242,6 +242,7 @@ class SecurityMiddleware:
                 current = getattr(request.state, "principal", None)
                 audit_event(
                     actor=current.identity if isinstance(current, Principal) else "anonymous",
+                    account_id=current.account_id if isinstance(current, Principal) else None,
                     auth_source=current.auth_source if isinstance(current, Principal) else "none",
                     action="http_write",
                     outcome="allowed" if status_code < 400 else "denied",

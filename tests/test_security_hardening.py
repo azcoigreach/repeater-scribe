@@ -18,13 +18,14 @@ from fastapi.testclient import TestClient
 from joserfc import jwt
 from joserfc.jwk import import_key
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from asl_transcriber import auth
 from asl_transcriber.auth import create_api_token, token_digest
 from asl_transcriber.config import Settings, settings
 from asl_transcriber.database import SessionLocal
 from asl_transcriber.main import app
-from asl_transcriber.models import ApiToken, AuthSession, OidcLoginState
+from asl_transcriber.models import Account, ApiToken, AuthSession, OidcLoginState, SecurityAudit
 from asl_transcriber.security import SseConnectionLimiter
 
 
@@ -35,6 +36,9 @@ def _session(role: str) -> tuple[str, str]:
     with SessionLocal() as session:
         session.add(
             AuthSession(
+                account=Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
+                                identity=f"{role}@example.test", role="user" if role == "operator" else role,
+                                created_by="fixture", updated_by="fixture"),
                 token_hash=token_digest(raw),
                 subject=f"subject-{uuid4()}",
                 identity=f"{role}@example.test",
@@ -212,7 +216,7 @@ def test_oidc_code_flow_validates_signed_token_and_prevents_state_replay(monkeyp
 
     monkeypatch.setattr(auth.httpx, "AsyncClient", client_factory)
 
-    async def scenario() -> None:
+    async def signed_state(subject: str = "operator-1", groups=None) -> str:
         nonlocal id_token
         authorization_url = await auth.oidc_authorization_url("/after-login")
         state = parse_qs(urlparse(authorization_url).query)["state"][0]
@@ -225,9 +229,9 @@ def test_oidc_code_flow_validates_signed_token_and_prevents_state_replay(monkeyp
                 {
                     "iss": issuer,
                     "aud": "repeater-scribe",
-                    "sub": "operator-1",
+                    "sub": subject,
                     "email": "operator@example.test",
-                    "groups": ["radio-admins"],
+                    "groups": ["radio-admins"] if groups is None else groups,
                     "nonce": login.nonce,
                     "iat": now,
                     "exp": now + 300,
@@ -235,10 +239,54 @@ def test_oidc_code_flow_validates_signed_token_and_prevents_state_replay(monkeyp
                 signing_key,
                 algorithms=["RS256"],
             )
+        return state
+
+    async def scenario() -> None:
+        state = await signed_state()
         raw_session, principal, next_path = await auth.complete_oidc_login("code", state)
         assert raw_session
         assert principal.identity == "operator@example.test"
         assert principal.role == "admin"
+        assert principal.account_id is not None
+        with SessionLocal() as session:
+            account = session.get(Account, principal.account_id)
+            assert (account.issuer, account.subject) == (issuer, "operator-1")
+            account.role = "viewer"
+            session.commit()
+        _, demoted, _ = await auth.complete_oidc_login("code", await signed_state())
+        assert demoted.account_id == principal.account_id and demoted.role == "viewer"
+        with SessionLocal() as session:
+            session.get(Account, principal.account_id).enabled = False
+            session.add(Account(
+                issuer="https://other-issuer.example.test", subject="operator-1",
+                identity="same subject, different issuer", role="viewer",
+                created_by="test", updated_by="test",
+            ))
+            session.commit()
+        with pytest.raises(Exception, match="disabled"):
+            await auth.complete_oidc_login("code", await signed_state())
+        with SessionLocal() as session:
+            denial = session.scalars(select(SecurityAudit).where(
+                SecurityAudit.action == "account_admission",
+                SecurityAudit.outcome == "denied",
+                SecurityAudit.actor == "operator-1",
+            )).one()
+            assert denial.account_id == principal.account_id
+            assert denial.auth_source == "oidc"
+        unknown_subject = f"unknown-{uuid4()}"
+        with pytest.raises(Exception, match="not allowed"):
+            await auth.complete_oidc_login(
+                "code", await signed_state(subject=unknown_subject, groups=[])
+            )
+        with SessionLocal() as session:
+            denial = session.scalars(select(SecurityAudit).where(
+                SecurityAudit.action == "account_admission",
+                SecurityAudit.outcome == "denied",
+                SecurityAudit.actor == unknown_subject,
+            )).one()
+            assert denial.account_id is None
+            assert session.scalar(select(Account).where(Account.subject == unknown_subject)) is None
+        assert auth._session_principal(raw_session) is None
         assert next_path == "/after-login"
         with pytest.raises(Exception, match="Invalid or expired login state"):
             await auth.complete_oidc_login("code", state)
