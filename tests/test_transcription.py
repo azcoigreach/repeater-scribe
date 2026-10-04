@@ -3,6 +3,8 @@ from __future__ import annotations
 import wave
 from pathlib import Path
 
+import av
+
 from asl_transcriber.audio.probe import AudioProbeResult, probe_audio
 from asl_transcriber.transcription.base import (
     TranscriptionEngine,
@@ -37,6 +39,14 @@ def test_audio_probe_reads_wave_metadata(tmp_path) -> None:
     assert probe.channels == 1
     assert probe.duration_seconds > 0
     assert probe.file_size > 0
+
+
+def test_pyav_accepts_faster_whisper_metadata_errors_argument(tmp_path) -> None:
+    target = tmp_path / "audio" / "sample.wav"
+    write_pcm_wav(target)
+
+    with av.open(str(target), mode="r", metadata_errors="ignore") as container:
+        assert len(container.streams.audio) == 1
 
 
 def test_transcription_engine_contract_returns_segments() -> None:
