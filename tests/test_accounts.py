@@ -174,6 +174,70 @@ def test_demotion_disable_reenable_and_local_logout(db_factory):
     assert auth.refresh_principal(admin) is not None
 
 
+def test_admin_can_revoke_all_sessions_for_one_account(db_factory):
+    _, admin_raw, _ = login(db_factory, "admin")
+    identifier, first_raw, _ = login(db_factory, subject="target")
+    _, second_raw, _ = login(db_factory, subject="target")
+
+    client = client_for(admin_raw)
+    path = f"/api/v1/accounts/{identifier}/sessions/revoke"
+    for headers in (
+        {"X-CSRF-Token": ""},
+        {"Origin": "https://testserver.evil"},
+    ):
+        assert client.post(path, headers=headers).status_code == 403
+    response = client.post(path)
+
+    assert response.status_code == 200
+    assert response.json() == {"account_id": identifier, "revoked_sessions": 2}
+    assert auth._session_principal(first_raw) is None
+    assert auth._session_principal(second_raw) is None
+    with db_factory() as db:
+        audit = db.scalar(
+            select(SecurityAudit).where(SecurityAudit.action == "account_sessions_revoked")
+        )
+        assert audit.detail == '{"revoked_sessions": 2}'
+        assert first_raw not in audit.detail and second_raw not in audit.detail
+
+
+def test_admin_can_provision_oidc_identity_and_view_session_summary(db_factory, monkeypatch):
+    monkeypatch.setattr(settings, "oidc_issuer_url", ISSUER)
+    _, admin_raw, _ = login(db_factory, "admin")
+    identifier, viewer_raw, _ = login(db_factory, subject="viewer")
+    viewer = client_for(viewer_raw)
+    assert viewer.post("/api/v1/accounts", json={"subject": "future"}).status_code == 403
+
+    client = client_for(admin_raw)
+    assert client.post(
+        "/api/v1/accounts", json={"subject": "future", "issuer": "https://attacker.test"}
+    ).status_code == 422
+    response = client.post("/api/v1/accounts", json={"subject": "future", "role": "viewer"})
+    assert response.status_code == 200
+    assert response.json()["provisioned_pending"] is True
+    assert response.json()["active_session_count"] == 0
+    account_id = response.json()["id"]
+    assert client.post("/api/v1/accounts", json={"subject": "future"}).status_code == 409
+
+    provisioned_id, first_raw, principal = login(
+        db_factory, role="admin", subject="future", allowed=False
+    )
+    assert provisioned_id == account_id and principal.role == "viewer"
+    _, stale_raw, _ = login(db_factory, subject="future", allowed=False)
+    with db_factory() as db:
+        stale_session = db.get(AuthSession, auth.token_digest(stale_raw))
+        stale_session.last_seen_at = datetime.now(UTC) - timedelta(
+            seconds=settings.session_idle_seconds + 1
+        )
+        db.commit()
+
+    account = client.get(f"/api/v1/accounts/{account_id}")
+    assert account.status_code == 200
+    assert account.json()["provisioned_pending"] is False
+    assert account.json()["active_session_count"] == 1
+    assert auth._session_principal(first_raw) is not None
+    assert client.get(f"/api/v1/accounts/{identifier}").json()["active_session_count"] == 1
+
+
 @pytest.mark.parametrize("change", [{"role": "viewer"}, {"enabled": False}])
 def test_last_admin_is_safe_across_concurrent_transactions(db_factory, change):
     first, _, _ = login(db_factory, "admin")
@@ -213,6 +277,26 @@ def test_admin_caller_is_rechecked_under_transaction_lock(db_factory):
     accounts.change_account(identifier, first, role="viewer", enabled=None)
     with pytest.raises(HTTPException, match="Administrator"):
         accounts.change_account(identifier, stale, role="admin", enabled=None)
+
+
+@pytest.mark.parametrize("operation", ["provision", "revoke_sessions"])
+def test_demoted_admin_cannot_provision_or_revoke_from_stale_page(db_factory, monkeypatch, operation):
+    monkeypatch.setattr(settings, "oidc_issuer_url", ISSUER)
+    stale_id, _, stale = login(db_factory, "admin", subject="stale-admin")
+    _, _, current = login(db_factory, "admin", subject="current-admin")
+    target_id, target_raw, _ = login(db_factory, subject="target")
+    accounts.change_account(stale_id, current, role="user", enabled=None)
+
+    with pytest.raises(HTTPException, match="Administrator"):
+        if operation == "provision":
+            accounts.provision_account("not-created", "viewer", stale)
+        else:
+            accounts.revoke_account_sessions(target_id, stale)
+
+    assert auth._session_principal(target_raw) is not None
+    if operation == "provision":
+        with db_factory() as db:
+            assert db.scalar(select(Account.id).where(Account.subject == "not-created")) is None
 
 
 @pytest.mark.parametrize("role", ["viewer", "user", "admin"])

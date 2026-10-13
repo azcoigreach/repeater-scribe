@@ -36,7 +36,7 @@ state that application tests were not run locally rather than claiming a pass.
 
 ## Pull request expectations
 
-- Start with a scoped issue and use a focused branch targeting main.
+- Start with a scoped issue and use a focused branch targeting the active milestone release branch (for example, `release/0.10.0`). When the milestone is complete, tag the release branch and merge it into `main` with authorization.
 - Add or update behavioral tests for behavior changes.
 - Map the change to acceptance criteria and document significant design decisions.
 - Respect discovery, ingestion, transcription, API, and web boundaries.

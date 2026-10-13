@@ -6,7 +6,7 @@
 - Read .github/copilot-instructions.md for the existing Git and repository safety rules.
 - Follow docs/development-workflow.md for issue readiness, implementation, and review.
 - Treat the issue as the durable specification. Record scope decisions there; do not assume another chat's history is available.
-- Inspect branch and worktree state. Preserve unrelated changes and work on one focused feature/fix branch from main unless another base is specified.
+- Inspect branch and worktree state. Preserve unrelated changes. Create a milestone release branch from main when needed (for example, `release/0.10.0`), then create focused issue branches from it and target pull requests to that release branch. After the milestone is complete, tag the release branch and merge it into main with authorization.
 - Use Python where practical and preserve discovery, ingestion, transcription, API, and web boundaries.
 - Do not silently implement unapproved future ideas listed in docs/plan.md.
 
