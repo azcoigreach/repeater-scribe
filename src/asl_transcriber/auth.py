@@ -328,8 +328,14 @@ async def _oidc_discovery() -> dict[str, Any]:
     return metadata
 
 
-def _safe_next_path(value: str | None) -> str:
-    if not value or not value.startswith("/") or value.startswith("//"):
+def safe_next_path(value: str | None) -> str:
+    if (
+        not value
+        or not value.startswith("/")
+        or value.startswith(("//", "/auth/", "/welcome"))
+        or "\\" in value
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
         return "/"
     return value[:1024]
 
@@ -352,7 +358,7 @@ async def oidc_authorization_url(next_path: str | None = None) -> str:
                 state_hash=token_digest(state),
                 nonce=nonce,
                 code_verifier=verifier,
-                next_path=_safe_next_path(next_path),
+                next_path=safe_next_path(next_path),
                 expires_at=now + timedelta(minutes=10),
             )
         )

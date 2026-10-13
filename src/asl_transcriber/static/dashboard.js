@@ -1490,11 +1490,6 @@ document.querySelector('#open-settings').addEventListener('click', () => {
   closeAllSubmenus();
   RuntimeSettings.open(mainMenuTrigger);
 });
-document.querySelector('#sign-out')?.addEventListener('click', async () => {
-  const response = await authenticatedFetch('/auth/logout', { method: 'POST' });
-  if (response.redirected) window.location.assign(response.url);
-});
-
 /* Favorite metadata editor */
 const favoriteModal = document.querySelector('#favorite-modal');
 function closeFavoriteEditor() {

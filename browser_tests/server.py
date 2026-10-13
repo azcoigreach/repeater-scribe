@@ -148,6 +148,23 @@ with SessionLocal() as db:
                 expires_at=datetime.now(UTC) + timedelta(hours=2),
             )
         )
+    shared_account = Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
+                             identity="devices", role="viewer",
+                             created_by="fixture", updated_by="fixture")
+    for name in ("device-a", "device-b", "device-revoked"):
+        db.add(
+            AuthSession(
+                account=shared_account,
+                token_hash=token_digest(f"browser-{name}"),
+                subject=f"browser-{name}",
+                identity="devices@example.test",
+                role="viewer",
+                csrf_token=f"csrf-{name}",
+                created_at=datetime.now(UTC),
+                last_seen_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=2),
+            )
+        )
     db.commit()
 
 

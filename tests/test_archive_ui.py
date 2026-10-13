@@ -103,17 +103,83 @@ def test_archive_detail_returns_controlled_404_for_unknown_recording(archive_ui_
     assert "Recording not found" in response.text
 
 
-def test_anonymous_internet_archive_pages_redirect_to_safe_login(archive_ui_db, monkeypatch) -> None:
+def test_anonymous_internet_archive_pages_redirect_to_landing(archive_ui_db, monkeypatch) -> None:
     monkeypatch.setattr(settings, "deployment_mode", "internet")
     monkeypatch.setattr(settings, "auth_mode", "oidc")
     client = TestClient(app, base_url="https://testserver")
 
-    response = client.get("/archive", follow_redirects=False)
+    response = client.get("/archive?q=net", follow_redirects=False)
     detail = client.get("/archive/recordings/unknown", follow_redirects=False)
 
     assert response.status_code == detail.status_code == 303
-    assert response.headers["location"] == "/auth/login?next=/archive"
-    assert detail.headers["location"] == "/auth/login?next=/archive/recordings/unknown"
+    assert response.headers["location"] == "/welcome?next=%2Farchive%3Fq%3Dnet"
+    assert detail.headers["location"] == "/welcome?next=%2Farchive%2Frecordings%2Funknown"
+
+
+def test_stale_cookie_redirects_to_landing_with_expired_message(archive_ui_db, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    client = TestClient(app, base_url="https://testserver")
+    client.cookies.set(settings.session_cookie_name, "no-such-session")
+
+    response = client.get("/events", follow_redirects=False)
+
+    assert response.headers["location"] == "/welcome?reason=expired&next=%2Fevents"
+
+
+def test_landing_is_public_and_does_not_auto_redirect_to_provider(archive_ui_db, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    client = TestClient(app, base_url="https://testserver")
+
+    response = client.get("/welcome?reason=expired&next=//evil.example", follow_redirects=False)
+
+    assert response.status_code == 200
+    assert "Your session expired" in response.text
+    assert 'href="/auth/login?next=%2F"' in response.text
+    assert "evil.example" not in response.text
+
+
+def test_landing_redirects_authenticated_visitors_to_safe_destination(archive_ui_db, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    client = TestClient(app, base_url="https://testserver")
+    client.cookies.set(settings.session_cookie_name, session_for(archive_ui_db, "viewer"))
+
+    assert client.get("/welcome?next=/archive", follow_redirects=False).headers["location"] == "/archive"
+    assert client.get("/welcome?next=https://evil.example", follow_redirects=False).headers["location"] == "/"
+
+
+def test_logout_isolated_per_session_and_tolerates_expired_session(archive_ui_db, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    monkeypatch.setattr(settings, "public_base_url", "https://testserver")
+    first, second = session_for(archive_ui_db, "viewer"), session_for(archive_ui_db, "viewer")
+    headers = {"X-CSRF-Token": "csrf", "Origin": "https://testserver"}
+    with TestClient(app, base_url="https://testserver") as one, TestClient(app, base_url="https://testserver") as two:
+        one.cookies.set(settings.session_cookie_name, first)
+        two.cookies.set(settings.session_cookie_name, second)
+
+        response = one.post("/auth/logout", headers=headers, follow_redirects=False)
+        again = one.post("/auth/logout", follow_redirects=False)
+
+        assert response.status_code == again.status_code == 303
+        assert response.headers["location"] == "/welcome?reason=signed_out"
+        assert again.headers["location"] == "/welcome?reason=signed_out"
+        assert one.get("/api/v1/auth/me").status_code == 401
+        assert two.get("/api/v1/auth/me").status_code == 200
+
+
+def test_login_failures_land_on_explanatory_page(archive_ui_db, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    client = TestClient(app, base_url="https://testserver")
+
+    denied = client.get("/auth/callback?error=access_denied", follow_redirects=False)
+    invalid = client.get("/auth/callback?code=x&state=unknown", follow_redirects=False)
+
+    assert denied.headers["location"] == "/welcome?reason=denied"
+    assert invalid.headers["location"] == "/welcome?reason=error"
 
 
 def test_all_authenticated_roles_can_open_archive_pages(archive_ui_db, monkeypatch) -> None:

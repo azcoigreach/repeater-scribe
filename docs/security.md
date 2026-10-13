@@ -100,6 +100,28 @@ The Favorites panel retains its last loaded list during a read failure and
 retries after 10 seconds; its status clears only after a successful load for
 the current home node. Node Controls reports explicit commands separately.
 
+### Browser sessions and sign-out
+
+Each sign-in creates an independent session, so several browsers or devices can
+be signed in for one account. Sign-out revokes only the current session; only
+account disabling or explicit revocation (#43) ends every session for an account.
+
+- Idle expiry is `ASLT_SESSION_IDLE_SECONDS` (default 3600) and absolute expiry
+  is `ASLT_SESSION_ABSOLUTE_SECONDS` (default 28800). Any authenticated request
+  from the session, including dashboard polling, counts as activity (recorded at
+  most once a minute). Open SSE streams recheck the session every second but do
+  not extend it, and expiry is never extended indefinitely.
+- Signed-out visitors, signed-out sessions and expired sessions land on
+  `/welcome`; the Sign in button is the only path to the identity provider.
+  Return paths must be same-origin and are validated server-side.
+- Pages confirm a rejected request (401) against `/api/v1/auth/me` before
+  leaving. Network failures, 5xx and 403 never sign the user out. Pages also
+  recheck on tab focus, visibility, reconnection and history restoration, and
+  sibling tabs follow a sign-out immediately.
+- The cause of the originally reported frozen Dashboard is unverified for the
+  deployed timeout values. Sign-out followed the provider redirect through
+  `fetch`, which is a confirmed way to leave the page stuck.
+
 ## Machine API tokens
 
 Create a token inside the application container. Its secret is printed once to

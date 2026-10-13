@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Empty, Full
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +47,7 @@ from asl_transcriber.auth import (
     require_ui_user,
     require_viewer,
     revoke_session,
+    safe_next_path,
     verify_csrf,
 )
 from asl_transcriber.auth_streams import protected_stream
@@ -424,7 +425,7 @@ app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 # Bump when shipping changed UI assets, independently of the product version.
-templates.env.globals["asset_version"] = "runtime-settings-1"
+templates.env.globals["asset_version"] = "runtime-settings-2"
 
 
 app.include_router(accounts_router)
@@ -432,11 +433,55 @@ app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["sessions"]
 app.include_router(sessions_router, prefix="/ui/sessions", include_in_schema=False)
 
 
+LANDING_MESSAGES = {
+    "signed_out": ("You are signed out", "Sign in again to return to your workspace."),
+    "expired": ("Your session expired", "Sign in again to continue where you left off."),
+    "denied": ("Access denied", "This account is not permitted to use Repeater Scribe. Ask an administrator for access, or try a different account."),
+    "error": ("Sign-in could not be completed", "The identity provider could not be reached or rejected the request. Try again in a moment."),
+}
+
+
+def _landing_url(reason: str | None = None, next_path: str | None = None) -> str:
+    parameters = {}
+    if reason in LANDING_MESSAGES:
+        parameters["reason"] = reason
+    safe_next = safe_next_path(next_path)
+    if safe_next != "/":
+        parameters["next"] = safe_next
+    return "/welcome" + (f"?{urlencode(parameters)}" if parameters else "")
+
+
+def _landing_redirect(request: Request) -> RedirectResponse:
+    target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    stale = bool(request.cookies.get(settings.session_cookie_name))
+    return RedirectResponse(_landing_url("expired" if stale else None, target), status_code=303)
+
+
+@app.get("/welcome", include_in_schema=False)
+def landing(request: Request, reason: str | None = None, next: str | None = None):
+    safe_next = safe_next_path(next)
+    if authenticate_request(request) is not None:
+        return RedirectResponse(safe_next, status_code=303)
+    title, detail = LANDING_MESSAGES.get(reason or "", (None, None))
+    return templates.TemplateResponse(
+        request=request,
+        name="landing.html",
+        context={
+            "app_name": settings.app_name,
+            "message_title": title,
+            "message_detail": detail,
+            "sign_in_url": "/auth/login?" + urlencode({"next": safe_next}),
+            "sign_in_enabled": settings.auth_mode == "oidc",
+        },
+        status_code=401 if reason == "denied" else 200,
+    )
+
+
 @app.get("/")
 def dashboard(request: Request):
     principal = authenticate_request(request)
     if principal is None:
-        return RedirectResponse(url="/auth/login?next=/", status_code=303)
+        return _landing_redirect(request)
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -459,8 +504,7 @@ def _workspace_context(
 ):
     principal = authenticate_request(request)
     if principal is None:
-        next_path = request.url.path
-        return RedirectResponse(url=f"/auth/login?next={quote(next_path, safe='/')}", status_code=303)
+        return _landing_redirect(request)
     context = {
         "request": request,
         "app_name": settings.app_name,
@@ -511,14 +555,25 @@ def archive_detail_workspace(
 
 @app.get("/auth/login")
 async def auth_login(next: str | None = None) -> RedirectResponse:
-    return RedirectResponse(await oidc_authorization_url(next), status_code=303)
+    try:
+        return RedirectResponse(await oidc_authorization_url(next), status_code=303)
+    except Exception:
+        logger.exception("Could not start sign-in")
+        return RedirectResponse(_landing_url("error", next), status_code=303)
 
 
 @app.get("/auth/callback")
-async def auth_callback(request: Request, code: str, state: str) -> RedirectResponse:
+async def auth_callback(
+    request: Request, code: str | None = None, state: str | None = None, error: str | None = None
+) -> RedirectResponse:
+    failure = "denied" if error == "access_denied" else "error"
     try:
+        if error or not code or not state:
+            raise HTTPException(status_code=400, detail="Sign-in was not completed")
         raw_session, principal, next_path = await complete_oidc_login(code, state)
-    except HTTPException:
+    except Exception as exc:  # noqa: BLE001 - every failure must end on the landing page
+        if isinstance(exc, HTTPException) and exc.status_code == 403:
+            failure = "denied"
         audit_event(
             actor="anonymous",
             auth_source="oidc",
@@ -526,7 +581,7 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
             outcome="denied",
             request=request,
         )
-        raise
+        return RedirectResponse(_landing_url(failure), status_code=303)
     response = RedirectResponse(next_path, status_code=303)
     response.set_cookie(
         settings.session_cookie_name,
@@ -549,13 +604,14 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     return response
 
 
-@app.post("/auth/logout", dependencies=[Depends(require_viewer)])
+@app.post("/auth/logout")
 def auth_logout(request: Request) -> RedirectResponse:
+    # An already-expired session still reaches a clean signed-out state.
     principal = authenticate_request(request)
-    assert principal is not None
-    verify_csrf(request, principal)
-    revoke_session(request.cookies.get(settings.session_cookie_name))
-    response = RedirectResponse("/auth/login", status_code=303)
+    if principal is not None:
+        verify_csrf(request, principal)
+        revoke_session(request.cookies.get(settings.session_cookie_name))
+    response = RedirectResponse(_landing_url("signed_out"), status_code=303)
     response.delete_cookie(settings.session_cookie_name, path="/")
     return response
 
