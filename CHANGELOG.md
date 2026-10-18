@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Branded `/welcome` landing page for signed-out, session-expired, denied, and
+  failed sign-in states (#42).
+- Shared client session handling: confirmed expiry, revocation, and sibling-tab
+  sign-out reach the landing page; outages do not sign users out (#41).
+
+### Fixed
+
+- Sign-out no longer follows the identity provider redirect in the background
+  and works after the session has already expired (#42).
+
 ## [0.9.2] - 2026-09-13
 
 ### Fixed
