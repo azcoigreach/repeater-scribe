@@ -43,7 +43,6 @@
   document.querySelector('#refresh').addEventListener('click', () => load(false));
   more.addEventListener('click', () => load(true));
   window.addEventListener('popstate', () => { clearTimeout(debounce); restore(); renderChips(); load(false); });
-  document.querySelector('#sign-out')?.addEventListener('click', async () => { await fetch('/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content } }); location.assign('/auth/login'); });
   const selected = new Map();
   function addSelection(parent, item) {
     if (!['user', 'admin'].includes(document.body.dataset.role)) return;
