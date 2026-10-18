@@ -296,7 +296,6 @@
     });});
     resetAnnotation(kind);
   }
-  $('#sign-out')?.addEventListener('click', async () => {await fetch('/auth/logout', {method:'POST', headers:{'X-CSRF-Token':$('meta[name="csrf-token"]').content}});location.assign('/auth/login');});
   run(async () => {
     document.querySelectorAll('.event-types').forEach(select => types.forEach(value => select.add(new Option(value, value))));
     const sourceData = await api('/sources');

@@ -139,10 +139,13 @@ class SecurityMiddleware:
             or request.headers.get("x-api-key")
             or request.cookies.get(settings.session_cookie_name)
         )
+        touch_session_activity = path != "/api/v1/auth/me"
         principal = (
-            await asyncio.to_thread(authenticate_request, request)
+            await asyncio.to_thread(
+                authenticate_request, request, touch_session_activity=touch_session_activity
+            )
             if has_credentials
-            else authenticate_request(request)
+            else authenticate_request(request, touch_session_activity=touch_session_activity)
         )
         identity = principal.subject if principal is not None else self._client_ip(scope)
         safe_method = request.method in {"GET", "HEAD", "OPTIONS"}

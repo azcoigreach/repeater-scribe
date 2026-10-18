@@ -48,6 +48,10 @@ window.Playback = (() => {
     players.delete(audio);
   }
 
+  function stopAll() {
+    for (const audio of players.keys()) cancel(audio);
+  }
+
   async function play(audio, { src, offset } = {}) {
     const state = players.get(audio);
     if (!state || (!state.persistent && !audio.isConnected)) return;
@@ -82,6 +86,6 @@ window.Playback = (() => {
   new MutationObserver(() => {
     for (const [audio, state] of players) if (!state.persistent && !audio.isConnected) remove(audio);
   }).observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener('pagehide', () => { for (const audio of players.keys()) cancel(audio); });
-  return { register, play, pause: cancel, remove };
+  window.addEventListener('pagehide', stopAll);
+  return { register, play, pause: cancel, remove, stopAll };
 })();

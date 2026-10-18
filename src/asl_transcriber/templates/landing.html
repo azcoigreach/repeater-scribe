@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in | Repeater Scribe</title>
+  <link rel="icon" type="image/png" href="/static/repeater-scribe-state0-256px.png">
+  <link rel="stylesheet" href="/static/landing.css?v={{ asset_version }}">
+</head>
+<body>
+  <main class="landing">
+    <img class="landing-logo" src="/static/logo.png" alt="REPEATER SCRIBE">
+    <p class="landing-summary">Repeater Scribe archives AllStarLink repeater traffic, transcribes each transmission, and keeps searchable events, callsigns and node activity in one workspace.</p>
+    {% if message_title %}
+    <section class="landing-message" role="status" aria-live="polite">
+      <h1>{{ message_title }}</h1>
+      <p>{{ message_detail }}</p>
+    </section>
+    {% else %}
+    <h1 class="landing-heading">Sign in to continue</h1>
+    {% endif %}
+    {% if sign_in_enabled %}
+    <a class="landing-signin" href="{{ sign_in_url }}">Sign in</a>
+    {% else %}
+    <p class="landing-note">Sign-in is not configured for this deployment.</p>
+    {% endif %}
+  </main>
+</body>
+</html>
