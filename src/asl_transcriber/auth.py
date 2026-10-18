@@ -132,7 +132,7 @@ def refresh_principal(principal: Principal) -> Principal | None:
         return resolve_principal(principal, db)
 
 
-def _session_principal(raw_token: str) -> Principal | None:
+def _session_principal(raw_token: str, *, touch_activity: bool = True) -> Principal | None:
     token_hash = token_digest(raw_token)
     now = datetime.now(UTC)
     with SessionLocal() as session:
@@ -145,7 +145,7 @@ def _session_principal(raw_token: str) -> Principal | None:
             return None
         stored = session.get(AuthSession, token_hash)
         assert stored is not None
-        if (now - _utc(stored.last_seen_at)).total_seconds() >= 60:
+        if touch_activity and (now - _utc(stored.last_seen_at)).total_seconds() >= 60:
             stored.last_seen_at = now
             session.commit()
         return principal
@@ -183,7 +183,7 @@ def _api_principal(raw_token: str) -> Principal | None:
     return None
 
 
-def authenticate_request(request: Request) -> Principal | None:
+def authenticate_request(request: Request, *, touch_session_activity: bool = True) -> Principal | None:
     cached = getattr(request.state, "principal", None)
     if isinstance(cached, Principal):
         current = refresh_principal(cached)
@@ -197,7 +197,7 @@ def authenticate_request(request: Request) -> Principal | None:
     elif request.headers.get("x-api-key"):
         principal = _api_principal(request.headers["x-api-key"])
     elif raw_session := request.cookies.get(settings.session_cookie_name):
-        principal = _session_principal(raw_session)
+        principal = _session_principal(raw_session, touch_activity=touch_session_activity)
     elif settings.auth_mode == "off" and settings.deployment_mode == "local":
         principal = Principal(
             subject="local-admin",
@@ -338,6 +338,17 @@ def safe_next_path(value: str | None) -> str:
     ):
         return "/"
     return value[:1024]
+
+
+def oidc_login_next_path(state: str | None) -> str | None:
+    if not state:
+        return None
+    now = datetime.now(UTC)
+    with SessionLocal() as session:
+        login = session.get(OidcLoginState, token_digest(state))
+        if login is None or _utc(login.expires_at) <= now:
+            return None
+        return safe_next_path(login.next_path)
 
 
 async def oidc_authorization_url(next_path: str | None = None) -> str:

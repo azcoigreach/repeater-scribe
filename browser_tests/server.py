@@ -151,7 +151,10 @@ with SessionLocal() as db:
     shared_account = Account(issuer="https://identity.example.test", subject=f"fixture-{uuid4()}",
                              identity="devices", role="viewer",
                              created_by="fixture", updated_by="fixture")
-    for name in ("device-a", "device-b", "device-revoked"):
+    for name in (
+        "device-a", "device-b", "device-revoked", "session-refresh-a",
+        "session-refresh-b", "session-cleanup", "session-timeout", "session-periodic",
+    ):
         db.add(
             AuthSession(
                 account=shared_account,

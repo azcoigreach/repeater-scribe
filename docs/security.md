@@ -117,7 +117,8 @@ account disabling or explicit revocation (#43) ends every session for an account
 - Pages confirm a rejected request (401) against `/api/v1/auth/me` before
   leaving. Network failures, 5xx and 403 never sign the user out. Pages also
   recheck on tab focus, visibility, reconnection and history restoration, and
-  sibling tabs follow a sign-out immediately.
+  sibling tabs follow a sign-out immediately. Visible pages also recheck every
+  60 seconds; this read-only probe does not refresh the idle-activity timestamp.
 - The cause of the originally reported frozen Dashboard is unverified for the
   deployed timeout values. Sign-out followed the provider redirect through
   `fetch`, which is a confirmed way to leave the page stuck.

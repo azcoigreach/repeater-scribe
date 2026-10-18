@@ -4,6 +4,8 @@
   const NativeEventSource = window.EventSource;
   const channel = 'BroadcastChannel' in window ? new BroadcastChannel('repeater-scribe-auth') : null;
   const streams = new Set();
+  const SESSION_CHECK_INTERVAL_MS = 60_000;
+  const SESSION_PROBE_TIMEOUT_MS = 5_000;
   let ended = false;
   let checking = null;
   let checkTimer = null;
@@ -15,21 +17,58 @@
   function endSession(reason) {
     if (ended) return;
     ended = true;
-    streams.forEach(stream => NativeEventSource.prototype.close.call(stream));
-    streams.clear();
+    deactivateWorkspace();
     const next = reason === 'signed_out' ? '' : `${location.pathname}${location.search}`;
     const params = new URLSearchParams({ reason });
     if (next && next !== '/') params.set('next', next);
     location.replace(`/welcome?${params}`);
   }
 
-  // Only a 401 from the session probe proves the session is gone; outages, 5xx and 403 do not.
+  function deactivateWorkspace() {
+    clearInterval(sessionCheckInterval);
+    clearTimeout(checkTimer);
+    streams.forEach(stream => NativeEventSource.prototype.close.call(stream));
+    streams.clear();
+    window.Playback?.stopAll();
+    if (document.body) {
+      document.body.inert = true;
+      document.body.setAttribute('aria-busy', 'true');
+    }
+  }
+
+  function refreshWorkspace() {
+    if (ended) return;
+    ended = true;
+    deactivateWorkspace();
+    location.reload();
+  }
+
+  // This read-only endpoint does not extend the idle timeout; outages never prove logout.
+  async function checkSession() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SESSION_PROBE_TIMEOUT_MS);
+    try {
+      const response = await nativeFetch('/api/v1/auth/me', {
+        cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+      });
+      if (response.status === 401) {
+        endSession('expired');
+      } else if (response.ok) {
+        const principal = await response.json();
+        if (principal.auth_source === 'session' && principal.csrf_token !== csrfToken()) {
+          refreshWorkspace();
+        }
+      }
+    } catch (_) {
+      // A timeout or transport failure is transient, not proof of logout.
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   function confirmSession() {
     if (ended) return Promise.resolve();
-    checking ||= nativeFetch('/api/v1/auth/me', { cache: 'no-store', credentials: 'same-origin' })
-      .then(response => { if (response.status === 401) endSession('expired'); })
-      .catch(() => {})
-      .finally(() => { checking = null; });
+    checking ||= checkSession().finally(() => { checking = null; });
     return checking;
   }
 
@@ -85,4 +124,7 @@
   window.addEventListener('focus', confirmSession);
   window.addEventListener('online', confirmSession);
   window.addEventListener('pageshow', event => { if (event.persisted) confirmSession(); });
+  const sessionCheckInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') confirmSession();
+  }, SESSION_CHECK_INTERVAL_MS);
 })();

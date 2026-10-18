@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from queue import Empty, Full
 from typing import Annotated
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +40,7 @@ from asl_transcriber.auth import (
     authenticate_request,
     complete_oidc_login,
     oidc_authorization_url,
+    oidc_login_next_path,
     purge_security_state,
     require_admin,
     require_api_admin,
@@ -425,7 +426,7 @@ app.add_middleware(SecurityMiddleware)
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 # Bump when shipping changed UI assets, independently of the product version.
-templates.env.globals["asset_version"] = "runtime-settings-2"
+templates.env.globals["asset_version"] = "session-recovery-3"
 
 
 app.include_router(accounts_router)
@@ -460,6 +461,9 @@ def _landing_redirect(request: Request) -> RedirectResponse:
 @app.get("/welcome", include_in_schema=False)
 def landing(request: Request, reason: str | None = None, next: str | None = None):
     safe_next = safe_next_path(next)
+    parsed_next = urlsplit(safe_next)
+    if parsed_next.scheme or parsed_next.netloc or not parsed_next.path.startswith("/"):
+        safe_next = "/"
     if authenticate_request(request) is not None:
         return RedirectResponse(safe_next, status_code=303)
     title, detail = LANDING_MESSAGES.get(reason or "", (None, None))
@@ -567,7 +571,9 @@ async def auth_callback(
     request: Request, code: str | None = None, state: str | None = None, error: str | None = None
 ) -> RedirectResponse:
     failure = "denied" if error == "access_denied" else "error"
+    next_path = None
     try:
+        next_path = oidc_login_next_path(state)
         if error or not code or not state:
             raise HTTPException(status_code=400, detail="Sign-in was not completed")
         raw_session, principal, next_path = await complete_oidc_login(code, state)
@@ -581,7 +587,7 @@ async def auth_callback(
             outcome="denied",
             request=request,
         )
-        return RedirectResponse(_landing_url(failure), status_code=303)
+        return RedirectResponse(_landing_url(failure, next_path), status_code=303)
     response = RedirectResponse(next_path, status_code=303)
     response.set_cookie(
         settings.session_cookie_name,

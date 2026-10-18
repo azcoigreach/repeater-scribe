@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -16,7 +17,7 @@ from asl_transcriber.auth import token_digest
 from asl_transcriber.config import settings
 from asl_transcriber.database import Base, get_db
 from asl_transcriber.main import app, templates
-from asl_transcriber.models import Account, AuthSession, Recording
+from asl_transcriber.models import Account, AuthSession, OidcLoginState, Recording
 
 
 @pytest.fixture()
@@ -148,6 +149,81 @@ def test_landing_redirects_authenticated_visitors_to_safe_destination(archive_ui
 
     assert client.get("/welcome?next=/archive", follow_redirects=False).headers["location"] == "/archive"
     assert client.get("/welcome?next=https://evil.example", follow_redirects=False).headers["location"] == "/"
+
+
+def test_landing_redirect_rejects_protocol_relative_destination(archive_ui_db, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    client = TestClient(app, base_url="https://testserver")
+    client.cookies.set(settings.session_cookie_name, session_for(archive_ui_db, "viewer"))
+
+    response = client.get("/welcome?next=//evil.example", follow_redirects=False)
+
+    assert response.headers["location"] == "/"
+
+
+def test_auth_probe_does_not_extend_idle_activity(archive_ui_db, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    raw = session_for(archive_ui_db, "viewer")
+    last_seen = datetime.now(UTC) - timedelta(minutes=2)
+    with archive_ui_db() as session:
+        stored = session.get(AuthSession, token_digest(raw))
+        assert stored is not None
+        stored.last_seen_at = last_seen
+        session.commit()
+    client = TestClient(app, base_url="https://testserver")
+    client.cookies.set(settings.session_cookie_name, raw)
+
+    response = client.get("/api/v1/auth/me")
+
+    assert response.status_code == 200
+    with archive_ui_db() as session:
+        stored = session.get(AuthSession, token_digest(raw))
+        assert stored is not None
+        assert stored.last_seen_at.replace(tzinfo=UTC) == last_seen
+
+
+def test_callback_failure_preserves_validated_return_destination(
+    archive_ui_db, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    state = "provider-failure-state"
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    with archive_ui_db() as session:
+        session.add(OidcLoginState(
+            state_hash=token_digest(state),
+            nonce="nonce",
+            code_verifier="verifier",
+            next_path="/archive?q=net",
+            expires_at=expires_at,
+        ))
+        session.commit()
+
+    async def discovery():
+        return {
+            "token_endpoint": "https://identity.example.test/token",
+            "jwks_uri": "https://identity.example.test/jwks",
+        }
+
+    real_client = auth.httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(
+            lambda request: httpx.Response(502, json={"error": "unavailable"})
+        )
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(auth, "_oidc_discovery", discovery)
+    monkeypatch.setattr(auth.httpx, "AsyncClient", client_factory)
+    response = TestClient(app, base_url="https://testserver").get(
+        f"/auth/callback?code=code&state={state}", follow_redirects=False
+    )
+
+    assert response.headers["location"] == "/welcome?reason=error&next=%2Farchive%3Fq%3Dnet"
+    with archive_ui_db() as session:
+        assert session.get(OidcLoginState, token_digest(state)) is None
 
 
 def test_logout_isolated_per_session_and_tolerates_expired_session(archive_ui_db, monkeypatch) -> None:
