@@ -65,7 +65,7 @@ def test_managed_accounts_fresh_and_released_upgrade(tmp_path, prior, monkeypatc
     alembic(database, "head")
     with closing(sqlite3.connect(database)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "managed_accounts",
+            "personal_api_tokens",
         )
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         assert db.execute("SELECT count(*) FROM auth_sessions").fetchone() == (0,)

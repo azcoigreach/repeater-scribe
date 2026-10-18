@@ -88,6 +88,55 @@
       const firstSignIn = node('td', date(account.first_sign_in_at));
       const lastSignIn = node('td', date(account.last_sign_in_at));
       const sessions = node('td', String(account.active_session_count));
+      const tokenCell = document.createElement('td');
+      tokenCell.append(node('small', `${account.active_personal_token_count || 0} active / ${account.personal_token_count || 0} total`));
+      const manageTokens = actionButton('Review tokens', async () => {
+        manageTokens.disabled = true;
+        try {
+          const result = await request(`/api/v1/accounts/${encodeURIComponent(account.id)}/tokens`);
+          const details = document.createElement('details');
+          details.open = true;
+          const summary = node('summary', `Personal API tokens for ${identity}`);
+          const list = node('div', '', 'account-token-list');
+          for (const token of result.items) {
+            const item = node('div', '', 'account-token-item');
+            item.append(
+              node('strong', token.name),
+              node('small', `${token.prefix || 'No display prefix'} · ${roleName(token.role)} · ${token.status}`),
+              node('small', `Scopes: ${token.scopes.join(', ') || 'None'} · Created: ${date(token.created_at)}`),
+              node('small', `Expires: ${date(token.expires_at)} · Last used: ${date(token.last_used_at)}`),
+            );
+            if (token.status === 'active') item.append(actionButton('Revoke token', async () => {
+              if (!window.confirm(`Revoke ${token.name} for ${identity}? This token stops working immediately.`)) return;
+              try {
+                await request(`/api/v1/accounts/${encodeURIComponent(account.id)}/tokens/${encodeURIComponent(token.id)}/revoke`, { method: 'POST' });
+                await loadAccounts(`Revoked ${token.name} for ${identity}.`);
+              } catch (error) {
+                feedback.textContent = error.message;
+              }
+            }));
+            list.append(item);
+          }
+          details.append(summary, list);
+          if (result.items.some(token => token.status === 'active')) {
+            details.append(actionButton('Revoke all personal tokens', async () => {
+              if (!window.confirm(`Revoke every personal API token for ${identity}?`)) return;
+              try {
+                const revoked = await request(`/api/v1/accounts/${encodeURIComponent(account.id)}/tokens/revoke-all`, { method: 'POST' });
+                await loadAccounts(`Revoked ${revoked.revoked_tokens} personal tokens for ${identity}.`);
+              } catch (error) {
+                feedback.textContent = error.message;
+              }
+            }));
+          }
+          tokenCell.replaceChildren(details);
+        } catch (error) {
+          feedback.textContent = error.message;
+        } finally {
+          manageTokens.disabled = false;
+        }
+      }, busyAccounts.has(account.id));
+      tokenCell.append(manageTokens);
 
       const actionsCell = document.createElement('td');
       const actions = node('div', '', 'account-row-actions');
@@ -114,7 +163,7 @@
         }
       }, busyAccounts.has(account.id) || account.active_session_count === 0));
       actionsCell.append(actions);
-      row.append(identityCell, roleCell, stateCell, firstSignIn, lastSignIn, sessions, actionsCell);
+      row.append(identityCell, roleCell, stateCell, firstSignIn, lastSignIn, sessions, tokenCell, actionsCell);
       accountsBody.append(row);
     }
   }
@@ -207,7 +256,7 @@
       table.className = 'account-table';
       const head = document.createElement('thead');
       const headingRow = document.createElement('tr');
-      for (const label of ['Identity', 'Role', 'Access', 'First sign-in', 'Last sign-in', 'Sessions', 'Actions']) {
+      for (const label of ['Identity', 'Role', 'Access', 'First sign-in', 'Last sign-in', 'Sessions', 'API tokens', 'Actions']) {
         headingRow.append(node('th', label));
       }
       head.append(headingRow);

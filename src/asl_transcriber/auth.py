@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import secrets
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ class Principal:
     session_hash: str | None = None
     account_id: str | None = None
     token_id: str | None = None
+    scopes: frozenset[str] | None = None
 
 
 def token_digest(value: str) -> str:
@@ -112,16 +114,37 @@ def resolve_principal(principal: Principal, db: Session) -> Principal | None:
                          "session", stored.csrf_token, stored.token_hash, account.id)
     if principal.auth_source == "api_token":
         token = db.get(ApiToken, principal.token_id) if principal.token_id else None
-        if token is None or not token.enabled:
+        if (
+            token is None
+            or not token.enabled
+            or token.revoked_at is not None
+            or (token.expires_at is not None and _utc(token.expires_at) <= now)
+        ):
             return None
         role = normalize_role(token.role)
+        scopes = None
+        if token.scopes_json is not None:
+            try:
+                raw_scopes = json.loads(token.scopes_json)
+            except (TypeError, ValueError):
+                return None
+            if not isinstance(raw_scopes, list) or any(
+                not isinstance(scope, str) for scope in raw_scopes
+            ):
+                return None
+            scopes = frozenset(raw_scopes)
         if token.account_id is not None:
             account = db.get(Account, token.account_id)
             if account is None or not account.enabled:
                 return None
-            role = min((role, normalize_role(account.role)), key=ROLE_RANK.__getitem__)
+            account_role = normalize_role(account.role)
+            role = (
+                account_role
+                if scopes is not None
+                else min((role, account_role), key=ROLE_RANK.__getitem__)
+            )
         return Principal(f"api-token:{token.id}", token.name, role, "api_token",
-                         account_id=token.account_id, token_id=token.id)
+                         account_id=token.account_id, token_id=token.id, scopes=scopes)
     if principal.auth_source == "local":
         return principal if settings.auth_mode == "off" and settings.deployment_mode == "local" else None
     return principal if principal.auth_source == "legacy_api_key" else None
@@ -156,9 +179,24 @@ def _api_principal(raw_token: str) -> Principal | None:
     token_hash = token_digest(raw_token)
     with SessionLocal() as session:
         stored = session.scalar(
-            select(ApiToken).where(ApiToken.token_hash == token_hash, ApiToken.enabled.is_(True))
+            select(ApiToken).where(ApiToken.token_hash == token_hash)
         )
         if stored is not None:
+            if stored.expires_at is not None and _utc(stored.expires_at) <= now:
+                if stored.enabled and stored.revoked_at is None:
+                    stored.enabled = False
+                    session.add(SecurityAudit(
+                        actor=stored.name,
+                        account_id=stored.account_id,
+                        auth_source="api_token",
+                        action="personal_token_expired",
+                        outcome="denied",
+                        detail=f"token_id={stored.id};name={stored.name}",
+                    ))
+                    session.commit()
+                return None
+            if not stored.enabled or stored.revoked_at is not None:
+                return None
             if (
                 stored.last_used_at is None
                 or (now - _utc(stored.last_used_at)).total_seconds() >= 60
@@ -232,6 +270,28 @@ def _require(request: Request, role: Role) -> Principal:
             detail=f"required_role={role};actual_role={principal.role}",
         )
         raise HTTPException(status_code=403, detail="Insufficient permission")
+    if principal.auth_source == "api_token" and principal.scopes is not None:
+        if role == "admin":
+            required_scope = "admin"
+        elif role == "user":
+            required_scope = (
+                "node:control"
+                if request.url.path.startswith(("/api/v1/node", "/api/v1/nodes"))
+                else "content:write"
+            )
+        else:
+            required_scope = "api:read"
+        if required_scope not in principal.scopes:
+            audit_event(
+                actor=principal.identity,
+                account_id=principal.account_id,
+                auth_source=principal.auth_source,
+                action="authorization",
+                outcome="denied",
+                request=request,
+                detail=f"required_scope={required_scope};token_id={principal.token_id}",
+            )
+            raise HTTPException(status_code=403, detail="Token scope is insufficient")
     return principal
 
 
@@ -553,7 +613,9 @@ def create_api_token(name: str, role: str) -> str:
 
 def revoke_api_token(name: str) -> bool:
     with SessionLocal() as session:
-        stored = session.scalar(select(ApiToken).where(ApiToken.name == name))
+        stored = session.scalar(
+            select(ApiToken).where(ApiToken.name == name, ApiToken.account_id.is_(None))
+        )
         if stored is None:
             return False
         stored.enabled = False

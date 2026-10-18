@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal
-from asl_transcriber.models import Account, AuthSession, SecurityAudit
+from asl_transcriber.models import Account, ApiToken, AuthSession, SecurityAudit
 from asl_transcriber.roles import Role, normalize_role
 from asl_transcriber.time_utils import iso_utc
 
@@ -166,6 +166,15 @@ def change_account(
         account.updated_by = current.subject
         if not next_enabled:
             db.execute(delete(AuthSession).where(AuthSession.account_id == account.id))
+            db.execute(
+                update(ApiToken)
+                .where(
+                    ApiToken.account_id == account.id,
+                    ApiToken.enabled.is_(True),
+                    ApiToken.revoked_at.is_(None),
+                )
+                .values(enabled=False, revoked_at=datetime.now(UTC))
+            )
         account_audit(
             db,
             account,

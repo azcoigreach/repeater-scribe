@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from asl_transcriber import account_api, accounts, auth, auth_streams, main
+from asl_transcriber import account_api, accounts, auth, auth_streams, main, personal_token_api
 from asl_transcriber.config import settings
 from asl_transcriber.database import Base
 from asl_transcriber.models import Account, ApiToken, AuthSession, SecurityAudit
@@ -33,7 +33,7 @@ def db_factory(tmp_path, monkeypatch):
 
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
-    for module in (auth, accounts, account_api):
+    for module in (auth, accounts, account_api, personal_token_api):
         monkeypatch.setattr(module, "SessionLocal", factory)
     monkeypatch.setattr(settings, "auth_mode", "oidc")
     monkeypatch.setattr(settings, "deployment_mode", "internet")
@@ -277,6 +277,267 @@ def test_admin_caller_is_rechecked_under_transaction_lock(db_factory):
     accounts.change_account(identifier, first, role="viewer", enabled=None)
     with pytest.raises(HTTPException, match="Administrator"):
         accounts.change_account(identifier, stale, role="admin", enabled=None)
+
+
+def test_personal_token_is_revealed_once_and_revoked_by_owner(db_factory):
+    account_id, raw, _ = login(db_factory, "viewer")
+    browser = client_for(raw)
+
+    created = browser.post("/api/v1/personal-tokens", json={"name": "read-only"})
+
+    assert created.status_code == 201
+    secret = created.json()["token"]
+    token_id = created.json()["id"]
+    assert secret.startswith("aslt_pat_")
+    assert created.json()["scopes"] == ["api:read"]
+    assert browser.get("/api/v1/personal-tokens").status_code == 200
+    listed = browser.get("/api/v1/personal-tokens").json()["items"]
+    assert len(listed) == 1
+    assert listed[0]["status"] == "active"
+    assert "token" not in listed[0] and "token_hash" not in listed[0]
+    assert TestClient(main.app, base_url="https://testserver").get(
+        "/api/v1/recordings", headers={"Authorization": f"Bearer {secret}"}
+    ).status_code == 200
+
+    revoked = browser.delete(f"/api/v1/personal-tokens/{token_id}")
+
+    assert revoked.status_code == 200
+    assert browser.get("/api/v1/personal-tokens").json()["items"][0]["status"] == "revoked"
+    assert TestClient(main.app, base_url="https://testserver").get(
+        "/api/v1/recordings", headers={"Authorization": f"Bearer {secret}"}
+    ).status_code == 401
+    with db_factory() as db:
+        token = db.get(ApiToken, token_id)
+        assert token.account_id == account_id
+        assert token.token_hash != secret
+        assert token.revoked_at is not None
+        token_audits = db.scalars(
+            select(SecurityAudit).where(
+                SecurityAudit.action.in_(["personal_token_created", "personal_token_revoked"])
+            )
+        ).all()
+        assert len(token_audits) == 2
+        assert all(secret not in (audit.detail or "") for audit in token_audits)
+
+
+def test_personal_token_lifecycle_requires_csrf_and_browser_session(db_factory):
+    _, raw, _ = login(db_factory, "viewer")
+    client = TestClient(main.app, base_url="https://testserver")
+    client.cookies.set(settings.session_cookie_name, raw)
+
+    missing_csrf = client.post("/api/v1/personal-tokens", json={"name": "blocked"})
+    bearer = client.post(
+        "/api/v1/personal-tokens",
+        headers={"Authorization": f"Bearer {auth.create_api_token('machine-viewer', 'viewer')}"},
+        json={"name": "blocked"},
+    )
+
+    assert missing_csrf.status_code == 403
+    assert bearer.status_code == 403
+
+
+def test_personal_tokens_are_isolated_to_their_owner(db_factory):
+    _, first_raw, _ = login(db_factory, "viewer")
+    _, second_raw, _ = login(db_factory, "viewer")
+    first = client_for(first_raw)
+    second = client_for(second_raw)
+    created = first.post(
+        "/api/v1/personal-tokens",
+        json={"name": "private-token", "scopes": ["api:read"]},
+    ).json()
+
+    assert second.get("/api/v1/personal-tokens").json()["items"] == []
+    assert second.delete(f"/api/v1/personal-tokens/{created['id']}").status_code == 404
+
+
+def test_cli_service_token_revoke_does_not_touch_same_named_personal_token(db_factory):
+    _, owner_raw, _ = login(db_factory, "viewer")
+    created = client_for(owner_raw).post(
+        "/api/v1/personal-tokens",
+        json={"name": "shared-name", "scopes": ["api:read"]},
+    ).json()
+    machine_secret = auth.create_api_token("shared-name", "viewer")
+
+    assert auth.revoke_api_token("shared-name")
+    assert TestClient(main.app, base_url="https://testserver").get(
+        "/api/v1/recordings",
+        headers={"Authorization": f"Bearer {machine_secret}"},
+    ).status_code == 401
+    assert TestClient(main.app, base_url="https://testserver").get(
+        "/api/v1/recordings",
+        headers={"Authorization": f"Bearer {created['token']}"},
+    ).status_code == 200
+
+
+def test_personal_token_scopes_and_owner_role_are_enforced(db_factory):
+    viewer_id, viewer_raw, _ = login(db_factory, "viewer")
+    viewer = client_for(viewer_raw)
+    rejected = viewer.post(
+        "/api/v1/personal-tokens", json={"name": "overreach", "scopes": ["api:read", "node:control"]}
+    )
+    assert rejected.status_code == 403
+    viewer_read = viewer.post(
+        "/api/v1/personal-tokens",
+        json={"name": "viewer-read", "scopes": ["api:read"]},
+    ).json()["token"]
+
+    user_id, user_raw, _ = login(db_factory, "user")
+    user = client_for(user_raw)
+    content = user.post(
+        "/api/v1/personal-tokens",
+        json={"name": "content", "scopes": ["content:write"]},
+    ).json()["token"]
+    node = user.post(
+        "/api/v1/personal-tokens",
+        json={"name": "node", "scopes": ["node:control"]},
+    ).json()["token"]
+    assert user.post(
+        "/api/v1/personal-tokens",
+        json={"name": "overreach-admin", "scopes": ["admin"]},
+    ).status_code == 403
+    content_client = TestClient(main.app, base_url="https://testserver")
+    content_headers = {"Authorization": f"Bearer {content}"}
+    node_headers = {"Authorization": f"Bearer {node}"}
+
+    assert content_client.get("/api/v1/recordings", headers=content_headers).status_code == 403
+    assert content_client.post("/api/v1/node/ping", headers=content_headers).status_code == 403
+    assert TestClient(main.app, base_url="https://testserver").post(
+        "/api/v1/node/ping", headers=node_headers
+    ).status_code == 503
+    assert TestClient(main.app, base_url="https://testserver").post(
+        f"/api/v1/ingestion/jobs/{uuid4()}/retry", headers=content_headers
+    ).status_code == 404
+
+    accounts.change_account(user_id, login(db_factory, "admin")[2], role="viewer", enabled=None)
+    assert TestClient(main.app, base_url="https://testserver").post(
+        "/api/v1/node/ping", headers=node_headers
+    ).status_code == 403
+
+    _, admin_raw, _ = login(db_factory, "admin")
+    admin = client_for(admin_raw)
+    admin_secret = admin.post(
+        "/api/v1/personal-tokens",
+        json={"name": "admin-api", "scopes": ["admin"]},
+    ).json()["token"]
+    assert TestClient(main.app, base_url="https://testserver").get(
+        "/api/v1/system/info", headers={"Authorization": f"Bearer {admin_secret}"}
+    ).status_code == 200
+    accounts.change_account(viewer_id, login(db_factory, "admin")[2], role="admin", enabled=None)
+    read_client = TestClient(main.app, base_url="https://testserver")
+    read_headers = {"Authorization": f"Bearer {viewer_read}"}
+    assert read_client.get("/api/v1/recordings", headers=read_headers).status_code == 200
+    assert read_client.get("/api/v1/system/info", headers=read_headers).status_code == 403
+
+
+def test_disabling_account_revokes_personal_tokens_permanently(db_factory):
+    account_id, owner_raw, _ = login(db_factory, "user")
+    created = client_for(owner_raw).post(
+        "/api/v1/personal-tokens",
+        json={"name": "disable-test", "scopes": ["api:read"]},
+    )
+    secret = created.json()["token"]
+    _, _, admin = login(db_factory, "admin")
+
+    accounts.change_account(account_id, admin, role=None, enabled=False)
+
+    with db_factory() as db:
+        token = db.scalar(select(ApiToken).where(ApiToken.account_id == account_id))
+        assert token is not None and token.revoked_at is not None and not token.enabled
+    accounts.change_account(account_id, admin, role=None, enabled=True)
+    response = TestClient(main.app, base_url="https://testserver").get(
+        "/api/v1/recordings", headers={"Authorization": f"Bearer {secret}"}
+    )
+    assert response.status_code == 401
+
+
+def test_personal_token_limit_and_expiry_are_enforced(db_factory):
+    account_id, raw, _ = login(db_factory, "viewer")
+    with db_factory() as db:
+        now = datetime.now(UTC)
+        db.add_all([
+            ApiToken(
+                account_id=account_id,
+                name=f"token-{index}",
+                token_hash=auth.token_digest(f"limit-token-{index}"),
+                role="viewer",
+                enabled=True,
+                token_prefix=f"prefix-{index}",
+                scopes_json='["api:read"]',
+                created_at=now,
+                expires_at=now + timedelta(days=30),
+            )
+            for index in range(personal_token_api.ACTIVE_TOKEN_LIMIT)
+        ])
+        db.commit()
+
+    client = client_for(raw)
+    limited = client.post("/api/v1/personal-tokens", json={"name": "too-many"})
+    assert limited.status_code == 409
+
+    with db_factory() as db:
+        expired = db.scalar(select(ApiToken).where(ApiToken.name == "token-0"))
+        expired.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        db.commit()
+        expired_token = "limit-token-0"
+    assert TestClient(main.app, base_url="https://testserver").get(
+        "/api/v1/recordings",
+        headers={"Authorization": f"Bearer {expired_token}"},
+    ).status_code == 401
+    with db_factory() as db:
+        expired = db.scalar(select(ApiToken).where(ApiToken.name == "token-0"))
+        assert expired is not None and not expired.enabled
+        assert personal_token_api.token_status(expired) == "expired"
+        audit = db.scalar(
+            select(SecurityAudit).where(SecurityAudit.action == "personal_token_expired")
+        )
+        assert audit is not None
+        assert expired.id in (audit.detail or "")
+        assert expired_token not in (audit.detail or "")
+
+
+def test_admin_can_list_and_revoke_personal_token_metadata(db_factory, monkeypatch):
+    target_id, target_raw, _ = login(db_factory, "user")
+    target = client_for(target_raw)
+    first = target.post(
+        "/api/v1/personal-tokens",
+        json={"name": "automation", "scopes": ["api:read"]},
+    ).json()
+    second = target.post(
+        "/api/v1/personal-tokens",
+        json={"name": "backup", "scopes": ["api:read"]},
+    ).json()
+    _, admin_raw, _ = login(db_factory, "admin")
+    admin = client_for(admin_raw)
+
+    summary = admin.get(f"/api/v1/accounts/{target_id}/tokens")
+    account = admin.get(f"/api/v1/accounts/{target_id}")
+
+    assert summary.status_code == 200
+    assert {item["name"] for item in summary.json()["items"]} == {"automation", "backup"}
+    assert all("token" not in item and "token_hash" not in item for item in summary.json()["items"])
+    assert account.json()["personal_token_count"] == 2
+    assert account.json()["active_personal_token_count"] == 2
+
+    machine_admin = auth.create_api_token("machine-admin", "admin")
+    monkeypatch.setattr(settings, "deployment_mode", "local")
+    bearer_revoke = TestClient(main.app, base_url="https://testserver").post(
+        f"/api/v1/accounts/{target_id}/tokens/{first['id']}/revoke",
+        headers={"Authorization": f"Bearer {machine_admin}"},
+    )
+    assert bearer_revoke.status_code == 403
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+
+    revoked = admin.post(
+        f"/api/v1/accounts/{target_id}/tokens/{first['id']}/revoke"
+    )
+    revoked_all = admin.post(f"/api/v1/accounts/{target_id}/tokens/revoke-all")
+
+    assert revoked.status_code == 200
+    assert revoked_all.json() == {"revoked_tokens": 1}
+    for secret in (first["token"], second["token"]):
+        assert TestClient(main.app, base_url="https://testserver").get(
+            "/api/v1/recordings", headers={"Authorization": f"Bearer {secret}"}
+        ).status_code == 401
 
 
 @pytest.mark.parametrize("operation", ["provision", "revoke_sessions"])
