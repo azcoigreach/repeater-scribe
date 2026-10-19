@@ -434,7 +434,7 @@ app.mount(
 app.mount("/static", StaticFiles(directory="src/asl_transcriber/static"), name="static")
 templates = Jinja2Templates(directory="src/asl_transcriber/templates")
 # Bump when shipping changed UI assets, independently of the product version.
-templates.env.globals["asset_version"] = "personal-api-tokens-1"
+templates.env.globals["asset_version"] = "0.10.0-ui-3"
 
 
 app.include_router(accounts_router)

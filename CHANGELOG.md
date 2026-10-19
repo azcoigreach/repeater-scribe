@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Preserve saved dashboard panel visibility and placement when returning from
+  another workspace (#58).
 - Sign-out no longer follows the identity provider redirect in the background
   and works after the session has already expired (#42).
 
