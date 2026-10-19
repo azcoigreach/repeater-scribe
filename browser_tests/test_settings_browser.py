@@ -264,7 +264,7 @@ def test_admin_users_provisions_changes_access_and_revokes_sessions(page, applic
     expect(users_tab).to_be_visible()
     users_tab.click()
     users = page.locator(".account-table tbody tr")
-    expect(users).to_have_count(4)
+    expect(users).to_have_count(5)
     assert page.locator(".settings-content").evaluate("el => el.scrollWidth <= el.clientWidth")
     assert page.locator(".account-table-wrap").evaluate("el => el.scrollWidth > el.clientWidth")
 

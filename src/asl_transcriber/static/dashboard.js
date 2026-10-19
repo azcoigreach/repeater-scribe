@@ -1625,11 +1625,10 @@ if (!state.hidden.includes('status')) state.hidden.push('status');
 if (!findGroupWithPanel(state.tree, 'topology') && !state.floating.topology && !state.hidden.includes('topology')) {
   state.hidden.push('topology');
 }
-if (!findGroupWithPanel(state.tree, 'functions') && !state.floating.functions) {
+if (!findGroupWithPanel(state.tree, 'functions') && !state.floating.functions && !state.hidden.includes('functions')) {
   dockPanelDefault('functions');
-  state.hidden = state.hidden.filter(panelId => panelId !== 'functions');
 }
-if (!findGroupWithPanel(state.tree, 'favorites') && !state.floating.favorites) {
+if (!findGroupWithPanel(state.tree, 'favorites') && !state.floating.favorites && !state.hidden.includes('favorites')) {
   const stationsGroup = findGroupWithPanel(state.tree, 'stations');
   if (stationsGroup) stationsGroup.panels.push('favorites');
   else dockPanelDefault('favorites');

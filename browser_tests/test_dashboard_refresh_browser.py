@@ -73,6 +73,66 @@ def test_favorite_menu_focus_selection_and_dismissal_survive_refresh(page, favor
     assert len(commands) == 1
 
 
+@pytest.mark.parametrize("panel_id", ["functions", "favorites"])
+def test_closed_panel_stays_closed_after_workspace_navigation(page, application, panel_id):
+    origin, _ = application
+    page_errors = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+    page.goto(origin + "/")
+    panel = page.locator(f'.win[data-win="{panel_id}"]')
+    toggle = page.locator(f'#windows-submenu input[data-toggle-win="{panel_id}"]')
+    expect(toggle).to_be_checked()
+
+    page.get_by_role("button", name="Open menu").click()
+    page.locator('[data-submenu="view-submenu"]').click()
+    page.locator('[data-submenu="windows-submenu"]').click()
+    toggle.uncheck()
+    expect(panel).to_be_hidden()
+    assert panel_id in page.evaluate(
+        "JSON.parse(localStorage.getItem('dashboard-dock-state')).hidden"
+    )
+
+    page.get_by_role("link", name="Archive", exact=True).click()
+    page.get_by_role("link", name="Dashboard", exact=True).click()
+
+    dashboard_script = page.locator('script[src*="dashboard.js"]').get_attribute("src")
+    assert "0.10.0-ui-2" in dashboard_script
+    assert page.evaluate("typeof syncWindowMenuCheckboxes") == "function"
+    assert not page_errors, page_errors
+    restored = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state'))")
+    assert panel_id in restored["hidden"]
+    assert panel_id not in page.evaluate(
+        "JSON.stringify(JSON.parse(localStorage.getItem('dashboard-dock-state')).tree)"
+    )
+    expect(toggle).not_to_be_checked()
+
+
+def test_floating_functions_position_survives_workspace_navigation(page, application):
+    origin, _ = application
+    page.goto(origin + "/")
+    page.evaluate("undockPanel('functions')")
+    page.evaluate("state.floating.functions.left=145;state.floating.functions.top=92;const win=document.querySelector('.win[data-win=\"functions\"]');win.style.left='145px';win.style.top='92px';persist()")
+    seeded = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state')).floating.functions")
+    assert seeded["left"] == 145 and seeded["top"] == 92
+    page.reload()
+    saved = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state')).floating.functions")
+    assert saved["left"] == 145 and saved["top"] == 92, page.evaluate(
+        "({state: state.floating.functions, style: document.querySelector('.win[data-win=\\\"functions\\\"]').style.left})"
+    )
+
+    page.get_by_role("link", name="Archive", exact=True).click()
+    page.get_by_role("link", name="Dashboard", exact=True).click()
+
+    restored = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state')).floating.functions")
+    assert restored["left"] == saved["left"]
+    assert restored["top"] == saved["top"]
+    expect(page.locator('.win[data-win="functions"]')).to_be_visible()
+    expect(page.locator('.win[data-win="functions"]')).to_have_count(1)
+    expect(page.locator('.win[data-win="functions"]')).to_have_css("left", "145px")
+    expect(page.locator('.win[data-win="functions"]')).to_have_css("top", "92px")
+    expect(page.locator("#toggle-functions")).to_be_checked()
+
+
 @pytest.mark.parametrize("change", ["removed", "target", "home", "connected"])
 def test_favorite_refresh_discards_invalid_menu(page, favorites_dashboard, change):
     data, commands = favorites_dashboard
