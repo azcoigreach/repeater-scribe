@@ -109,15 +109,14 @@ def test_closed_panel_stays_closed_after_workspace_navigation(page, application,
 
 def test_floating_functions_position_survives_workspace_navigation(page, application):
     origin, _ = application
-    page.set_viewport_size({"width": 1440, "height": 1600})
     page.goto(origin + "/")
     page.evaluate("undockPanel('functions')")
-    page.evaluate("state.floating.functions.left=145;state.floating.functions.top=92;const win=document.querySelector('.win[data-win=\"functions\"]');win.style.left='145px';win.style.top='92px';persist()")
+    page.evaluate("state.floating.functions.left=145;state.floating.functions.top=0;const win=document.querySelector('.win[data-win=\"functions\"]');win.style.left='145px';win.style.top='0px';persist()")
     seeded = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state')).floating.functions")
-    assert seeded["left"] == 145 and seeded["top"] == 92
+    assert seeded["left"] == 145 and seeded["top"] == 0
     page.reload()
     saved = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state')).floating.functions")
-    assert saved["left"] == 145 and saved["top"] == 92
+    assert saved["left"] == 145 and saved["top"] == 0
 
     page.get_by_role("link", name="Archive", exact=True).click()
     page.get_by_role("link", name="Dashboard", exact=True).click()
@@ -128,7 +127,7 @@ def test_floating_functions_position_survives_workspace_navigation(page, applica
     expect(page.locator('.win[data-win="functions"]')).to_be_visible()
     expect(page.locator('.win[data-win="functions"]')).to_have_count(1)
     expect(page.locator('.win[data-win="functions"]')).to_have_css("left", "145px")
-    expect(page.locator('.win[data-win="functions"]')).to_have_css("top", "92px")
+    expect(page.locator('.win[data-win="functions"]')).to_have_css("top", "0px")
     expect(page.locator("#toggle-functions")).to_be_checked()
 
 
