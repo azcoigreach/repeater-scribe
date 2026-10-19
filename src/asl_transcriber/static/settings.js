@@ -37,13 +37,13 @@ window.RuntimeSettings = (() => {
     }
     // Later account/token pages own their actions. These controls only edit personal fields.
     actions.hidden = !pages.get(id).personal;
-    modal.querySelector('.settings-scope').textContent = pages.get(id).personal
+    modal.querySelector('.settings-scope').textContent = pages.get(id).scopeText || (pages.get(id).personal
       ? 'Personal preferences are saved for this account in this browser only.'
-      : 'Administrative account access.';
+      : 'Administrative account access.');
     feedback.textContent = '';
     if (focus) pages.get(id).tab.focus();
   }
-  function registerPage({ id, label, settings = [], personal = false, available = () => true, mount }) {
+  function registerPage({ id, label, settings = [], personal = false, scopeText = '', available = () => true, mount }) {
     if (!available()) return;
     if (pages.has(id)) throw new Error('Duplicate Settings page');
     const tab = document.createElement('button');
@@ -85,7 +85,7 @@ window.RuntimeSettings = (() => {
       panel.append(field);
     }
     if (mount) mount(panel);
-    pages.set(id, { tab, panel, personal });
+    pages.set(id, { tab, panel, personal, scopeText });
     tabs.append(tab);
     panels.append(panel);
     selectPage(activePage || id, false);

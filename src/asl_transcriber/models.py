@@ -539,17 +539,31 @@ class OidcLoginState(Base):
 
 class ApiToken(Base):
     __tablename__ = "api_tokens"
+    __table_args__ = (
+        UniqueConstraint("account_id", "name", name="uq_api_token_account_name"),
+        UniqueConstraint("token_hash", name="uq_api_token_token_hash"),
+        Index(
+            "uq_api_token_service_name",
+            "name",
+            unique=True,
+            sqlite_where=text("account_id IS NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id"), index=True)
-    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
-    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    token_prefix: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    scopes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SecurityAudit(Base):

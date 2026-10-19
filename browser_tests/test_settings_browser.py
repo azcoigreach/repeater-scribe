@@ -160,14 +160,14 @@ def test_extension_pages_and_personal_action_boundary(page, application):
     page.goto(application[0] + "/")
     page.evaluate("""() => {
         RuntimeSettings.registerPage({id: 'users', label: 'Users', available: () => false});
-        RuntimeSettings.registerPage({id: 'access', label: 'API Access', mount(panel) {
+        RuntimeSettings.registerPage({id: 'access', label: 'Automation', mount(panel) {
             const button = document.createElement('button');
             button.textContent = 'Page-owned action'; panel.append(button);
         }});
     }""")
     open_settings(page)
     expect(page.get_by_role("tab", name="Users", exact=True)).to_have_count(0)
-    page.get_by_role("tab", name="API Access", exact=True).click()
+    page.get_by_role("tab", name="Automation", exact=True).click()
     expect(page.get_by_role("button", name="Page-owned action")).to_be_visible()
     expect(page.get_by_role("button", name="Apply", exact=True)).to_have_count(0)
     page.get_by_role("tab", name="Dashboard", exact=True).click()
@@ -264,7 +264,7 @@ def test_admin_users_provisions_changes_access_and_revokes_sessions(page, applic
     expect(users_tab).to_be_visible()
     users_tab.click()
     users = page.locator(".account-table tbody tr")
-    expect(users).to_have_count(4)
+    expect(users).to_have_count(5)
     assert page.locator(".settings-content").evaluate("el => el.scrollWidth <= el.clientWidth")
     assert page.locator(".account-table-wrap").evaluate("el => el.scrollWidth > el.clientWidth")
 
@@ -304,6 +304,50 @@ def test_admin_users_provisions_changes_access_and_revokes_sessions(page, applic
     expect(page.get_by_role("tab", name="Users", exact=True)).to_have_count(0)
 
 
+def test_admin_users_can_review_and_revoke_personal_tokens(page, application):
+    origin, _ = application
+    page.context.add_cookies([{
+        "name": "__Host-aslt_session", "value": "browser-admin", "url": origin,
+        "secure": True, "httpOnly": True,
+    }])
+    page.goto(origin + "/")
+    account = next(
+        item for item in page.request.get(origin + "/api/v1/accounts").json()["items"]
+        if item["identity"] == "admin"
+    )
+    created = page.request.post(
+        origin + "/api/v1/personal-tokens",
+        headers={"Origin": origin, "X-CSRF-Token": "csrf-admin"},
+        data={"name": "admin-automation", "scopes": ["api:read"]},
+    )
+    assert created.status == 201
+    secret = created.json()["token"]
+    assert page.request.get(origin + "/api/v1/personal-tokens").json()["items"][0]["name"] == "admin-automation"
+    assert page.request.get(
+        origin + f"/api/v1/accounts/{account['id']}"
+    ).json()["personal_token_count"] == 1
+
+    page.reload()
+    open_settings(page)
+    page.get_by_role("tab", name="Users", exact=True).click()
+    row = page.locator(".account-table tbody tr").filter(
+        has=page.get_by_text("admin", exact=True)
+    )
+    expect(row).to_contain_text("1 active / 1 total")
+    row.get_by_role("button", name="Review tokens").click()
+    expect(row).to_contain_text("admin-automation")
+    expect(row).to_contain_text(created.json()["prefix"])
+    assert secret not in row.inner_text()
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    row.get_by_role("button", name="Revoke token").click()
+    expect(page.locator("#settings-feedback")).to_contain_text("Revoked admin-automation")
+    assert page.request.get(
+        origin + "/api/v1/recordings",
+        headers={"Authorization": f"Bearer {secret}"},
+    ).status == 401
+
+
 def test_admin_users_can_load_accounts_beyond_first_page(page, application):
     page.context.add_cookies([{
         "name": "__Host-aslt_session", "value": "browser-admin", "url": application[0],
@@ -337,3 +381,101 @@ def test_admin_users_can_load_accounts_beyond_first_page(page, application):
     expect(users).to_have_count(201)
     expect(users.last).to_contain_text("Fixture 200")
     expect(more).to_be_hidden()
+
+
+def test_api_access_reveals_personal_token_once_and_revokes_it(page, application):
+    origin, _ = application
+    page.goto(origin + "/")
+    open_settings(page)
+    access_tab = page.get_by_role("tab", name="API Access", exact=True)
+    expect(access_tab).to_be_visible()
+    access_tab.click()
+    expect(page.get_by_role("link", name="Open API Console")).to_have_attribute("href", "/docs")
+
+    form = page.get_by_role("form", name="Create personal API token")
+    form.get_by_label("Token name").fill("browser automation")
+    expect(form.get_by_label("Expires in")).to_have_value("90")
+    expect(form.get_by_label("Permission preset")).to_have_value("read")
+    expect(form.get_by_label("Read API data")).to_be_checked()
+    form.get_by_label("Permission preset").select_option("node")
+    expect(form.get_by_label("Read API data")).to_be_checked()
+    expect(form.get_by_label("Manage Favorites and node controls")).to_be_checked()
+    expect(form.get_by_label("Edit shared content")).not_to_be_checked()
+    form.get_by_label("Permission preset").select_option("read")
+    form.get_by_role("button", name="Create token").click()
+
+    reveal = page.locator(".token-reveal")
+    expect(reveal).to_contain_text("The complete secret will not be shown again")
+    secret = page.get_by_label("New personal API token").input_value()
+    assert secret.startswith("aslt_pat_")
+    token = page.locator(".personal-token-item").filter(has_text="browser automation")
+    expect(token).to_contain_text(secret[:18])
+    assert token.locator(".token-status").inner_text().lower() == "active"
+    assert page.request.get(
+        origin + "/api/v1/recordings",
+        headers={"Authorization": f"Bearer {secret}"},
+    ).status == 200
+
+    page.reload()
+    open_settings(page)
+    page.get_by_role("tab", name="API Access", exact=True).click()
+    token = page.locator(".personal-token-item").filter(has_text="browser automation")
+    expect(token).to_contain_text("active")
+    expect(page.get_by_label("New personal API token")).to_have_count(0)
+    page.once("dialog", lambda dialog: dialog.accept())
+    token.get_by_role("button", name="Revoke token").click()
+    expect(token).to_contain_text("revoked")
+    assert page.request.get(
+        origin + "/api/v1/recordings",
+        headers={"Authorization": f"Bearer {secret}"},
+    ).status == 401
+
+
+def test_openapi_console_is_authenticated_and_uses_bundled_assets(page, application):
+    origin, _ = application
+    page.context.clear_cookies()
+    anonymous = page.request.get(origin + "/openapi.json")
+    assert anonymous.status == 401
+
+    page.goto(origin + "/docs")
+
+    expect(page).to_have_url(origin + "/welcome?next=%2Fdocs")
+    page.context.add_cookies([{
+        "name": "__Host-aslt_session", "value": "browser-viewer", "url": origin,
+        "secure": True, "httpOnly": True,
+    }])
+    page.goto(origin + "/docs")
+    expect(page.locator("#swagger-ui")).to_be_visible()
+    expect(page.locator(".swagger-ui .scheme-container")).to_be_visible()
+    expect(page.get_by_role("button", name="Authorize", exact=True)).to_be_visible()
+    assert page.locator("script[src^='/static/swagger-ui/']").count() == 2
+
+
+def test_swagger_authorize_uses_personal_token_for_permitted_read(page, application):
+    origin, _ = application
+    page.goto(origin + "/")
+    open_settings(page)
+    page.get_by_role("tab", name="API Access", exact=True).click()
+    form = page.get_by_role("form", name="Create personal API token")
+    form.get_by_label("Token name").fill("swagger-reader")
+    form.get_by_role("button", name="Create token").click()
+    secret = page.get_by_label("New personal API token").input_value()
+
+    page.goto(origin + "/docs")
+    page.get_by_role("button", name="Authorize", exact=True).click()
+    dialog = page.locator(".dialog-ux")
+    expect(dialog).to_be_visible()
+    value = dialog.locator('input[type="text"]')
+    expect(value).to_have_count(1)
+    value.fill(secret)
+    dialog.get_by_role("button", name="Authorize", exact=True).click()
+    dialog.get_by_role("button", name="Close", exact=True).click()
+
+    page.get_by_role("button", name="GET /api/v1/recordings").click()
+    page.get_by_role("button", name="Try it out").click()
+    with page.expect_response(
+        lambda response: response.request.method == "GET"
+        and response.url.split("?", 1)[0].endswith("/api/v1/recordings")
+    ) as response:
+        page.get_by_role("button", name="Execute").click()
+    assert response.value.status == 200

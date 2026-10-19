@@ -74,6 +74,47 @@ def test_anonymous_internet_access_is_limited_to_health(monkeypatch) -> None:
         assert client.get("/api/v1/system/info").status_code == 401
 
 
+def test_openapi_console_is_authenticated_and_advertises_bearer(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "internet")
+    monkeypatch.setattr(settings, "auth_mode", "oidc")
+    anonymous = TestClient(app, base_url="https://testserver")
+
+    assert anonymous.get("/openapi.json").status_code == 401
+    docs = anonymous.get("/docs", follow_redirects=False)
+    assert docs.status_code == 303
+    assert docs.headers["location"].startswith("/welcome?next=%2Fdocs")
+
+    raw, _ = _session("viewer")
+    browser = TestClient(app, base_url="https://testserver")
+    browser.cookies.set(settings.session_cookie_name, raw)
+    schema = browser.get("/openapi.json")
+    assert schema.status_code == 200
+    definition = schema.json()
+    assert definition["openapi"] == "3.0.3"
+    assert definition["components"]["securitySchemes"]["BearerAuth"] == {
+        "type": "http", "scheme": "bearer"
+    }
+    assert definition["paths"]["/api/v1/recordings"]["get"]["security"] == [
+        {"BearerAuth": []}
+    ]
+    assert "/api/v1/personal-tokens" not in definition["paths"]
+    assert "/api/v1/accounts/{account_id}/tokens/revoke-all" not in definition["paths"]
+    html = browser.get("/docs")
+    assert html.status_code == 200
+    assert "/static/swagger-ui/swagger-ui-bundle.js" in html.text
+    assert "/static/openapi-init.js" in html.text
+    assert "cdn.jsdelivr.net" not in html.text
+
+
+def test_local_openapi_console_remains_public(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", "local")
+    monkeypatch.setattr(settings, "auth_mode", "off")
+
+    with TestClient(app) as client:
+        assert client.get("/openapi.json").status_code == 200
+        assert client.get("/docs").status_code == 200
+
+
 def test_session_role_and_csrf_are_enforced(monkeypatch) -> None:
     monkeypatch.setattr(settings, "deployment_mode", "internet")
     monkeypatch.setattr(settings, "auth_mode", "oidc")

@@ -24,6 +24,7 @@ dependencies = [
   "watchfiles>=0.22.0",
   "faster-whisper>=1.0.0",
   "av>=11,<19",
+  "swagger-ui-bundle>=1.1,<2",
   "ffmpeg-python>=0.2.0",
   "python-dotenv>=1.0.0",
   "defusedxml>=0.7.1",

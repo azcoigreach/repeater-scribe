@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token }}">
+  <script src="/static/auth_session.js?v={{ asset_version }}"></script>
   <title>REPEATER SCRIBE</title>
   <link rel="icon" id="favicon" type="image/png" sizes="256x256" href="/static/repeater-scribe-state0-256px.png">
   <link rel="apple-touch-icon" href="/static/repeater-scribe-state0-256px.png">
@@ -14,7 +15,7 @@
   <script src="/static/playback.js?v={{ asset_version }}"></script>
   <script src="/static/time.js?v={{ asset_version }}"></script>
 </head>
-<body data-role="{{ role }}" data-preference-scope="{{ preference_scope }}" data-last-heard-default="{{ last_heard_default }}">
+<body data-role="{{ role }}" data-account-id="{{ account_id or '' }}" data-preference-scope="{{ preference_scope }}" data-last-heard-default="{{ last_heard_default }}">
   <header class="topbar">
     <div class="brand"><img class="brand-logo" src="/static/logo.png" alt="REPEATER SCRIBE"></div>
     <nav class="workspace-nav" aria-label="Workspaces"><a class="workspace-link active" href="/" aria-current="page">Dashboard</a><a class="workspace-link" href="/archive">Archive</a><a class="workspace-link" href="/callsigns">Callsigns</a><a class="workspace-link" href="/events">Events</a></nav>
@@ -320,6 +321,7 @@
   <script src="/static/transcript_corrections.js?v={{ asset_version }}"></script>
   <script src="/static/settings.js?v={{ asset_version }}"></script>
   <script src="/static/account_settings.js?v={{ asset_version }}"></script>
+  <script src="/static/personal_tokens.js?v={{ asset_version }}"></script>
   <script src="/static/dashboard.js?v={{ asset_version }}"></script>
 </body>
 </html>
