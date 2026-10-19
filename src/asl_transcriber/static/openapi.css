@@ -1,0 +1,8 @@
+body { margin:0; background:#15191e; color:#f4f7fb; font-family:"IBM Plex Mono","DejaVu Sans Mono",monospace; }
+.api-header { display:flex; align-items:center; gap:16px; padding:10px 24px; background:#222830; border-bottom:1px solid #4b5663; }
+.api-header img { width:auto; height:36px; }
+.api-header a { color:#74c7ff; text-decoration:none; }
+.api-header span { margin-left:auto; color:#a7b0bb; font-size:12px; }
+.api-note { max-width:1100px; margin:16px auto 0; padding:0 16px; color:#a7b0bb; font-size:12px; line-height:1.5; }
+#swagger-ui { max-width:1140px; margin:0 auto; }
+.swagger-ui { color:#202830; }

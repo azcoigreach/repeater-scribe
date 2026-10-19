@@ -48,5 +48,5 @@ from asl_transcriber.database import Base, engine
 
 Base.metadata.create_all(engine)
 with engine.begin() as connection:
-	connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-	connection.execute(text("INSERT INTO alembic_version (version_num) VALUES ('managed_accounts')"))
+    connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+    connection.execute(text("INSERT INTO alembic_version (version_num) VALUES ('personal_api_tokens')"))

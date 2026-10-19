@@ -96,7 +96,7 @@ def test_closed_panel_stays_closed_after_workspace_navigation(page, application,
     page.get_by_role("link", name="Dashboard", exact=True).click()
 
     dashboard_script = page.locator('script[src*="dashboard.js"]').get_attribute("src")
-    assert "0.10.0-ui-2" in dashboard_script
+    assert "0.10.0-ui-3" in dashboard_script
     assert page.evaluate("typeof syncWindowMenuCheckboxes") == "function"
     assert not page_errors, page_errors
     restored = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state'))")

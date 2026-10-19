@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Console | {{ app_name }}</title>
+  <link rel="icon" type="image/png" href="/static/repeater-scribe-state0-256px.png">
+  <link rel="stylesheet" href="/static/openapi.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/swagger-ui/swagger-ui.css">
+  <script src="/static/swagger-ui/swagger-ui-bundle.js" defer></script>
+  <script src="/static/swagger-ui/swagger-ui-standalone-preset.js" defer></script>
+  <script src="/static/openapi-init.js?v={{ asset_version }}" defer></script>
+</head>
+<body>
+  <header class="api-header">
+    <a href="/"><img src="/static/logo.png" alt="Repeater Scribe"></a>
+    <a href="/">Dashboard</a>
+    <span>{{ role }} account</span>
+  </header>
+  <p class="api-note">Authorize with a personal token. The token’s current account role, granted scopes, and runtime settings still govern every request. This console adds no privileges.</p>
+  <main id="swagger-ui"></main>
+</body>
+</html>

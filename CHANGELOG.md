@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
   failed sign-in states (#42).
 - Shared client session handling: confirmed expiry, revocation, and sibling-tab
   sign-out reach the landing page; outages do not sign users out (#41).
+- Account-owned personal API tokens with scoped authority, expiration, one-time
+  secret reveal, and a protected Bearer-authenticated Swagger console (#56).
+- Admin token metadata and revocation controls in Settings → Users (#43).
 
 ### Fixed
 

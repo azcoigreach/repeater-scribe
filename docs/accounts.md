@@ -44,10 +44,10 @@ diagnostics and account administration. These roles never bypass independent
 AMI/control/raw-function enablement. See the [complete endpoint matrix](permissions.md).
 
 Every protected request resolves the current account enabled state and role.
-A session's stored role is historical data, not authority. Named tokens remain
-independent credentials; an optional account link provides a future personal-token
-hook that caps token authority to the lower of credential and current account
-role and rejects disabled accounts. No personal-token creation API is added.
+A session's stored role is historical data, not authority. Ownerless named
+machine tokens remain independent credentials. Account-owned personal tokens
+are always capped by the owner's current enabled state and role, in addition to
+the scopes granted to that token.
 
 All three SSE routes revalidate credentials before each emitted event and at
 least every second while idle (subject to database/scheduler latency). Revocation,
@@ -81,6 +81,61 @@ revalidate the caller inside that transaction. Disabling or demoting the last
 enabled managed Admin returns 409, including when independent processes submit
 concurrent requests. A named Admin token does not count as an enabled account.
 
+## Personal API tokens
+
+Every enabled account can manage up to 25 active personal tokens from **Settings
+→ API Access**. The secret is shown only once after creation; later list and Admin
+responses include only the safe prefix and metadata. Token names are unique
+within an account. Expiration is required and can be 30, 90 (default), or 365
+days. To rotate, create and securely store a replacement, then revoke the old
+token. Revocation and expiration take effect on the next request.
+
+Available scopes are:
+
+- `api:read`: Viewer reads, subject to existing endpoint access rules.
+- `content:write`: User-level shared-content edits.
+- `node:control`: User-level Favorites and permitted node controls; AMI and raw
+   function settings still apply.
+- `admin`: Admin endpoints. Only an Admin can grant it; the Settings page asks
+   for confirmation.
+
+The server intersects the granted scopes with the token's role snapshot and the
+owner's current role. Demotion immediately caps existing token authority.
+Disabling an account revokes its personal tokens and browser sessions in one
+transaction. Re-enabling never restores either. API token lifecycle actions
+require a browser session with CSRF and exact-Origin validation; a bearer token
+cannot mint another bearer token. Legacy CLI-created ownerless machine tokens
+keep their existing role behavior and are never converted to personal tokens.
+
+Use the versioned API with `Authorization: Bearer`:
+
+```bash
+curl --fail-with-body https://radio.example.test/api/v1/recordings \
+   -H "Authorization: Bearer $ASLT_TOKEN"
+```
+
+Create a token from an authenticated browser session; the response's `token`
+field is the only full-secret reveal:
+
+```bash
+curl --fail-with-body https://radio.example.test/api/v1/personal-tokens \
+   -X POST \
+   -H "Cookie: __Host-aslt_session=$ASLT_SESSION" \
+   -H "Origin: https://radio.example.test" \
+   -H "X-CSRF-Token: $ASLT_CSRF_TOKEN" \
+   -H "Content-Type: application/json" \
+   --data '{"name":"daily archive reader","expires_in_days":90,"scopes":["api:read"]}'
+```
+
+The authenticated Swagger UI is at `/docs`; it supports Bearer **Authorize**
+and **Try it out**. The OpenAPI JSON at `/openapi.json` is also protected and is
+not served anonymously. The documentation page's browser session does not add
+privileges to a token used by Swagger.
+
+Admins can inspect safe token summaries and revoke one or all personal tokens
+from a selected account in Settings → Users. Neither the Admin API nor UI ever
+reveals another user's full token secret.
+
 ## Upgrade and recovery
 
 Back up the database as described in [security operations](security.md), stop
@@ -89,7 +144,7 @@ The supported prior revision is `events_sessions` (0.9.2); fresh creation is als
 supported. Keep deployment OIDC configuration intact for initial admission.
 
 UI assets use a shared `asset_version` template global, currently
-`managed-accounts-1`, to invalidate cached scripts and styles independently of
+`personal-api-tokens-1`, to invalidate cached scripts and styles independently of
 the product version. Bump this revision whenever changed UI assets are shipped.
 
 **Browser sessions and pending OIDC logins are revoked once on upgrade.** Old
@@ -123,6 +178,7 @@ and recover a known subject after restoring lost account data. Never disable
 internet authentication to recover access.
 
 For rollback, restore a verified pre-upgrade backup into an isolated database
-and use the matching prior image. A schema downgrade revokes sessions and disables
-any account-linked tokens before dropping linkage; it cannot preserve the new
-account administration state. Do not downgrade the only copy of account data.
+and use the matching prior image. Downgrading to `managed_accounts` removes
+personal-token rows rather than converting them into independent service tokens;
+ownerless machine tokens are preserved. It also drops managed account state and
+revokes browser sessions. Do not downgrade the only copy of account data.

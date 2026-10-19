@@ -3,20 +3,29 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from asl_transcriber.accounts import (
+    begin_account_write,
     change_account,
     provision_account,
     revoke_account_sessions,
     serialize_account,
 )
-from asl_transcriber.auth import Admin, Principal, require_api_admin
+from asl_transcriber.auth import (
+    Admin,
+    Principal,
+    audit_event,
+    require_api_admin,
+    resolve_principal,
+    verify_csrf,
+)
 from asl_transcriber.config import settings
 from asl_transcriber.database import SessionLocal
-from asl_transcriber.models import Account, AuthSession
+from asl_transcriber.models import Account, ApiToken, AuthSession
+from asl_transcriber.personal_token_api import serialize_token
 from asl_transcriber.roles import Role
 
 router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
@@ -60,11 +69,37 @@ def _session_counts(db, account_ids: list[str]) -> dict[str, int]:
 
 
 def _serialize_accounts(db, rows: list[Account]) -> list[dict[str, Any]]:
-    session_counts = _session_counts(db, [row.id for row in rows])
+    account_ids = [row.id for row in rows]
+    session_counts = _session_counts(db, account_ids)
+    token_counts: dict[str, tuple[int, int]] = {}
+    if account_ids:
+        now = datetime.now(UTC)
+        token_rows = db.execute(
+            select(
+                ApiToken.account_id,
+                func.count(ApiToken.id),
+                func.sum(case((
+                    ApiToken.enabled.is_(True)
+                    & ApiToken.revoked_at.is_(None)
+                    & ((ApiToken.expires_at.is_(None)) | (ApiToken.expires_at > now))
+                    & Account.enabled.is_(True),
+                    1,
+                ), else_=0)),
+            )
+            .join(Account, Account.id == ApiToken.account_id)
+            .where(ApiToken.account_id.in_(account_ids))
+            .group_by(ApiToken.account_id)
+        )
+        token_counts = {
+            account_id: (int(total), int(active or 0))
+            for account_id, total, active in token_rows
+        }
     return [
         serialize_account(row)
         | {
             "active_session_count": session_counts.get(row.id, 0),
+            "personal_token_count": token_counts.get(row.id, (0, 0))[0],
+            "active_personal_token_count": token_counts.get(row.id, (0, 0))[1],
             "provisioned_pending": row.first_sign_in_at is None,
         }
         for row in rows
@@ -115,3 +150,109 @@ def revoke_sessions(
     principal: Annotated[Principal, Depends(require_api_admin)],
 ) -> dict[str, Any]:
     return revoke_account_sessions(account_id, principal)
+
+
+def _current_admin(principal: Principal, db) -> Principal:
+    current = resolve_principal(principal, db)
+    if current is None or current.role != "admin":
+        raise HTTPException(403, "Administrator access is required")
+    if current.scopes is not None and "admin" not in current.scopes:
+        raise HTTPException(403, "Token scope is insufficient")
+    return current
+
+
+@router.get("/{account_id}/tokens")
+def account_tokens(account_id: str, _: Admin) -> dict[str, Any]:
+    with SessionLocal() as db:
+        account = db.get(Account, account_id)
+        if account is None:
+            raise HTTPException(404, "Account not found")
+        tokens = db.scalars(
+            select(ApiToken)
+            .where(ApiToken.account_id == account_id)
+            .order_by(ApiToken.created_at.desc(), ApiToken.id)
+        )
+        return {
+            "items": [
+                serialize_token(token, owner_enabled=account.enabled) for token in tokens
+            ]
+        }
+
+
+@router.post("/{account_id}/tokens/{token_id}/revoke", include_in_schema=False)
+def revoke_account_token(
+    account_id: str,
+    token_id: str,
+    request: Request,
+    principal: Admin,
+) -> dict[str, str]:
+    if principal.auth_source != "session" or principal.account_id is None:
+        raise HTTPException(403, "A browser session is required for token lifecycle changes")
+    verify_csrf(request, principal)
+    now = datetime.now(UTC)
+    with SessionLocal() as db:
+        begin_account_write(db)
+        current = _current_admin(principal, db)
+        token = db.scalar(
+            select(ApiToken).where(
+                ApiToken.id == token_id,
+                ApiToken.account_id == account_id,
+            )
+        )
+        if token is None:
+            raise HTTPException(404, "Personal token not found")
+        if token.enabled and token.revoked_at is None:
+            token.enabled = False
+            token.revoked_at = now
+        name = token.name
+        db.commit()
+    audit_event(
+        actor=current.subject,
+        account_id=account_id,
+        auth_source=current.auth_source,
+        action="admin_personal_token_revoked",
+        outcome="allowed",
+        request=request,
+        detail=f"token_id={token_id};name={name}",
+    )
+    return {"id": token_id, "status": "revoked"}
+
+
+@router.post("/{account_id}/tokens/revoke-all", include_in_schema=False)
+def revoke_account_tokens(
+    account_id: str,
+    request: Request,
+    principal: Admin,
+) -> dict[str, int]:
+    if principal.auth_source != "session" or principal.account_id is None:
+        raise HTTPException(403, "A browser session is required for token lifecycle changes")
+    verify_csrf(request, principal)
+    now = datetime.now(UTC)
+    with SessionLocal() as db:
+        begin_account_write(db)
+        current = _current_admin(principal, db)
+        account = db.get(Account, account_id)
+        if account is None:
+            raise HTTPException(404, "Account not found")
+        tokens = list(db.scalars(
+            select(ApiToken).where(
+                ApiToken.account_id == account_id,
+                ApiToken.enabled.is_(True),
+                ApiToken.revoked_at.is_(None),
+            )
+        ))
+        for token in tokens:
+            token.enabled = False
+            token.revoked_at = now
+        token_ids = [token.id for token in tokens]
+        db.commit()
+    audit_event(
+        actor=current.subject,
+        account_id=account_id,
+        auth_source=current.auth_source,
+        action="admin_personal_tokens_revoked_all",
+        outcome="allowed",
+        request=request,
+        detail=f"token_ids={','.join(token_ids)}",
+    )
+    return {"revoked_tokens": len(token_ids)}

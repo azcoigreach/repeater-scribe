@@ -358,6 +358,10 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .account-table th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 .account-table td small { display: block; max-width: 210px; margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
 .account-table .account-provider-id { max-width: 190px; }
+.account-token-list { display: grid; gap: 8px; min-width: 220px; max-width: 360px; margin-top: 8px; }
+.account-token-item { display: grid; gap: 3px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; overflow-wrap: anywhere; }
+.account-token-item .control-button { justify-self: start; }
+.account-table details summary { cursor: pointer; color: var(--green); }
 .account-row-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 150px; }
 .account-row-actions .control-button, .account-table .control-button { padding: 6px 8px; font-size: 11px; }
 .account-row-actions button:disabled, .account-provision-form button:disabled { cursor: not-allowed; opacity: .55; }
@@ -369,6 +373,23 @@ button, input, select, textarea { font-family: "IBM Plex Mono", "DejaVu Sans Mon
 .settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .settings-actions[hidden] { display: none; }
 .settings-actions button:first-child { margin-right: auto; }
+.personal-token-form { display: grid; gap: 12px; max-width: 620px; margin: 16px 0; }
+.personal-token-form > label { display: grid; gap: 5px; max-width: 360px; color: var(--muted); font-size: 12px; }
+.personal-token-form input, .personal-token-form select { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--ink); background: var(--paper); }
+.token-scope-options { display: grid; gap: 8px; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 5px; }
+.token-scope-options label { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 4px 8px; align-items: start; }
+.token-scope-options input { grid-row: span 2; margin: 2px 0 0; }
+.token-scope-options small { grid-column: 2; color: var(--muted); line-height: 1.45; }
+.token-admin-warning { margin: 0; color: var(--amber) !important; }
+.personal-token-list { display: grid; gap: 8px; margin-top: 16px; }
+.personal-token-item { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; overflow-wrap: anywhere; }
+.personal-token-item header { display: flex; justify-content: space-between; gap: 10px; }
+.personal-token-item p, .personal-token-item small { margin: 0; }
+.token-status { color: var(--muted); text-transform: uppercase; }
+.token-status-active { color: var(--green); }
+.token-status-revoked, .token-status-owner_disabled { color: var(--amber); }
+.token-reveal { margin: 0 0 16px; padding: 12px; border: 1px solid var(--green); border-radius: 5px; }
+.token-secret { display: block; width: 100%; margin: 8px 0; padding: 8px; resize: vertical; color: var(--ink); background: var(--paper); border: 1px solid var(--line); font: 12px monospace; overflow-wrap: anywhere; }
 #settings-feedback { font-size: 12px; line-height: 1.5; }
 @media (max-width: 520px) {
   .settings-content { padding: 16px; max-height: calc(100dvh - 24px); }

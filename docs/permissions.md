@@ -20,7 +20,10 @@ checks after role authorization. See [account behavior and recovery](accounts.md
 | GET | `/` | Viewer |
 | GET | `/api/v1/accounts` | Admin |
 | GET | `/api/v1/accounts/{account_id}` | Admin |
+| GET | `/api/v1/accounts/{account_id}/tokens` | Admin |
 | PATCH | `/api/v1/accounts/{account_id}` | Admin |
+| POST | `/api/v1/accounts/{account_id}/tokens/{token_id}/revoke` | Admin |
+| POST | `/api/v1/accounts/{account_id}/tokens/revoke-all` | Admin |
 | GET | `/api/v1/activity` | Viewer |
 | GET | `/api/v1/archive/recordings` | Viewer |
 | GET | `/api/v1/archive/recordings/{recording_id}` | Viewer |
@@ -42,6 +45,9 @@ checks after role authorization. See [account behavior and recovery](accounts.md
 | POST | `/api/v1/ingestion/scan` | Admin |
 | POST | `/api/v1/node/ping` | User |
 | GET | `/api/v1/node/status` | Viewer |
+| GET | `/api/v1/personal-tokens` | Viewer session |
+| POST | `/api/v1/personal-tokens` | Viewer session |
+| DELETE | `/api/v1/personal-tokens/{token_id}` | Viewer session |
 | POST | `/api/v1/node/{node_id}/command` | User |
 | GET | `/api/v1/node/{node_id}/commands` | Viewer |
 | POST | `/api/v1/node/{node_id}/function` | User |
@@ -93,6 +99,8 @@ checks after role authorization. See [account behavior and recovery](accounts.md
 | GET | `/events` | Viewer |
 | GET | `/events/{session_id}` | Viewer |
 | GET | `/health` | Public |
+| GET | `/docs` | Viewer browser session in internet mode; Public in local mode |
+| GET | `/openapi.json` | Viewer browser session in internet mode; Public in local mode |
 | PATCH | `/ui/callsign-mentions/{mention_id}` | User |
 | POST | `/ui/callsigns/{callsign}/qrz-refresh` | User |
 | POST | `/ui/ingestion/jobs/{job_id}/callsign-correction` | User |
@@ -126,8 +134,10 @@ checks after role authorization. See [account behavior and recovery](accounts.md
 | POST | `/ui/sessions/{session_id}/reopen` | User |
 | PATCH | `/ui/sessions/{session_id}/tags` | User |
 
-`/static/*` exposes public application assets. Local-mode `/docs`, `/redoc` and
-`/openapi.json` are public developer tools; all three are disabled in internet
-mode. Framework OPTIONS/HEAD behavior adds no write authority. The current health
-response includes version only in local mode. No account/session-management UI
-or personal-token endpoint is included in this change.
+Personal-token list/create/revoke routes require a browser session; mutations
+also require CSRF and exact public Origin. Granted token scopes further narrow
+the existing role checks; they do not replace them. `/static/*` exposes public
+application assets. Swagger UI and its OpenAPI schema require a signed-in browser
+account in internet mode and are public developer tools in local mode. Framework
+OPTIONS/HEAD behavior adds no write authority. The current health response
+includes version only in local mode.
