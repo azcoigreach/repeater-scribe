@@ -109,6 +109,7 @@ def test_closed_panel_stays_closed_after_workspace_navigation(page, application,
 
 def test_floating_functions_position_survives_workspace_navigation(page, application):
     origin, _ = application
+    page.set_viewport_size({"width": 1440, "height": 1600})
     page.goto(origin + "/")
     page.evaluate("undockPanel('functions')")
     page.evaluate("state.floating.functions.left=145;state.floating.functions.top=92;const win=document.querySelector('.win[data-win=\"functions\"]');win.style.left='145px';win.style.top='92px';persist()")
@@ -116,9 +117,7 @@ def test_floating_functions_position_survives_workspace_navigation(page, applica
     assert seeded["left"] == 145 and seeded["top"] == 92
     page.reload()
     saved = page.evaluate("JSON.parse(localStorage.getItem('dashboard-dock-state')).floating.functions")
-    assert saved["left"] == 145 and saved["top"] == 92, page.evaluate(
-        "({state: state.floating.functions, style: document.querySelector('.win[data-win=\\\"functions\\\"]').style.left})"
-    )
+    assert saved["left"] == 145 and saved["top"] == 92
 
     page.get_by_role("link", name="Archive", exact=True).click()
     page.get_by_role("link", name="Dashboard", exact=True).click()
